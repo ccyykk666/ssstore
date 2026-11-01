@@ -1,194 +1,75 @@
 # ssstore 云端接续说明
 
-更新日期：2026-11-01（北京时间）。
+更新日期：2026-11-01（北京时间）。先读取本文、实际源码和工作流；不要重复执行已完成的请求或重复触发构建。
 
-请先阅读本文件、实际源码和现有工作流，再继续用户尚未完成的任务。不要仅因交接文档新增功能、重复改写已完成内容，或重复触发构建。
+## 当前状态
 
-## 1. 当前代码与待办
+- 私有仓库：<https://github.com/ccyykk666/ssstore>，目标分支 `main`。
+- 当前应用代码提交：`fb28436d05ec2e50db26402e75c2c038ff490dc0`。
+- 版本：**0.4.2（9）**；SwiftUI 自签 IPA，最低 iOS 17，使用 GitHub Xcode 27 环境 / iOS 27 SDK。
+- 0.4.1（8）已在此前核验并交付，旧交接中的取包任务已经完成。
+- 0.4.2 构建：<https://github.com/ccyykk666/ssstore/actions/runs/41319132477>。
+- 最终 Xcode 27 构建已成功，产物 `ssstore-unsigned`，artifact ID `13088890363`。已下载并直接提取 `ssstore-0.4.2-unsigned.ipa`；按用户要求未额外核验安装包。
+- 同一应用代码已先在旧 Xcode 26 工作流完成 39 项 XCTest、0 失败及 iOS Release 编译；用户随后要求改用 Xcode 27，最终交付应取上述新运行的产物。
 
-- 私有仓库：<https://github.com/ccyykk666/ssstore>
-- 目标分支：`main`。
-- 最新应用代码提交：`9ffc7c312f7b91315e01c7cb99e0e474922c68ff`。
-- 提交说明：`Simplify interface copy and prepare 0.4.1`。
-- 此提交已成功推送到远端 `main`，且已通过 `git ls-remote` 核对完整 SHA。
-- 当前版本：**0.4.1（8）**，见 `project.yml`；设置页版本显示已同步。
-- 本交接文档在上述应用提交之后单独提交，因此新会话看到的最新 HEAD 可能是文档提交，属于正常情况。以实际代码与远端状态为准。
-- 应用为 SwiftUI 普通自签 IPA，最低 iOS 17；用户设备为 iOS 27.2，要求使用 iOS 26 SDK 构建。
+## 本轮用户请求及实现
 
-**尚未完成的目标：取得两轮文案精简后的 0.4.1（8）IPA，核验构建并给用户可在 iPhone 上访问的产物链接。**
+1. 首页筛选更名为“显示差异项”；移除“商店：中国大陆优先”页脚。
+2. 移除正常读取时间、清单读取/图标缓存完成摘要、查询计数和耗时摘要。操作中显示进度，异常时保留实际错误与警告。
+3. 左滑应用可“忽略”，按精确 Bundle ID 持久化。启动加载和扫描合并会过滤；原生扫描在生成图标键、补充元数据和图标读取前排除；商店查询只处理当前可见记录。
+4. 设置中的“已忽略应用”可逐项恢复，恢复后重新读取应用。忽略操作不会卸载设备应用。
+5. 仅保留 Remote Pairing 连接；移除协议选择、经典 Lockdown 传输和配对文件导入支持。原有 Remote Pairing 配对数据仍沿用。旧经典连接偏好迁移到 49152；经典配对文件保留但明确报错，需重新创建或导入 Remote Pairing 文件。
+6. 移除设置页地区策略解释、Apple 查询/本机存储说明、默认端口说明和“连接要求”整节。
+7. 详情页移除清单时间、商店数据来源、商店匹配编辑器、版本相同状态与冗余版本解释；查询按钮位于应用名右侧。版本字段改为“原始版本”“原始构建号”。列表也不再显示“版本相同”徽标。
+8. 底部保留“读取应用”“查询版本”；更多菜单仅保留“刷新全部版本”“设备数据”。删除清单导入、历史记录界面/记录流程、原始清单导出；现有已存清单仍兼容。
+9. 配对文件导入、导出和删除仍保留；设备数据与应用数据的只读操作保留。
+10. 用户追加要求采用 Xcode 27 构建，工作流已迁移至 GitHub `xcode-27` 环境，使用其 `/Applications/Xcode.app` 正式版默认工具链，检查 Xcode / iOS SDK 主版本为 27。
+11. 用户追加要求顶栏 `.soft`：`SSStoreApp.swift` 在根视图应用 `.scrollEdgeEffectStyle(.soft, for: .top)`，iOS 26 及以上启用，旧系统默认效果。
+12. 用户最后明确说“完成后不用核验，构建成功直接给 ipa 就行”。本轮已按要求在最终运行成功后直接下载并交付 IPA，未做额外包内容/哈希/SDK 核验。
 
-用户最后一项功能请求是“再精简一轮然后生成”。两轮精简与推送均已完成；本会话未能查询远端构建结果，也未下载或检查新 IPA。不能宣称 0.4.1 已编译成功或已生成安装包。
+核心修改：`ssstore/ContentView.swift`、`SettingsView.swift`、`AppDetailView.swift`、`AppModel.swift`，`Bridge/DeviceScanner.*`、`DeviceInspector.*`，`Packages/UpdateCore/Sources/UpdateCore/IgnoredApplications.swift`、`PairingRecord.swift`。设备接口索引仍为 661 条声明，检查器实际使用标记更新为 110 条，不代表所有服务可用。
 
-## 2. 用户偏好与已有授权
+新增 3 项忽略名单测试，覆盖序列化后重新加载、应用改名/版本变化仍忽略、精确 Bundle ID、重复忽略及恢复；配对测试改为明确拒绝经典 Lockdown 文件。原有商店及版本比较测试保留。
 
-- 使用中文沟通。
-- 仓库和应用名保持 `ssstore`；不要添加 README。
-- 文案采用 iOS 常见用语和规范简体中文，短而直接，仅保留必要引导、操作条件和错误原因。
-- 用户已授权向该私有仓库推送项目代码、使用 GitHub Actions 编译；生成 IPA 是尚待完成的明确请求，无需重复询问这项授权。
-- 不要过度设计。增加用于推测性、极低概率竞态或安全边界的复杂机制前，先解释具体失败、概率与成本并取得用户认可。
-- 当前任务已在隔离环境中运行，使用现有检出；除非用户明确要求，不创建 Git worktree。
-- 本地文件路径链接在用户的 iPhone 上无法打开。不要再把 `/workspace/...` 当成可下载附件。优先提供真实 GitHub 构建/产物链接；需要传递纯文字时可直接贴在聊天里。
+## 用户偏好及授权
 
-## 3. 本次已完成的修改
+- 中文沟通，文案短而直接，采用常见 iOS 简体中文术语。仓库和应用名保持 `ssstore`，不要添加 README。
+- 用户已授权修改、向私有仓库推送及 GitHub Actions 编译，明确要求完成后给新版 IPA。
+- 不创建 Git worktree；不引入未经用户认可的推测性复杂机制。
+- 用户在 iPhone 上访问。交付真实 GitHub 产物链接或 ChatGPT 可下载文件链接；不要只给 `/workspace/...` 路径。
+- 无法假定能连接用户真机。编译成功不等于已验证真机界面或设备服务。
 
-两轮精简合并在应用提交 `9ffc7c3` 中，未改变版本判断、商店查询、设备通信及文件访问逻辑：
+## 构建和交付
 
-- 删除首页标语、重复教程、对未开放功能的长篇说明。
-- 首页标题改为 `ssstore`。
-- 操作统一为“读取应用”“查询版本”“刷新全部版本”“创建配对”“好”等。
-- “设备数据与接口”缩为“设备数据”；单应用入口为“应用数据”；历史入口为“清单记录”。
-- 配对步骤压缩为三步，保留 Wi-Fi、开发者模式、本地网络权限、配对码、后台任务和两分钟限时等必要信息。
-- 精简版本详情、设置、设备读取说明、通知与错误提示；具体错误、错误码与动态占位符仍保留。
-- 保留“版本标识不同不能判断更新方向”、删除配对文件的作用范围及设备权限限制。
-- 使用“墙纸”“锁定屏幕”等常见 iOS 术语；文件大小提示统一为 `32 MiB`，实际限制仍为 `32 * 1024 * 1024` 字节。
-- 更新本地网络权限说明，并同步 `docs/API_REFERENCE.md` 中的入口名称。
-- 版本由 0.4.0（7）更新为 0.4.1（8）。
+工作流 `.github/workflows/build-ios.yml`：`xcode-27`，`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，显式检查 Xcode 为 27 系列、iphoneos SDK 为 `27.*`，执行 `bash scripts/build-ipa.sh`。
 
-核心文件：
+流程为核心 XCTest → 准备固定 DeviceKit → XcodeGen → 无签名 Release 编译 → `dist/ssstore.ipa`，产物名 `ssstore-unsigned`。应用代码 push 自动构建，纯 docs 修改不触发。接续时先查当前应用提交已有运行，只有失败或确有必要才重跑。
 
-- `ssstore/ContentView.swift`：首页、筛选、工具栏和应用行。
-- `ssstore/SettingsView.swift`：连接设置、地区和关于。
-- `ssstore/AppDetailView.swift`：版本详情和商店匹配。
-- `ssstore/OnDevicePairingView.swift`、`OnDevicePairingController.swift`、`PairingBackgroundExecution.swift`：配对界面、通知与状态。
-- `ssstore/InspectionView.swift`：设备数据、文件、历史和接口索引界面。
-- `ssstore/AppModel.swift`：扫描、导入、查询和保存反馈。
-- `Packages/UpdateCore/Sources/UpdateCore/Inspection.swift`：设备读取标题、分组与说明。
-- `Packages/UpdateCore/Sources/UpdateCore/Models.swift`：版本状态说明。
-- `ssstore/Bridge/DeviceScanner.m`、`DeviceInspector.m`：原生阶段、错误和结果提示。
+按用户最新要求，查询当前代码提交的运行状态，成功后下载该运行的 IPA 并直接交付；不做额外安装包核验。如失败，读取对应日志修复。安装包须自行签名；不能把旧运行的产物当作最新 `.soft` 版本。
 
-本会话曾导出旧版 0.4.0 的 566 处文案到 `/workspace/exports/ssstore-copy-0.4.0.*`。这些是精简前的参考材料，不是当前文案，也没有提交到仓库；新会话未必能访问。
+当前会话可通过已连接 GitHub 工具查询私有仓库 Actions、下载产物和推送；旧会话 API 出站阻塞不代表当前工具不可用。保持平台代理与 TLS 校验，不索取 PAT 或其他秘密，不绕过已明确拒绝的网络策略。不得声称保存网络草稿等于策略已应用。
 
-## 4. 已有验证与局限
+## 必须保留的语义
 
-最终应用提交前已执行：
+### 版本与商店查询
 
-- 官方 `swift:latest` 容器，实际 Swift **6.4.2**。
-- `swift test --package-path Packages/UpdateCore --scratch-path /swift-cache --jobs 4`：**36 项 XCTest 测试通过，0 失败**。
-- `swiftc -frontend -parse ssstore/*.swift`：全部 Swift 界面语法检查通过。
-- `git diff --check`：通过。
-- YAML 解析、0.4.1（8）元数据和设置页版本一致性检查：通过。
-- 非 UI 的 10 个文件做过去除字符串后的代码对比，确认只是文案修改；Objective-C 格式占位符保留。
+- 本地读取 `softwareVersionExternalIdentifier` / `ExternalVersionIdentifier`；远端从 Apple Catalog `offers[0].version.externalId` 或 `buyParams.appExtVrsId` 读取。
+- 精确核对有效 Bundle ID；两边都有有效数字 Store ID 时也须一致。保留既存映射兼容，映射不能绕过身份核验。
+- 版本 ID 只接受正十进制、去除前导零；它是不透明标识，不能比较大小。相同才可显示对应商店版本；不同不判断更新方向。缺失、身份/地区不符或失败为待核对。原始版本与构建号保留。
+- `VersionOrder` 仅继续用于最低 iOS 判断，不恢复应用字符串版本比较或专用补丁。工商银行曾因原始 short/build 不同被误判，external ID 891257769 相同才应视为相同版本。
+- 默认大陆优先，仅成功查询且明确未找到的应用补查美国。超时、限流、网络失败不算未找到；美国失败保留大陆成功结果；429 停止批次。
+- 保留固定 CN/US/HK/JP。Bundle ID 去重，每批 25，已知数字 Store ID 可直查 Catalog。Lookup 发现后查 Catalog，不按应用名模糊冒充身份匹配。
+- Lookup 间隔 3.2 秒，按地区/策略缓存 5 分钟，强制刷新绕过缓存。无 Apple ID 登录或下载功能。
 
-Swift Testing 还会显示单独的“0 tests”结果，那不是 XCTest 的结果，不能据此认为没有执行测试。
+### 配对与设备读取
 
-本机为 Linux，没有原生 Swift、Xcode 或 iOS SDK。语法检查不等于 iOS 编译、SwiftUI 类型检查或真机运行验证。新 IPA 的完整构建与包内容仍需在 GitHub Actions 上确认。
+- Loon 回环 + Remote Pairing/RSD，默认 `10.7.0.1:49152`。普通清单用 InstallationProxy Lookup/Browse，图标用 SpringBoard，不依赖 CoreDevice。
+- 仅移除经典连接协议；`lockdownd_get_value` 等通过 RSD 提供的设备信息服务仍需保留。
+- 手机配对此前已确认可用。广播/监听保持到握手结束，持续后台任务、PIN 通知、两分钟超时和主动停止保留。
+- 固定 `jkcoxson/idevice v0.1.68` 发布 XCFramework 及 SHA-256 校验，不随意升级。
+- 扫描、配对、检查共用 busy 状态；FFI 资源在同一工作线程创建、使用和释放。忽略/恢复在 busy 时禁用。
+- 41 个主读取入口、2 个文件辅助操作，详见 `docs/API_REFERENCE.md`。新服务未全部真机验证；曾遇到 CoreDevice `ServiceNotFound 21`。
+- 文件只读，单文件 32 MiB、64 KiB 分块；CoreDevice 仅列目录，导出通过 AFC。无安装、卸载、设备写入/删除、恢复、连续日志、抓包或性能流执行入口。
+- 固定 C FFI 无 `get_icon_state`，不能宣称完整桌面布局。描述文件解析不代表证书信任验证；动态占用不是可清理缓存；能力声明不是隐私授权。
+- 不提交配对文件、PIN、证书私钥等秘密；不假定可访问用户手机或旧环境本地文件。
 
-本实例准备过的资源（新会话需自行核实是否保留）：
-
-- 官方 Docker 镜像 `swift:latest`，本次摘要为 `sha256:119ff7d833ea622851b459513333bb4bda5ebb32b7acd05dd05077d5b0383129`。
-- `/workspace/.ssstore-env/swift-cache`：仓库外构建缓存。
-- `/workspace/.ssstore-env/install.sh`：重复安装/验证脚本。
-- `/workspace/.ssstore-env/release-validation.log`：最终应用提交前的验证日志。
-- DeviceKit v0.1.68 已由仓库脚本下载，并通过固定 SHA-256 校验，位于被忽略的 XCFramework 路径。
-
-Swift 5.9.2 的 Linux Foundation 曾缺少项目用到的 API，编译失败；升级到最新稳定工具链后通过。`project.yml` 的 `SWIFT_VERSION: "5.9"` 是语言设置，不能据此要求使用旧的 Linux 工具链。不要为解决旧工具链问题修改已正常工作的源码。
-
-## 5. IPA 构建与接续命令
-
-工作流：`.github/workflows/build-ios.yml`。
-
-- 名称：`Build unsigned iOS IPA`。
-- 运行环境：`macos-15`。
-- Xcode：`/Applications/Xcode_26.0.1.app/Contents/Developer`。
-- 显式检查 iphoneos SDK 为 `26.*`。
-- 命令：`bash scripts/build-ipa.sh`。
-- 流程：核心测试 → 准备固定 DeviceKit → XcodeGen → 无签名 Release 编译 → 打包。
-- IPA 路径：`dist/ssstore.ipa`。
-- Artifact 名称：`ssstore-unsigned`。
-- 支持 `workflow_dispatch`，应用源码等路径的 push 会自动触发。
-- 本交接文档只改 `docs/`，按当前 push 路径筛选不会单独触发构建。
-
-构建入口：<https://github.com/ccyykk666/ssstore/actions/workflows/build-ios.yml>
-
-接续时先检查应用提交是否已有构建，避免重复运行：
-
-```sh
-git status --short
-git log -3 --oneline
-git ls-remote origin refs/heads/main
-
-gh run list --repo ccyykk666/ssstore \
-  --workflow build-ios.yml \
-  --commit 9ffc7c312f7b91315e01c7cb99e0e474922c68ff \
-  --json databaseId,headSha,status,conclusion,url
-```
-
-若已有运行，查看并等待该次运行；若失败，读取该次日志定位问题，修复后再构建。只有确认不存在相应运行或确有重跑必要时，才执行：
-
-```sh
-gh workflow run build-ios.yml --repo ccyykk666/ssstore --ref main
-```
-
-拿到实际运行 ID 后：
-
-```sh
-gh run view RUN_ID --repo ccyykk666/ssstore
-gh run download RUN_ID --repo ccyykk666/ssstore \
-  --name ssstore-unsigned --dir /workspace/ssstore/dist/downloaded
-```
-
-下载后核对 IPA 的版本 **0.4.1（8）**、arm64、iOS 26 SDK 及资源，确认产物对应正确代码提交。给用户真实构建/产物链接并说明仍需自行签名安装。不要把旧版成功构建的产物当成当前版本。
-
-## 6. 当前网络阻塞的事实
-
-本会话中：
-
-- 原生 HTTPS Git 读取和推送均成功，平台现有 GitHub 认证可用。
-- `gh api` 访问 `https://api.github.com/...` 被代理拒绝；`curl` 的 CONNECT 响应为 **403 Forbidden**。
-- 使用完全访问权限/沙箱外执行重新验证后仍相同。
-- 云实例状态报告 `network_policy.mode: restricted`、`state: enforced`，自定义 `allowed_hosts: []`。
-- `api.github.com` 不在该实例报告的允许域名中。
-- 正常 GitHub 私有仓库 Actions 网页通过命令行匿名访问返回 404，未取得运行信息。这不能证明没有构建。
-- 没有得到运行 ID、成功/失败状态或本次 artifact ID。
-
-通过环境配置工具已保存加入 `api.github.com` 的网络草稿，工具确认 `status: saved`、`requires_publish: true`。但本实例后续观测仍为旧的受限策略，**没有证据表明草稿已应用或发布**。保存草稿本身不改变运行时网络。
-
-用户在自己的界面里找不到环境网络设置。上一助手给过未经核实的“Codex 设置 → 环境”路径，已经承认错误。**不要再将这个路径当成已证实入口，让用户反复寻找。**
-
-用户已有完整项目操作授权；当前观测到的问题是云环境出站策略，不应要求用户重复授权 Git、提供 PAT，或把 API 拒绝误诊为仓库没有权限。新会话应先测试自身实际网络和认证能力；它可能与本会话不同。保留平台代理与 TLS 校验，不尝试绕过已明确拒绝的网络策略。
-
-如果新会话同样被阻塞，应如实说明本机能力限制，并提供已经核实的替代流程。不要声称通过保存草稿、切换完全访问权限或修改文件已经修复网络。不要请求用户在聊天中粘贴秘密值。
-
-## 7. 必须保留的应用语义
-
-### 版本判断
-
-- 本地读取 `softwareVersionExternalIdentifier` / `ExternalVersionIdentifier`。
-- 远端读取 Apple Catalog 的 `offers[0].version.externalId` / `buyParams` 中的 `appExtVrsId`。
-- 验证应用身份：代码要求精确的有效 Bundle ID；两边都有有效数字 Store ID 时也必须相同。自签改写标识的映射不能绕过身份核验。
-- ID 只接受有效正十进制并去除前导零；它是不透明标识，不能比较大小判断新旧。
-- 相同：版本相同，可使用该商店记录的展示版本；不同：版本标识不同，不推断更新方向。
-- 缺失、身份不符、地区/策略不符或查询失败：待核对。
-- 原始版本/构建字段仍保留；不能重新用字符串启发式判断应用更新。
-- `VersionOrder` 仍用于最低 iOS 版本判断，不要误删。`UpdateStatus` 中旧的 `update` / `ahead` 枚举不代表当前应用更新判断。
-
-历史回归案例：工商银行原始 short=3.1.40、build=1.2，本地/商店 external ID 同为 891257769，对应商店版本 11.1.0.9.0。京东、夸克网盘、同程、王者荣耀也曾因版本字符串不同被误判；不要恢复这些应用的专用字符串补丁。
-
-### 商店查询
-
-- 默认中国大陆优先，仅明确未找到的应用补查美国；网络失败、超时、限流不算未找到。
-- 美国查询失败保留中国大陆成功结果；429 停止批次。
-- 保留固定 CN / US / HK / JP 地区。
-- Bundle ID 去重，每批 25；已知数字 Store ID 可直接查 Catalog。
-- Lookup 发现应用，再查 Catalog，不能用名称搜索冒充精确身份匹配。
-- 查询间隔 3.2 秒，按地区/策略缓存 5 分钟，强制刷新绕过缓存。
-- 没有 Apple ID 登录、账户或下载流程。
-
-### 配对和设备读取
-
-- 使用 Loon 回环与 Remote Pairing/RSD，默认 `10.7.0.1:49152`；普通扫描使用 InstallationProxy Lookup/Browse，图标使用 SpringBoard，不依赖 CoreDevice。
-- 用户此前已确认手机配对可用。广播和监听保持到握手结束，使用持续后台任务和通知展示 PIN，设有超时与主动停止。不要恢复“握手开始就撤下广播”的旧问题。
-- 固定依赖 `jkcoxson/idevice v0.1.68` 的发布 XCFramework，并保留下载校验。不要随意升级。
-- 41 个主读取入口、2 个文件辅助操作；索引 661 条 C 声明，检查器使用 125 条。声明数量不是可用服务或用户操作数量。
-- 详细覆盖与限制见 `docs/API_REFERENCE.md`。新增服务并未全部真机验证；用户曾遇到 CoreDevice `ServiceNotFound 21`。
-- 扫描、配对、检查共用 busy 状态；FFI 资源在同一工作线程创建、使用和释放。
-- 文件只读、单文件上限 32 MiB、64 KiB 分块。CoreDevice 文件入口仅列目录，文件导出走 AFC。
-- 无安装、卸载、写入、删除、恢复等执行按钮；无连续日志、抓包、性能流执行入口。
-- 完整桌面布局未实现：固定版本 C FFI 不导出 `get_icon_state`，不能用图标参数冒充布局。
-- 描述文件解析不是证书信任/撤销验证；动态占用不是可清理缓存；能力声明不是实际隐私授权。
-- 变化历史记录的是发现变化的时间，不是系统真实安装时间；版本标识变化不表示升级方向。
-- 不提交配对文件、PIN、证书私钥等敏感资料；不要假定能访问用户手机、Windows 本地文件或历史登录凭据。
-
-## 8. 新会话的第一步
-
-先确认源码和提交，读取本文及工作流；**优先查询 `9ffc7c3` 的既有构建并获取 0.4.1（8）IPA**。仅在构建失败或用户提出新反馈时修改代码。完成后报告实际构建结果、正确产物链接和仍需签名安装的事实。
