@@ -3,7 +3,7 @@ import XCTest
 
 final class RegionFallbackTests: XCTestCase {
     private static func release(_ id: String, country: String, version: String = "2.0") -> StoreRelease {
-        StoreRelease(bundleID: id, name: id, version: version, country: country, source: "Apple Catalog")
+        StoreRelease(bundleID: id, name: id, version: version, country: country, storeID: "123", externalVersionID: "456", source: "Apple Catalog")
     }
 
     func testDefaultMigrationAndManualSelection() {
@@ -38,9 +38,9 @@ final class RegionFallbackTests: XCTestCase {
         XCTAssertEqual(requests.last, ["b"])
         XCTAssertEqual(result.releases["a"]?.country, "cn")
         XCTAssertEqual(result.releases["b"]?.country, "us")
-        var app = AppRecord(installed: InstalledApp(bundleID: "b", name: "b", version: "2.0"))
+        var app = AppRecord(installed: InstalledApp(bundleID: "b", name: "b", version: "2.0", storeID: "123", externalVersionID: "455"))
         app.release = result.releases["b"]
-        XCTAssertEqual(app.status(country: "cn-us"), .update)
+        XCTAssertEqual(app.status(country: "cn-us"), .different)
         XCTAssertEqual(app.status(country: "cn"), .unknown)
     }
 

@@ -18,14 +18,15 @@ struct AppDetailView: View {
                             Text(record.installed.name).font(.title2.bold())
                         }
                         Text(record.status(country: model.country).rawValue)
-                            .foregroundStyle(record.status(country: model.country) == .update ? Color.orange : Color.secondary)
-                        field("本机版本", record.displayedVersion(country: model.country) ?? "未知")
+                            .foregroundStyle(record.status(country: model.country) == .different ? Color.orange : Color.secondary)
+                        field(record.status(country: model.country) == .current ? "本机对应商店版本" : "本机原始版本（未确认商店对应关系）", record.displayedVersion(country: model.country) ?? "未知")
+                        Text("检测方式：商店版本标识匹配").font(.caption).foregroundStyle(.secondary)
                         if let explanation = record.versionExplanation(country: model.country) {
                             Text(explanation).font(.footnote).foregroundStyle(.secondary)
                         }
                         field("原始版本字段 · CFBundleShortVersionString", record.installed.version ?? "未提供")
                         field("原始构建字段 · CFBundleVersion", record.installed.build ?? "未提供")
-                        if let external = record.installed.externalVersionID { field("本机商店版本标识", external) }
+                        field("本机商店版本标识", record.installed.externalVersionID ?? "未取得，请重新读取本机")
                         field("Bundle ID", record.id)
                         if let date = model.scannedAt { field("清单记录时间", date.formatted()) }
                     }
@@ -46,7 +47,7 @@ struct AppDetailView: View {
                             field("最低系统版本", release.minimumOS ?? "未提供")
                             field("数据获取时间", release.fetchedAt.formatted())
                             field("数据来源", release.source ?? "iTunes Lookup（旧记录）")
-                            if let external = release.externalVersionID { field("商店版本标识", external) }
+                            field("商店版本标识", release.externalVersionID ?? "未取得，请重新查询")
                             if !release.matches(scope: model.country) { Text("这份结果不属于当前查询方式，请重新查询。").foregroundStyle(.orange) }
                             if model.country == StoreQueryPolicy.chinaThenUS && release.country == "us" && release.lookupScope == model.country {
                                 Text("中国区未找到此应用，本次使用美区补查结果。能否更新取决于安装渠道与账号地区。")

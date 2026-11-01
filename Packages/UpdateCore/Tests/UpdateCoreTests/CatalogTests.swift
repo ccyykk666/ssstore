@@ -2,62 +2,74 @@ import XCTest
 @testable import UpdateCore
 
 final class CatalogTests: XCTestCase {
-    func testScreenshotVersions() {
-        var jd = AppRecord(installed: InstalledApp(bundleID: "com.360buy.jdmobile", name: "京东", version: "171195", build: "16.1.81"))
-        jd.release = StoreRelease(bundleID: jd.id, name: "京东", version: "16.1.81", country: "cn")
-        XCTAssertEqual(jd.status(country: "cn"), .current)
-        XCTAssertEqual(jd.displayedVersion(country: "cn"), "16.1.81")
-        jd.release?.version = "16.1.82"
-        XCTAssertEqual(jd.status(country: "cn"), .update)
-        XCTAssertEqual(jd.installed.version, "171195")
-
-        for (bundle, local, build, remote) in [
+    func testScreenshotAppsAllUseVersionIdentifiers() {
+        let cases = [
+            ("com.360buy.jdmobile", "171195", "16.1.81", "16.1.81"),
             ("com.tongcheng.iphone", "11.5.20", "11.5.20.25936", "11.5.2"),
-            ("com.tencent.smoba", "12.1.10103", "unknown", "12.1.1.1")
-        ] {
-            var app = AppRecord(installed: InstalledApp(bundleID: bundle, name: bundle, version: local, build: build))
-            app.release = StoreRelease(bundleID: bundle, name: bundle, version: remote, country: "cn")
-            XCTAssertEqual(app.status(country: "cn"), .different)
-            XCTAssertEqual(app.displayedVersion(country: "cn"), local)
-            XCTAssertNotNil(app.versionExplanation(country: "cn"))
+            ("com.tencent.smoba", "12.1.10103", "unknown", "12.1.1.1"),
+            ("com.quark.clouddrive", "10.19.5", "10.19.5.1091", "10.19.5.1091"),
+            ("com.icbc.iphoneclient", "3.1.40", "1.2", "11.1.0.9.0")
+        ]
+        for (bundle, local, build, remote) in cases {
+            var app = AppRecord(installed: InstalledApp(bundleID: bundle, name: bundle, version: local,
+                build: build, storeID: "123", externalVersionID: "456"))
+            app.release = StoreRelease(bundleID: bundle, name: bundle, version: remote, country: "cn",
+                storeID: "123", externalVersionID: "456")
+            XCTAssertEqual(app.status(country: "cn-us"), .current)
+            XCTAssertEqual(app.displayedVersion(country: "cn-us"), remote)
+            XCTAssertEqual(app.installed.version, local)
+            app.release?.externalVersionID = "457"
+            XCTAssertEqual(app.status(country: "cn-us"), .different)
+            app.installed.externalVersionID = nil
+            XCTAssertEqual(app.status(country: "cn-us"), .unknown)
+            XCTAssertEqual(app.displayedVersion(country: "cn-us"), local)
         }
     }
 
-    func testBuildCoincidenceDoesNotOverrideNormalMarketingVersion() {
+    func testNoStringOrSupplementalFieldCanReplaceMissingIdentifiers() {
         var app = AppRecord(installed: InstalledApp(bundleID: "normal", name: "应用", version: "2.0", build: "1.0"))
         app.release = StoreRelease(bundleID: "normal", name: "应用", version: "1.0", country: "cn")
-        XCTAssertEqual(app.status(country: "cn"), .different)
+        app.installed.coreDeviceVersion = "1.0"
+        app.installed.browseVersion = "1.0"
+        app.installed.metadataVersion = "1.0"
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
         XCTAssertEqual(app.displayedVersion(country: "cn"), "2.0")
+        app.installed.version = "1.0"
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
     }
 
-    func testQuarkDriveFullBuildMatchesStoreAndFutureUpdates() {
+    func testQuarkVersionStringsNeverOverrideDifferentOrMissingIdentifiers() {
         var app = AppRecord(installed: InstalledApp(bundleID: "com.quark.clouddrive", name: "夸克网盘",
-                                                     version: "10.19.5", build: "10.19.5.1091"))
-        app.release = StoreRelease(bundleID: app.id, name: "夸克网盘", version: "10.19.5.1091", country: "cn")
+            version: "10.19.5", build: "10.19.5.1091", storeID: "123", externalVersionID: "11"))
+        app.release = StoreRelease(bundleID: app.id, name: "夸克网盘", version: "10.19.5.1091", country: "cn",
+            storeID: "123", externalVersionID: "11")
         app.installed.metadataVersion = "10.19.5"
         XCTAssertEqual(app.status(country: "cn-us"), .current)
         XCTAssertEqual(app.displayedVersion(country: "cn-us"), "10.19.5.1091")
-        XCTAssertEqual(app.installed.version, "10.19.5")
-        XCTAssertNotNil(app.versionExplanation(country: "cn-us"))
         app.release?.version = "10.19.5.1092"
-        XCTAssertEqual(app.status(country: "cn-us"), .update)
-        app.installed.build = "10.19.5.1095"
+        app.release?.externalVersionID = "12"
         XCTAssertEqual(app.status(country: "cn-us"), .different)
-        app.release?.version = "10.19.5"
-        XCTAssertEqual(app.status(country: "cn-us"), .current)
-        XCTAssertEqual(app.displayedVersion(country: "cn-us"), "10.19.5")
+        app.installed.externalVersionID = "20"
+        XCTAssertEqual(app.status(country: "cn-us"), .different)
+        app.release?.externalVersionID = nil
+        XCTAssertEqual(app.status(country: "cn-us"), .unknown)
     }
 
-    func testMatchingExternalIDResolvesDifferentDisplayFormats() {
+    func testVersionIdentifierRequiresMatchingAppIdentityAndRegion() {
         var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "应用", version: "11.5.20", storeID: "123", externalVersionID: "456"))
         app.release = StoreRelease(bundleID: "a", name: "应用", version: "11.5.2", country: "cn", storeID: "123", externalVersionID: "456")
         XCTAssertEqual(app.status(country: "cn"), .current)
         XCTAssertEqual(app.displayedVersion(country: "cn"), "11.5.2")
         XCTAssertNotNil(app.versionExplanation(country: "cn"))
         app.release?.externalVersionID = "457"
+        app.release?.version = app.installed.version ?? ""
         XCTAssertEqual(app.status(country: "cn"), .different)
         app.release?.storeID = "999"
-        XCTAssertEqual(app.status(country: "cn"), .different)
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
+        app.release?.storeID = "123"
+        XCTAssertEqual(app.status(country: "us"), .unknown)
+        app.error = "网络失败"
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
     }
 
     func testBatchPlanningDeduplicatesMappings() {
@@ -105,7 +117,7 @@ final class CatalogTests: XCTestCase {
     func testOldSavedInventoryRemainsDecodable() throws {
         let data = Data(#"{"installed":{"bundleID":"a","name":"a","version":"1.0","isSystem":false},"release":{"bundleID":"a","name":"a","version":"1.1","country":"cn","fetchedAt":0}}"#.utf8)
         let app = try JSONDecoder().decode(AppRecord.self, from: data)
-        XCTAssertEqual(app.status(country: "cn"), .update)
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
         XCTAssertNil(app.installed.localIconKey)
         XCTAssertNil(app.release?.externalVersionID)
     }
@@ -119,30 +131,26 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(app.version, "11.5.20")
     }
 
-    func testICBCHistoricalFieldsRequireEvidence() {
+    func testICBCUsesActualScreenshotIdentifier() {
         var app = AppRecord(installed: InstalledApp(bundleID: "com.icbc.iphoneclient", name: "中国工商银行", version: "3.1.40", build: "1.2"))
-        app.release = StoreRelease(bundleID: app.id, name: "中国工商银行", version: "11.0.9.0", country: "cn", storeID: "123", externalVersionID: "456")
-        XCTAssertEqual(app.status(country: "cn-us"), .different)
-        app.installed.coreDeviceVersion = "11.0.9.0"
+        app.release = StoreRelease(bundleID: app.id, name: "中国工商银行", version: "11.1.0.9.0", country: "cn",
+            storeID: "423514795", externalVersionID: "891257769")
+        app.installed.coreDeviceVersion = "11.1.0.9.0"
+        XCTAssertEqual(app.status(country: "cn-us"), .unknown)
+        app.installed.storeID = "423514795"
+        app.installed.externalVersionID = "891257769"
         XCTAssertEqual(app.status(country: "cn-us"), .current)
-        app.installed.coreDeviceVersion = "3.1.40"
-        app.installed.storeID = "123"
-        app.installed.externalVersionID = "456"
-        XCTAssertEqual(app.status(country: "cn-us"), .current)
-        XCTAssertEqual(app.displayedVersion(country: "cn-us"), "11.0.9.0")
+        XCTAssertEqual(app.displayedVersion(country: "cn-us"), "11.1.0.9.0")
+        XCTAssertEqual(app.installed.version, "3.1.40")
     }
 
-    func testMetadataWithoutStoreIdentityStillRequiresCrossMajorReview() {
-        var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "a", version: "3.1.40", build: "1.2"))
+    func testOriginalMetadataDoesNotDetermineUpdateDirection() {
+        var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "a", version: "1.0", build: "999"))
         app.installed.metadataVersion = "10.0.0"
-        app.release = StoreRelease(bundleID: "a", name: "a", version: "11.0.9.0", country: "cn")
-        XCTAssertEqual(app.status(country: "cn"), .different)
-        app.installed.metadataVersion = nil
-        app.installed.version = "01.002"
-        app.release?.version = "1.3"
-        XCTAssertEqual(app.status(country: "cn"), .update)
-        app.installed.coreDeviceVersion = "1.4"
-        XCTAssertEqual(app.status(country: "cn"), .different)
+        app.release = StoreRelease(bundleID: "a", name: "a", version: "11.1.0.9.0", country: "cn")
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
+        app.installed.version = "11.1.0.9.0"
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
     }
 
     func testEnrichedDeviceFieldsPreserveOriginalValues() throws {
@@ -155,4 +163,29 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(app.metadataVersion, "11.0.9.0")
         XCTAssertNotNil(app.versionReadNote)
     }
+    func testExactBundleSupportsOmittedStoreIDButRewrittenBundleRequiresStoreID() {
+        var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "a", version: "1", externalVersionID: "123"))
+        app.release = StoreRelease(bundleID: "a", name: "a", version: "2", country: "cn", externalVersionID: "123")
+        XCTAssertEqual(app.status(country: "cn"), .current)
+        app.installed.bundleID = "a.sideloaded"
+        app.lookupBundleID = "a"
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
+        app.installed.storeID = "100"
+        app.release?.storeID = "100"
+        XCTAssertEqual(app.status(country: "cn"), .current)
+        app.release?.bundleID = "another.app"
+        XCTAssertEqual(app.status(country: "cn"), .unknown)
+    }
+
+    func testIdentifiersMustBePositiveDecimalValues() {
+        var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "a", version: "1", externalVersionID: "00123"))
+        app.release = StoreRelease(bundleID: "a", name: "a", version: "1", country: "cn", externalVersionID: "123")
+        XCTAssertEqual(app.status(country: "cn"), .current)
+        for invalid in ["", "0", "000", "abc", "-1"] {
+            app.installed.externalVersionID = invalid
+            app.release?.externalVersionID = invalid
+            XCTAssertEqual(app.status(country: "cn"), .unknown)
+        }
+    }
+
 }

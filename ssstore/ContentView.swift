@@ -5,7 +5,7 @@ import UpdateCore
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var search = ""
-    @State private var onlyUpdates = false
+    @State private var onlyDifferent = false
     @State private var includeSystem = false
     @State private var settings = false
     @State private var importing = false
@@ -13,7 +13,7 @@ struct ContentView: View {
     private var visible: [AppRecord] {
         model.records.filter { record in
             (includeSystem || !record.installed.isSystem) &&
-            (!onlyUpdates || record.status(country: model.country) == .update) &&
+            (!onlyDifferent || record.status(country: model.country) == .different) &&
             (search.isEmpty || record.installed.name.localizedCaseInsensitiveContains(search) ||
              record.id.localizedCaseInsensitiveContains(search))
         }
@@ -30,8 +30,8 @@ struct ContentView: View {
                             .font(.headline)
                         HStack(spacing: 28) {
                             metric("已收录", value: model.records.filter { !$0.installed.isSystem }.count)
-                            metric("可更新", value: model.records.filter { $0.status(country: model.country) == .update }.count)
-                            metric("待确认", value: model.records.filter { !$0.installed.isSystem && [.unknown, .different].contains($0.status(country: model.country)) }.count)
+                            metric("标识不同", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .different }.count)
+                            metric("待核对", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .unknown }.count)
                         }
                         if let date = model.scannedAt {
                             Text("\(model.inventoryOrigin) · \(date.formatted(date: .abbreviated, time: .shortened))")
@@ -52,10 +52,10 @@ struct ContentView: View {
                     }
                 }
                 Section {
-                    Toggle("只看可更新", isOn: $onlyUpdates)
+                    Toggle("只看版本标识不同", isOn: $onlyDifferent)
                     Toggle("显示系统应用", isOn: $includeSystem)
                 } footer: {
-                    Text("数据源：苹果目录与 Lookup · \(StoreQueryPolicy.label(model.country))。美区补查标注 US；5 分钟内可复用缓存。缺少可靠对应信息时，跨主版本差异标为待核对。")
+                    Text("全部应用按商店版本标识检测：相同确认同版，不同标注差异，缺失则待核对。\(StoreQueryPolicy.label(model.country))；美区补查标注 US，5 分钟内可复用缓存。")
                 }
                 Section("应用 · \(visible.count)") {
                     if visible.isEmpty {
@@ -131,13 +131,13 @@ private struct AppRow: View {
             AppIconView(app: record.installed, storeIconURL: record.release?.iconURL)
             VStack(alignment: .leading, spacing: 5) {
                 Text(record.installed.name).font(.headline).lineLimit(1)
-                Text("本机 \(record.displayedVersion(country: country) ?? "未知")  ·  最新 \(releaseLabel)")
+                Text("\(status == .current ? "本机" : "本机原始") \(record.displayedVersion(country: country) ?? "未知")  ·  商店 \(releaseLabel)")
                     .font(.caption).foregroundStyle(.secondary)
                 if record.error != nil { Text("查询失败，点按查看原因").font(.caption2).foregroundStyle(.orange) }
             }
             Spacer(minLength: 2)
             Text(status.rawValue).font(.caption2.bold())
-                .foregroundStyle(status == .update ? Color.orange : Color.secondary)
+                .foregroundStyle(status == .different ? Color.orange : Color.secondary)
         }.padding(.vertical, 4)
     }
 

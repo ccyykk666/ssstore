@@ -41,7 +41,7 @@ final class UpdateCoreTests: XCTestCase {
         XCTAssertThrowsError(try AppleLookup.decode(Data(#"{"results":[]}"#.utf8), bundleID: "a", country: "us"))
         var record = AppRecord(installed: InstalledApp(bundleID: "test.app", name: "应用", version: "1.0"))
         record.release = release
-        XCTAssertEqual(record.status(country: "cn"), .different) // Unverified cross-major bundle fields.
+        XCTAssertEqual(record.status(country: "cn"), .unknown) // Display-only Lookup lacks version identifiers.
         XCTAssertEqual(record.status(country: "us"), .unknown)
         record.error = "网络失败"
         XCTAssertEqual(record.status(country: "cn"), .unknown)

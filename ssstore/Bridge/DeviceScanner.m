@@ -106,9 +106,6 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     struct RsdHandshakeHandle *handshake = NULL;
     struct InstallationProxyClientHandle *client = NULL;
     struct SpringBoardServicesClientHandle *springboard = NULL;
-    struct AppServiceHandle *appService = NULL;
-    struct AppListEntryC *nativeApps = NULL;
-    uintptr_t nativeCount = 0;
     plist_t browseOptions = NULL;
     plist_t *browseRows = NULL;
     size_t browseCount = 0;
@@ -179,21 +176,6 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             }
             [versionNotes addObject:@"已读取 InstallationProxy Lookup / Browse"];
         } else { [versionNotes addObject:readError.localizedDescription]; }
-        if (remotePairing) {
-            progress(@"正在交叉读取 CoreDevice 应用信息…");
-            if (Check(app_service_connect_rsd(adapter, handshake, &appService), @"连接 CoreDevice 应用服务", &readError) &&
-                Check(app_service_list_apps(appService, 1, 1, 1, 1, 1, &nativeApps, &nativeCount), @"读取 CoreDevice 应用信息", &readError)) {
-                for (uintptr_t index = 0; index < nativeCount; index++) {
-                    struct AppListEntryC *entry = &nativeApps[index];
-                    if (!entry->bundle_identifier) continue;
-                    NSMutableDictionary *item = byID[[NSString stringWithUTF8String:entry->bundle_identifier]];
-                    if (!item) continue;
-                    if (entry->version) item[@"CoreDeviceVersion"] = [NSString stringWithUTF8String:entry->version];
-                    if (entry->bundle_version) item[@"CoreDeviceBuild"] = [NSString stringWithUTF8String:entry->bundle_version];
-                }
-                [versionNotes addObject:@"已读取 CoreDevice"];
-            } else { [versionNotes addObject:readError.localizedDescription]; }
-        }
         for (NSMutableDictionary *item in apps) {
             NSMutableArray *notes = [versionNotes mutableCopy];
             [notes addObject:item[@"externalVersionID"] ? @"系统提供了安装版本标识" : @"系统未提供安装版本标识"];
@@ -264,8 +246,6 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             free(browseRows);
         }
         plist_free(browseOptions);
-        app_service_free_app_list(nativeApps, nativeCount);
-        app_service_free(appService);
         if (raw) {
             idevice_plist_array_free((plist_t *)raw, count);
             // v0.1.68 frees each node but leaves the boxed pointer slice allocated.
