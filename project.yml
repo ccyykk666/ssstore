@@ -1,0 +1,47 @@
+name: ssstore
+options:
+  bundleIdPrefix: dev.personal
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  UpdateCore:
+    path: Packages/UpdateCore
+  DeviceKit:
+    path: Packages/DeviceKit
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    CLANG_ENABLE_MODULES: YES
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  ssstore:
+    type: application
+    platform: iOS
+    sources:
+      - path: ssstore
+        excludes: [Info.plist]
+    info:
+      path: ssstore/Info.plist
+      properties:
+        CFBundleDisplayName: ssstore
+        UILaunchScreen: {}
+        NSLocalNetworkUsageDescription: 通过你启用的本地 VPN 连接本机设备管理服务，读取应用名称与版本。
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.personal.ssstore
+        SWIFT_OBJC_BRIDGING_HEADER: ssstore/Bridge/ssstore-Bridging-Header.h
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies:
+      - package: UpdateCore
+      - package: DeviceKit
+        product: IDevice
+schemes:
+  ssstore:
+    build:
+      targets:
+        ssstore: all

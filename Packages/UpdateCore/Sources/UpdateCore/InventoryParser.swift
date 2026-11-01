@@ -1,0 +1,46 @@
+import Foundation
+
+public enum InventoryParser {
+    public static func parse(_ data: Data) throws -> [InstalledApp] {
+        let root: Any
+        if let json = try? JSONSerialization.jsonObject(with: data) { root = json }
+        else { root = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) }
+        let rows: [[String: Any]]
+        if let array = root as? [[String: Any]] { rows = array }
+        else if let dict = root as? [String: Any], let array = dict["apps"] as? [[String: Any]] { rows = array }
+        else if let dict = root as? [String: Any], let lookup = dict["LookupResult"] as? [String: [String: Any]] {
+            rows = lookup.map { key, value in var row = value; row["CFBundleIdentifier"] = key; return row }
+        } else { throw InventoryError.invalidFormat }
+
+        var unique: [String: InstalledApp] = [:]
+        for row in rows {
+            guard let id = text(row, ["bundleID", "CFBundleIdentifier"]), !id.isEmpty else { continue }
+            unique[id] = InstalledApp(
+                bundleID: id,
+                name: text(row, ["name", "CFBundleDisplayName", "CFBundleName"]) ?? id,
+                version: text(row, ["version", "CFBundleShortVersionString"]),
+                build: text(row, ["build", "CFBundleVersion"]),
+                isSystem: (row["isSystem"] as? Bool) ?? (row["ApplicationType"] as? String == "System")
+            )
+        }
+        guard !unique.isEmpty else { throw InventoryError.empty }
+        return unique.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private static func text(_ row: [String: Any], _ keys: [String]) -> String? {
+        for key in keys {
+            if let value = row[key] as? String, !value.isEmpty { return value }
+        }
+        return nil
+    }
+}
+
+public enum InventoryError: LocalizedError {
+    case invalidFormat, empty
+    public var errorDescription: String? {
+        switch self {
+        case .invalidFormat: return "清单格式不支持，请导入 JSON 应用数组、apps 数组或 installation_proxy 的 LookupResult plist。"
+        case .empty: return "没有读到带 Bundle ID 的应用。原有清单已保留。"
+        }
+    }
+}

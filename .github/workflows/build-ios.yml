@@ -1,0 +1,27 @@
+name: Build unsigned iOS IPA
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'ssstore/**'
+      - 'Packages/**'
+      - 'project.yml'
+      - 'scripts/build-ipa.sh'
+      - '.github/workflows/build-ios.yml'
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Test core and build IPA
+        run: bash scripts/build-ipa.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssstore-unsigned
+          path: dist/*.ipa
+          if-no-files-found: error

@@ -1,0 +1,17 @@
+{
+  "apps": [
+    {
+      "bundleID": "com.tencent.xin",
+      "name": "微信（导入格式示例）",
+      "version": "8.0.0",
+      "build": "100",
+      "isSystem": false
+    },
+    {
+      "bundleID": "com.example.sideloaded",
+      "name": "自签应用（无法在苹果目录匹配的示例）",
+      "version": "1.0",
+      "isSystem": false
+    }
+  ]
+}

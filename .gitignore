@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+DerivedData/
+build/
+dist/
+*.xcuserstate
+xcuserdata/
+*.mobiledevicepairing
+*.p12
+*.mobileprovision
+pairing*.plist
+Packages/DeviceKit/IDevice.xcframework/
+ssstore.xcodeproj/
+/README.md
