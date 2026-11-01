@@ -8,10 +8,13 @@ on:
       - 'Vendor/**'
       - 'project.yml'
       - 'scripts/build-ipa.sh'
+      - 'scripts/select-ci-tests.py'
+      - 'scripts/tests/**'
       - '.github/workflows/build-ios.yml'
   pull_request:
 permissions:
   contents: read
+  actions: read
 jobs:
   build:
     runs-on: xcode-27
@@ -19,6 +22,17 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select checks for changed code
+        id: checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: python3 scripts/select-ci-tests.py
+      - name: Test CI check selection
+        if: steps.checks.outputs.selection == 'true'
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Verify Xcode 27 and iOS 27 SDK
         run: |
           xcodebuild -version
@@ -39,11 +53,21 @@ jobs:
         with:
           path: build/DerivedData/SourcePackages
           key: xcode27-store-spm-${{ hashFiles('Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
-      - name: Test core and build IPA
+      - name: Test UpdateCore
+        if: steps.checks.outputs.core == 'true'
+        run: swift test --package-path Packages/UpdateCore
+      - name: Check download protocol
+        if: steps.checks.outputs.downloads == 'true'
+        run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh protocol
+      - name: Check store localization
+        if: steps.checks.outputs.localization == 'true'
+        run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh localization
+      - name: Build IPA
         run: bash scripts/build-ipa.sh
       - uses: actions/upload-artifact@v4
         with:
           name: ssstore-unsigned
           path: dist/*.ipa
           if-no-files-found: error
+
 

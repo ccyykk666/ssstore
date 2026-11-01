@@ -4,10 +4,21 @@
 
 ## 当前状态
 
-- 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前准备发布 **0.5.2（12）**，iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。
+- 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前已交付 **0.5.2（12）**，iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。
 - 0.5.1（11）已推送并构建交付，源码提交 `e2c0027562fc3e2fb9189ea08f3d18dba9507781`，构建 `41329740686`，41 项核心测试及上游下载协议/本地化检查通过；实际工具链 Xcode 27.1、iOS 27.1 SDK。
-- 用户继续提出九项导航、菜单、计数、配对及免网页证书安装要求；本轮修改详见下节。0.5.2 的构建状态需以本轮 Actions 为准。
+- 0.5.2 的九项界面和安装通道调整已推送 `40fe1576df3074a65cab8f9d6bb307cc9dbffac1`，构建 `41331962262` 成功并交付 IPA。新增配对安装仅通过编译，尚未实机验证。
+- 本轮仅调整 CI 的测试选择策略，不改应用版本：用户要求只在相关代码变更时运行对应测试，避免每次构建重复执行无关测试。
 - 依旧按用户要求：构建成功后直接交付 IPA，不额外检查 IPA 内容或哈希。若遇到需要用户决定的问题，先询问。
+
+## CI 测试选择策略
+
+- `.github/workflows/build-ios.yml` 全量拉取 git 历史，由 `scripts/select-ci-tests.py` 查询本分支最近成功的 push/手动构建（无记录则使用基准分支），比较该成功提交与当前实际 checkout 的代码。重跑已成功的相同提交时可复用对应成功基准。不会把上一次失败的提交作为已验证基准，也不会把 PR 的 head_sha 冒充实际测试过的合并提交。
+- UpdateCore：仅 `Packages/UpdateCore/` 下源码、测试或包配置变化时运行 `swift test`。
+- 下载协议：仅其实际编译输入 StoreProtocol.swift、StoreDiagnostics.swift、StoreDownloadProtocol.swift、DownloadProtocolChecks.swift 或 check.downloads.sh 变化时运行。
+- 本地化：仅 Localizable.xcstrings、StoreDownloadProtocol.swift、LocalizationChecks.py 或 check.downloads.sh 变化时运行。下载检查脚本支持 protocol/localization/all，省略参数仍运行全部，兼容上游原用法。
+- 选择器自身、其测试或工作流变更时才运行选择器的 Python 回归检查。仅改 SwiftUI 页面、原生桥接、普通文案或文档，不重复运行无关的三组库检查；应用编译和打包照常执行。
+- 无成功基准、历史缺失或 Actions API 不可访问时，明确记录原因并回退到全部检查；不能静默跳过未验证代码。检查选择结果写入 Actions 日志和步骤摘要。
+- `scripts/build-ipa.sh` 只编译并打包，不再隐式执行测试。测试由 workflow 独立条件步骤负责；不要恢复每次构建无条件全测，也不要在成功交付 IPA 前额外核验产物。
 
 ## 0.5.2 本轮代码改动
 
@@ -79,7 +90,7 @@
 
 ## 构建和交付
 
-工作流 `.github/workflows/build-ios.yml`：`xcode-27`，`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，显式检查 Xcode 为 27 系列、iphoneos SDK 为 `27.*`，执行 `bash scripts/build-ipa.sh`。
+工作流 `.github/workflows/build-ios.yml`：`xcode-27`，`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，显式检查 Xcode 为 27 系列、iphoneos SDK 为 `27.*`，按变更执行相关测试，再执行仅负责编译打包的 `bash scripts/build-ipa.sh`。
 
 流程为核心 XCTest → 上游 Asspp 下载协议/本地化测试 → 准备固定 DeviceKit → XcodeGen 和固定 SPM 依赖 → 无签名 Release 编译 → `dist/ssstore.ipa`，产物名 `ssstore-unsigned`。应用代码 push 自动构建，纯 docs 修改不触发。接续时先查当前应用提交已有运行，只有失败或确有必要才重跑。
 

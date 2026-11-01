@@ -7,8 +7,7 @@ if ! command -v xcodegen >/dev/null; then
   exit 1
 fi
 
-swift test --package-path Packages/UpdateCore
-bash Vendor/Asspp/Resources/Scripts/check.downloads.sh
+# CI selects relevant checks separately; this script only builds and packages.
 bash scripts/prepare-devicekit.sh
 xcodegen generate
 mkdir -p ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
@@ -32,4 +31,5 @@ output="$stage/ssstore.ipa"
 (cd "$stage" && /usr/bin/zip -qry "$output" Payload)
 cp "$output" "$PWD/dist/ssstore.ipa"
 echo "已生成待自签 IPA：$PWD/dist/ssstore.ipa"
+
 
