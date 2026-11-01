@@ -32,6 +32,7 @@ final class AppModel: ObservableObject {
     private var nextLookupAt = Date.distantPast
     private let storage: URL
     let pairingURL: URL
+    let pairingController = OnDevicePairingController()
 
     init() {
         let prefs = UserDefaults.standard
@@ -57,7 +58,7 @@ final class AppModel: ObservableObject {
 
     func scan() async {
         guard !busy else { return }
-        guard hasPairing else { message = "请先在连接设置中导入配对文件。iOS 27.2 请使用 Remote Pairing 格式。"; return }
+        guard hasPairing else { message = "请先在连接设置中创建或导入 Remote Pairing 文件。"; return }
         guard let number = UInt16(port), number > 0 else { message = "端口应在 1 到 65535 之间。"; return }
         busy = true
         activity = "正在连接本机并读取应用…"
@@ -80,24 +81,49 @@ final class AppModel: ObservableObject {
         guard !busy else { return }
         do {
             let data = try readSelectedFile(url)
-            guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
-                throw LocalError.message("配对文件必须是 plist。")
-            }
-            let remote = plist["private_key"] is Data && plist["public_key"] is Data && plist["identifier"] is String
-            let classic = plist["HostID"] is String && plist["HostPrivateKey"] is Data
-            guard remote || classic else { throw LocalError.message("未识别的配对格式。请从 idevice_pair 导出 Remote Pairing 文件。") }
-            try data.write(to: pairingURL, options: [.atomic, .completeFileProtection])
-            // Keep device credentials out of cloud backups and the Files browser.
-            var protectedURL = pairingURL
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            try protectedURL.setResourceValues(values)
-            hasPairing = true
-            mode = remote ? .remote : .classic
-            if !remote {
+            let kind = try savePairing(data)
+            if kind == .lockdown {
                 message = "已导入传统配对文件。iOS 26.4 及更新系统的回环通常需要 Remote Pairing，请重新导出相应文件。"
             }
         } catch { message = "导入配对失败：\(error.localizedDescription)" }
+    }
+
+    func createPairingOnDevice() {
+        guard !busy else { return }
+        guard #available(iOS 27.0, *) else {
+            message = "手机端创建配对需要 iOS 27 或更新版本。当前系统请使用导入功能。"
+            return
+        }
+        busy = true
+        activity = "正在创建手机配对，请在连接设置中完成确认…"
+        pairingController.start { [weak self] result in
+            guard let self else { return }
+            defer { busy = false; activity = "" }
+            if case .success(let data) = result {
+                do {
+                    _ = try savePairing(data)
+                    pairingController.reportSaveResult(nil)
+                } catch { pairingController.reportSaveResult(error) }
+            }
+        }
+    }
+
+    private func savePairing(_ data: Data) throws -> PairingRecordKind {
+        let kind = try PairingRecord.kind(of: data)
+        try data.write(to: pairingURL, options: [.atomic, .completeFileProtection])
+        var protectedURL = pairingURL
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try protectedURL.setResourceValues(values)
+        hasPairing = true
+        mode = kind == .remote ? .remote : .classic
+        return kind
+    }
+
+    func pairingDataForExport() throws -> Data {
+        let data = try Data(contentsOf: pairingURL)
+        _ = try PairingRecord.kind(of: data)
+        return data
     }
 
     func removePairing() {
@@ -196,9 +222,4 @@ private struct SavedInventory: Codable {
     var records: [AppRecord]
     var scannedAt: Date?
     var origin: String
-}
-
-private enum LocalError: LocalizedError {
-    case message(String)
-    var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
 }

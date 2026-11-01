@@ -37,7 +37,7 @@ struct ContentView: View {
                             Text("\(model.inventoryOrigin) · \(date.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption).foregroundStyle(.secondary)
                         } else {
-                            Text("先开启 Loon 回环并导入配对文件，再读取应用。")
+                            Text("先在连接设置中创建或导入配对文件，再开启 Loon 回环读取应用。")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -60,7 +60,7 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Label(model.records.isEmpty ? "尚无应用清单" : "没有符合条件的应用", systemImage: "tray")
                                 .font(.headline)
-                            Text(model.records.isEmpty ? "连接设置中导入 Remote Pairing 文件，然后点击“读取本机”。也可导入电脑导出的清单。" : "调整筛选条件，或点击检查更新获取商店版本。")
+                            Text(model.records.isEmpty ? "在连接设置中创建或导入 Remote Pairing 文件，然后点击“读取本机”。也可导入电脑导出的清单。" : "调整筛选条件，或点击检查更新获取商店版本。")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }.padding(.vertical, 12)
                     }

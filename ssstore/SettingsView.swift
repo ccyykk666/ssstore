@@ -6,6 +6,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var importing = false
     @State private var removing = false
+    @State private var creating = false
+    @State private var exporting = false
+    @State private var exportDocument = PairingFileDocument(data: Data())
 
     var body: some View {
         NavigationStack {
@@ -18,8 +21,17 @@ struct SettingsView: View {
                         .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("端口", text: $model.port).keyboardType(.numberPad)
                     Label(model.hasPairing ? "已保存配对文件" : "尚未导入配对文件", systemImage: model.hasPairing ? "checkmark.circle" : "doc.badge.plus")
+                    if #available(iOS 27.0, *) {
+                        Button("在手机上创建 Remote Pairing") { creating = true }
+                    }
                     Button("导入配对文件") { importing = true }
-                    if model.hasPairing { Button("移除本软件内的配对文件", role: .destructive) { removing = true } }
+                    if model.hasPairing {
+                        Button("导出配对文件") {
+                            do { exportDocument = PairingFileDocument(data: try model.pairingDataForExport()); exporting = true }
+                            catch { model.message = error.localizedDescription }
+                        }
+                        Button("移除本软件内的配对文件", role: .destructive) { removing = true }
+                    }
                 } header: {
                     Text("本机连接")
                 } footer: {
@@ -28,7 +40,7 @@ struct SettingsView: View {
                 Section {
                     Text("1. Loon 更新至 3.5.3（Build 1007）或更高版本。")
                     Text("2. 在 Loon 中启用“本机开发服务回环”插件并启动 VPN。")
-                    Text("3. 在电脑上用 idevice_pair 创建 Remote Pairing，导出文件并导入这里。")
+                    Text("3. iOS 27 及更新版本可点击“在手机上创建 Remote Pairing”；也可导入电脑生成的文件。")
                     Text("4. 保持设备解锁，先在 Wi-Fi 环境中点击“读取本机”。")
                     Link("查看你提供的回环插件", destination: URL(string: "https://github.com/ios151/Rewrite/blob/main/dev-loopback/modules/dev-loopback.lpx")!)
                 } header: {
@@ -47,7 +59,7 @@ struct SettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("关于") {
-                    Text("ssstore · 0.1.0")
+                    Text("ssstore · 0.2.0")
                     Text("查询仅发送应用 Bundle ID 与所选商店地区到苹果。配对文件保存在本软件本地，不会随版本查询上传。")
                     Text("读取清单和检查更新是两个动作。安装、卸载或升级应用后，请重新读取本机；导入清单只是快照。")
                     Text("本版显示可用版本与更新说明。应用安装和签名续期仍由原安装渠道处理。")
@@ -56,13 +68,21 @@ struct SettingsView: View {
             .disabled(model.busy)
             .navigationTitle("连接设置")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .sheet(isPresented: $creating) {
+                OnDevicePairingView(controller: model.pairingController)
+                    .environment(\.isEnabled, true)
+            }
+            .fileExporter(isPresented: $exporting, document: exportDocument,
+                          contentType: .propertyList, defaultFilename: "ssstore-pairing.plist") { result in
+                if case .failure(let error) = result { model.message = error.localizedDescription }
+            }
             .fileImporter(isPresented: $importing, allowedContentTypes: [.item]) { result in
                 switch result {
                 case .success(let url): model.importPairing(from: url)
                 case .failure(let error): model.message = error.localizedDescription
                 }
             }
-            .alert("提示", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
+            .alert("提示", isPresented: Binding(get: { model.message != nil && !creating }, set: { if !$0 { model.message = nil } })) {
                 Button("知道了") { model.message = nil }
             } message: { Text(model.message ?? "") }
             .confirmationDialog("移除本软件保存的配对文件？", isPresented: $removing, titleVisibility: .visible) {
