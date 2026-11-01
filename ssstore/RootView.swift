@@ -5,7 +5,7 @@ struct RootView: View {
     var body: some View {
         TabView {
             ContentView().tabItem { Label("应用", systemImage: "square.stack.3d.up") }
-            NavigationStack { InspectionView() }.tabItem { Label("设备", systemImage: "iphone") }
+            NavigationStack { InspectionView() }.tabItem { Label("数据", systemImage: "chart.bar.xaxis") }
             AccountView().tabItem { Label("账户", systemImage: "person.crop.circle") }
             SearchView().tabItem { Label("搜索", systemImage: "magnifyingglass") }
         }
