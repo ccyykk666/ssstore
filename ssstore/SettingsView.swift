@@ -61,11 +61,12 @@ struct SettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("关于") {
-                    Text("ssstore · 0.3.2")
+                    Text("ssstore · 0.4.0")
                     Text("批量查询仅向苹果发送 Bundle ID、数字商店 ID 与所选地区，无需 Apple ID 登录。配对文件与本地图标保存在本软件内，不会随版本查询上传。")
                     Text("读取清单和检查更新是两个动作。安装、卸载或升级应用后，请重新读取本机；导入清单只是快照。")
                     Text("所有应用统一读取 Lookup / Browse 安装元数据里的版本标识，与苹果目录匹配。标识不同仅代表存在差异；缺失则待核对。版本字符串与构建号只作原始信息展示。")
                     Text("本版显示可用版本与更新说明。应用安装和签名续期仍由原安装渠道处理。")
+                    Text("更多菜单中可打开“设备数据与接口”。容量、文件、描述文件和诊断按需读取；服务广播、连接成功及成功返回数据会分别说明。")
                 }
             }
             .disabled(model.busy)

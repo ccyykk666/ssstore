@@ -84,6 +84,8 @@ struct ContentView: View {
                         Button { model.checkUpdates() } label: { Label("检查更新", systemImage: "arrow.clockwise") }
                         Button { model.checkUpdates(force: true) } label: { Label("强制刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
                         Button { importing = true } label: { Label("导入应用清单", systemImage: "square.and.arrow.down") }
+                        NavigationLink { InspectionView() } label: { Label("设备数据与接口", systemImage: "server.rack") }
+                        NavigationLink { InventoryHistoryView() } label: { Label("清单变更记录", systemImage: "clock.arrow.circlepath") }
                         if FileManager.default.fileExists(atPath: model.rawInventoryURL.path) {
                             ShareLink(item: model.rawInventoryURL) { Label("导出本机原始字段", systemImage: "square.and.arrow.up") }
                         }

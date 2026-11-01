@@ -31,6 +31,7 @@ struct AppDetailView: View {
                         if let date = model.scannedAt { field("清单记录时间", date.formatted()) }
                     }
                     Section("本机数据核对") {
+                        NavigationLink { InspectionView(bundleID: record.id) } label: { Label("读取此应用的详细数据", systemImage: "doc.text.magnifyingglass") }
                         Text(record.installed.versionReadNote ?? "此记录尚未补充本机数据。请重新点击“读取本机”。")
                             .font(.footnote).foregroundStyle(.secondary)
                         if let version = record.installed.coreDeviceVersion { field("CoreDevice · version", version) }

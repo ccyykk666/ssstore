@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     @Published var iconRevision = 0
     @Published var iconReadSummary = ""
     @Published var checkSummary = ""
+    @Published var inspectionReceipts: [String: InspectionReceipt] = [:]
+    @Published var history: [InventoryEvent] = []
     @Published var country: String { didSet { UserDefaults.standard.set(country, forKey: "country") } }
     @Published var host: String { didSet { UserDefaults.standard.set(host, forKey: "host") } }
     @Published var port: String { didSet { UserDefaults.standard.set(port, forKey: "port") } }
@@ -37,6 +39,8 @@ final class AppModel: ObservableObject {
     let iconsDirectory: URL
     let pairingURL: URL
     let rawInventoryURL: URL
+    private let historyURL: URL
+    private let inspectionReceiptsURL: URL
     let pairingController = OnDevicePairingController()
 
     init() {
@@ -56,6 +60,8 @@ final class AppModel: ObservableObject {
             .appendingPathComponent("ssstore-icons", isDirectory: true)
         pairingURL = folder.appendingPathComponent("device-pairing.plist")
         rawInventoryURL = folder.appendingPathComponent("device-inventory.json")
+        historyURL = folder.appendingPathComponent("inventory-history.json")
+        inspectionReceiptsURL = folder.appendingPathComponent("inspection-receipts.json")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: storage.path) {
@@ -65,6 +71,8 @@ final class AppModel: ObservableObject {
                 inventoryOrigin = saved.origin
             }
             hasPairing = FileManager.default.fileExists(atPath: pairingURL.path)
+            if let data = try? Data(contentsOf: historyURL) { history = (try? JSONDecoder().decode([InventoryEvent].self, from: data)) ?? [] }
+            if let data = try? Data(contentsOf: inspectionReceiptsURL) { inspectionReceipts = (try? JSONDecoder().decode([String: InspectionReceipt].self, from: data)) ?? [:] }
         } catch { message = "读取本地记录失败：\(error.localizedDescription)" }
     }
 
@@ -79,8 +87,9 @@ final class AppModel: ObservableObject {
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let remote = mode == .remote
         let iconsPath = iconsDirectory.path
+        let before = records.map(\.installed)
         do {
-            let _: Data = try await withCheckedThrowingContinuation { continuation in
+            let finalData: Data = try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
                         let data = try DeviceScanner.scan(pairingPath: path, host: address, port: number, remotePairing: remote,
@@ -105,7 +114,58 @@ final class AppModel: ObservableObject {
                     catch { continuation.resume(throwing: error) }
                 }
             }
+            let events = InventoryHistory.changes(previous: before, current: try InventoryParser.parse(finalData))
+            if !events.isEmpty {
+                history = Array((events + history).prefix(1000))
+                try JSONEncoder().encode(history).write(to: historyURL, options: [.atomic, .completeFileProtection])
+            }
         } catch { message = error.localizedDescription }
+    }
+
+    func inspect(_ operation: InspectionOperation, bundleID: String = "", path: String = "/",
+                 source: String? = nil, domain: Int = 1, groupID: String = "") async throws -> (InspectionResult, URL) {
+        func failure(_ text: String) -> NSError { NSError(domain: "ssstore.Inspection", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
+        guard !busy else { throw failure("另一项操作正在进行，请等待完成。") }
+        guard hasPairing else { throw failure("请先在连接设置中创建或导入配对文件。") }
+        guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
+        guard !operation.requiresApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
+        busy = true; activity = "正在读取：\(operation.title)…"
+        defer { busy = false; activity = "" }
+        let pairingPath = pairingURL.path
+        let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let remote = mode == .remote
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ssstore-inspection", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let key = operation.rawValue + "|" + bundleID
+        do {
+            let data: Data = try await withCheckedThrowingContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue,
+                                                      "domain": domain, "groupID": groupID]
+                        continuation.resume(returning: try DeviceInspector.run(pairingPath: pairingPath, host: address, port: number,
+                            remotePairing: remote, operation: operation.rawValue, options: options, outputDirectory: folder.path))
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+            let result = try JSONDecoder().decode(InspectionResult.self, from: data)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let reportURL = folder.appendingPathComponent("\(operation.rawValue)-report.json")
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(result).write(to: reportURL, options: [.atomic, .completeFileProtection])
+            inspectionReceipts[key] = InspectionReceipt(success: true, message: "调用成功", reportPath: reportURL.path)
+            saveInspectionReceipts()
+            return (result, reportURL)
+        } catch {
+            inspectionReceipts[key] = InspectionReceipt(success: false, message: error.localizedDescription)
+            saveInspectionReceipts()
+            throw error
+        }
+    }
+
+    private func saveInspectionReceipts() {
+        do { try JSONEncoder().encode(inspectionReceipts).write(to: inspectionReceiptsURL, options: [.atomic, .completeFileProtection]) }
+        catch { message = "保存接口调用记录失败：\(error.localizedDescription)" }
     }
 
     func localIconURL(for app: InstalledApp) -> URL? {
