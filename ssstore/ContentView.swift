@@ -95,7 +95,9 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
+                        Button { Task { await model.scan() } } label: { Label("读取应用", systemImage: "iphone") }
                         Button { model.checkUpdates(force: true) } label: { Label("刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
+                            .disabled(model.records.isEmpty)
                         NavigationLink { DownloadView(embedded: true) } label: { Label("下载", systemImage: "arrow.down.circle") }
                         Button { onlyDifferent.toggle() } label: {
                             Label("显示差异项", systemImage: onlyDifferent ? "checkmark.circle.fill" : "circle")
@@ -109,15 +111,6 @@ struct ContentView: View {
                         .accessibilityAddTraits(includeSystem ? [.isSelected] : [])
                     } label: { Image(systemName: "ellipsis.circle") }
                     .disabled(model.busy)
-                }
-                ToolbarItem(placement: .bottomBar) {
-                    Button { Task { await model.scan() } } label: { Label("读取应用", systemImage: "iphone") }
-                        .disabled(model.busy)
-                }
-                ToolbarItem(placement: .bottomBar) { Spacer() }
-                ToolbarItem(placement: .bottomBar) {
-                    Button { model.checkUpdates() } label: { Label("查询版本", systemImage: "arrow.clockwise") }
-                        .disabled(model.busy || model.records.isEmpty)
                 }
             }
             .onChange(of: failureCount) { _, count in if count == 0 { onlyFailed = false } }
