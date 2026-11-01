@@ -30,7 +30,7 @@ struct ProductHistoryView: View {
                     } label: {
                         HStack {
                             Text(pkg.software.version)
-                                .foregroundStyle(.accent)
+                                .foregroundStyle(Color.accentColor)
                             Spacer()
                         }
                         .contentShape(Rectangle())
