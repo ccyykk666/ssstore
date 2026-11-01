@@ -37,6 +37,12 @@ struct AppDetailView: View {
                         if let version = record.installed.metadataVersion { field("安装元数据 · bundleShortVersionString", version) }
                         if let build = record.installed.metadataBuild { field("安装元数据 · bundleVersion", build) }
                     }
+                    Section {
+                        NavigationLink("商店详情与下载") {
+                            StoreProductView(bundleID: record.effectiveBundleID,
+                                             region: record.release?.country ?? (model.country == StoreQueryPolicy.chinaThenUS ? "cn" : model.country))
+                        }
+                    }
                     if let release = record.release {
                         Section("商店版本 · \(release.country.uppercased())") {
                             field("最新版本", release.version)

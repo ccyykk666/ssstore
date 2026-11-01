@@ -13,3 +13,10 @@ SHA-256: `c9eccdd1942de756d746a2569d93302774ab0eff1cff314ec8118f768b3d8dc7`.
 The user's [Loon loopback plugin](https://github.com/ios151/Rewrite/blob/main/dev-loopback/modules/dev-loopback.lpx) is referenced for use in Loon, not downloaded or enabled automatically. Loon is a separate application.
 
 The optional export script invokes an existing [ideviceinstaller](https://github.com/libimobiledevice/ideviceinstaller) installation. Its executable and source are not bundled.
+
+
+## Asspp
+
+The App Store account, search, historical version, download, IPA management and local installation features integrate Asspp 4.2.2, upstream commit `6682eb8f831a7b5c62dc14ea97088769c6adba48`, from <https://github.com/Lakr233/Asspp>. The user's fork `ccyykk666/Asspp` was fast-forwarded to that upstream commit on 2026-11-01. Asspp is MIT licensed; its full notice is preserved in `Vendor/Asspp/LICENSE` and bundled as `AssppLicense.txt`. Dependencies are pinned to the versions in the upstream resolved package file, including ApplePackage 2.0.3.
+
+Local adaptations: shared ssstore launch and storage bootstrap, integration tabs and links from installed-app details, embedded store settings, a download navigation callback, and dismissible preview/share sheets. Upstream standalone launch, welcome UI, branding assets and macOS-only device management are excluded from the iOS target.

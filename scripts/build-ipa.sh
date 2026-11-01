@@ -8,8 +8,12 @@ if ! command -v xcodegen >/dev/null; then
 fi
 
 swift test --package-path Packages/UpdateCore
+bash Vendor/Asspp/Resources/Scripts/check.downloads.sh
 bash scripts/prepare-devicekit.sh
 xcodegen generate
+mkdir -p ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+cp Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved \
+  ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 xcodebuild -project ssstore.xcodeproj -scheme ssstore \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build
@@ -28,3 +32,4 @@ output="$stage/ssstore.ipa"
 (cd "$stage" && /usr/bin/zip -qry "$output" Payload)
 cp "$output" "$PWD/dist/ssstore.ipa"
 echo "已生成待自签 IPA：$PWD/dist/ssstore.ipa"
+

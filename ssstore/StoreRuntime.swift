@@ -1,0 +1,39 @@
+import ApplePackage
+import Digger
+import Foundation
+import Logging
+
+let logger = Logger(label: "dev.personal.ssstore.store")
+let documentsDirectory: URL = {
+    let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("Asspp", isDirectory: true)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}()
+let temporaryDirectory: URL = {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("ssstore-store", isDirectory: true)
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}()
+
+@MainActor
+enum StoreRuntime {
+    private static var prepared = false
+
+    static func prepare() {
+        guard !prepared else { return }
+        prepared = true
+        LoggingSystem.bootstrap { LogManagerHandler(label: $0) }
+        APLogger.verbose = false
+        APLogger.logger = Logger(label: "dev.personal.ssstore.applepackage")
+        DiggerManager.shared.maxConcurrentTasksCount = 3
+        DiggerManager.shared.startDownloadImmediately = true
+        _ = documentsDirectory
+        _ = temporaryDirectory
+        _ = AppStore.this
+        Task {
+            do { _ = try await Installer(certificateAtPath: Installer.ca.path) }
+            catch { logger.error("Unable to start local installation service: \(error.localizedDescription)") }
+        }
+    }
+}

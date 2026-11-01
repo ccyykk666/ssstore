@@ -65,6 +65,7 @@ struct InspectionDetailView: View {
     @State private var loading = false
     @State private var initialized = false
     @State private var preview: InspectionFile?
+    @State private var choosingApp = false
     private var needsApp: Bool { operation.requiresApp && !(operation == .coreFiles && domain != 1) }
 
     init(operation: InspectionOperation, initialBundleID: String = "", initialPath: String = "/", autoRead: Bool = false,
@@ -82,9 +83,14 @@ struct InspectionDetailView: View {
                     Text(operation.note).font(.footnote).foregroundStyle(.secondary)
                 }
                 if needsApp {
-                    Picker("应用", selection: $bundleID) {
-                        Text("请选择").tag("")
-                        ForEach(model.records) { Text($0.installed.name).tag($0.id) }
+                    Button { choosingApp = true } label: {
+                        HStack {
+                            Text("应用").foregroundStyle(.primary)
+                            Spacer()
+                            Text(model.records.first { $0.id == bundleID }?.installed.name ?? "请选择")
+                                .foregroundStyle(.secondary).lineLimit(1)
+                            if initialBundleID.isEmpty { Image(systemName: "chevron.up.chevron.down").font(.caption) }
+                        }
                     }.disabled(!initialBundleID.isEmpty)
                 }
                 if operation.isBrowser {
@@ -132,20 +138,21 @@ struct InspectionDetailView: View {
                         ForEach(result.files) { file in
                             VStack(alignment: .leading, spacing: 8) {
                                 Button(file.name) { preview = file }
-                                ShareLink(item: URL(fileURLWithPath: file.path)) { Label("导出文件", systemImage: "square.and.arrow.up") }
+                                ShareFileButton(title: "导出文件", url: URL(fileURLWithPath: file.path))
                             }
                         }
                     }
                 }
                 Section("返回数据") { InspectionRows(value: result.value) }
-                if let reportURL { Section { ShareLink(item: reportURL) { Label("导出 JSON 报告", systemImage: "square.and.arrow.up") } } }
+                if let reportURL { Section { ShareFileButton(title: "导出 JSON 报告", url: reportURL) } }
             }
             Section("服务") {
                 Text(operation.service).font(.caption.monospaced()).textSelection(.enabled)
             }
         }
         .navigationTitle(operation.title).navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $preview) { file in QuickLookFile(url: URL(fileURLWithPath: file.path)) }
+        .sheet(item: $preview) { file in FilePreviewSheet(url: URL(fileURLWithPath: file.path)) }
+        .sheet(isPresented: $choosingApp) { ApplicationPickerView(selection: $bundleID) }
         .onChange(of: bundleID) { _, _ in clearResult() }
         .onChange(of: path) { _, _ in clearResult() }
         .onChange(of: domain) { _, _ in clearResult() }
@@ -189,13 +196,13 @@ private struct InspectionFileEntryView: View {
                 }
                 ForEach(result.files) { file in
                     Button("预览 \(file.name)") { preview = file }
-                    ShareLink(item: URL(fileURLWithPath: file.path)) { Label("导出文件", systemImage: "square.and.arrow.up") }
+                    ShareFileButton(title: "导出文件", url: URL(fileURLWithPath: file.path))
                 }
             }
         }
         .navigationTitle(entry.name).navigationBarTitleDisplayMode(.inline)
         .task { if result == nil && !loading { await perform(.fileInfo) } }
-        .sheet(item: $preview) { file in QuickLookFile(url: URL(fileURLWithPath: file.path)) }
+        .sheet(item: $preview) { file in FilePreviewSheet(url: URL(fileURLWithPath: file.path)) }
     }
     private func perform(_ operation: InspectionOperation) async {
         loading = true; failure = nil; defer { loading = false }
@@ -258,7 +265,7 @@ private struct InspectionRows: View {
     }
 }
 
-private struct QuickLookFile: UIViewControllerRepresentable {
+struct QuickLookFile: UIViewControllerRepresentable {
     let url: URL
     func makeCoordinator() -> Coordinator { Coordinator(url: url) }
     func makeUIViewController(context: Context) -> QLPreviewController {

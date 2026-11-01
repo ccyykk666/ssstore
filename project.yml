@@ -8,13 +8,49 @@ packages:
     path: Packages/UpdateCore
   DeviceKit:
     path: Packages/DeviceKit
+  ApplePackage:
+    url: https://github.com/Lakr233/ApplePackage
+    exactVersion: "2.0.3"
+  Digger:
+    url: https://github.com/Lakr233/Digger
+    exactVersion: "0.0.5"
+  Vapor:
+    url: https://github.com/vapor/vapor
+    exactVersion: "4.121.2"
+  SwiftNIO:
+    url: https://github.com/apple/swift-nio.git
+    exactVersion: "2.95.0"
+  SwiftNIOSSL:
+    url: https://github.com/apple/swift-nio-ssl.git
+    exactVersion: "2.36.0"
+  Kingfisher:
+    url: https://github.com/onevcat/Kingfisher
+    exactVersion: "7.12.0"
+  AnyCodable:
+    url: https://github.com/Flight-School/AnyCodable
+    exactVersion: "0.6.7"
+  ButtonKit:
+    url: https://github.com/Dean151/ButtonKit
+    exactVersion: "0.7.1"
+  KeychainAccess:
+    url: https://github.com/kishikawakatsumi/KeychainAccess.git
+    exactVersion: "4.2.2"
+  SwiftLog:
+    url: https://github.com/apple/swift-log
+    exactVersion: "1.10.1"
+  SwiftCollections:
+    url: https://github.com/apple/swift-collections.git
+    exactVersion: "1.3.0"
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation.git
+    exactVersion: "0.9.20"
 settings:
   base:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "0.4.2"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "0.5.0"
+    CURRENT_PROJECT_VERSION: "10"
 targets:
   ssstore:
     type: application
@@ -22,6 +58,16 @@ targets:
     sources:
       - path: ssstore
         excludes: [Info.plist]
+      - path: Vendor/Asspp/Asspp
+        excludes:
+          - App/main.swift
+          - Interface/Welcome
+          - Interface/Installed
+          - Backend/DeviceCTL
+          - Interface/Download/DeviceCTLInstallSection.swift
+      - path: Vendor/Asspp/Certificates
+        type: folder
+        buildPhase: resources
     info:
       path: ssstore/Info.plist
       properties:
@@ -29,10 +75,14 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
-        NSLocalNetworkUsageDescription: 用于发现配对主机，并读取本机应用和设备信息。
+        NSLocalNetworkUsageDescription: 用于发现配对主机、读取设备信息及在本机安装应用。
         NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing._tcp]
-        UIBackgroundModes: [processing]
+        UIBackgroundModes: [processing, audio]
         BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).pairing.*]
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
@@ -45,6 +95,34 @@ targets:
       - package: UpdateCore
       - package: DeviceKit
         product: IDevice
+      - package: ApplePackage
+        product: ApplePackage
+      - package: Digger
+        product: Digger
+      - package: Vapor
+        product: Vapor
+      - package: SwiftNIO
+        product: NIO
+      - package: SwiftNIO
+        product: NIOHTTP1
+      - package: SwiftNIO
+        product: NIOTLS
+      - package: SwiftNIOSSL
+        product: NIOSSL
+      - package: Kingfisher
+        product: Kingfisher
+      - package: AnyCodable
+        product: AnyCodable
+      - package: ButtonKit
+        product: ButtonKit
+      - package: KeychainAccess
+        product: KeychainAccess
+      - package: SwiftLog
+        product: Logging
+      - package: SwiftCollections
+        product: OrderedCollections
+      - package: ZIPFoundation
+        product: ZIPFoundation
 schemes:
   ssstore:
     build:

@@ -4,14 +4,20 @@ import UpdateCore
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @State private var search = ""
+    @State private var onlyFailed = false
     @State private var onlyDifferent = false
     @State private var includeSystem = false
     @State private var settings = false
 
+    private var listedRecords: [AppRecord] {
+        model.records.filter { includeSystem || !$0.installed.isSystem }
+    }
+    private var failureCount: Int { listedRecords.filter { $0.error != nil }.count }
+
     private var visible: [AppRecord] {
-        model.records.filter { record in
-            (includeSystem || !record.installed.isSystem) &&
-            (!onlyDifferent || record.status(country: model.country) == .different) &&
+        listedRecords.filter { record in
+            (!onlyFailed || record.error != nil) &&
+            (!onlyDifferent || record.status(country: model.country) != .current) &&
             (search.isEmpty || record.installed.name.localizedCaseInsensitiveContains(search) ||
              record.id.localizedCaseInsensitiveContains(search))
         }
@@ -22,10 +28,17 @@ struct ContentView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 28) {
-                            metric("应用", value: model.records.filter { !$0.installed.isSystem }.count)
-                            metric("标识不同", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .different }.count)
-                            metric("待核对", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .unknown }.count)
+                        HStack(alignment: .top, spacing: 12) {
+                            metric("应用", value: listedRecords.count)
+                            metric("标识不同", value: listedRecords.filter { $0.status(country: model.country) == .different }.count)
+                            metric("待核对", value: listedRecords.filter { $0.error == nil && $0.status(country: model.country) == .unknown }.count)
+                            if failureCount > 0 {
+                                Button { onlyFailed.toggle() } label: { metric("失败", value: failureCount) }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(onlyFailed ? Color.orange : Color.primary)
+                                    .accessibilityLabel("\(failureCount) 个失败项，点按筛选")
+                                    .accessibilityAddTraits(onlyFailed ? [.isSelected] : [])
+                            }
                         }
                     }
                     .padding(.vertical, 8)
@@ -42,7 +55,7 @@ struct ContentView: View {
                     Toggle("显示差异项", isOn: $onlyDifferent)
                     Toggle("显示系统应用", isOn: $includeSystem)
                 }
-                Section("应用 · \(visible.count)") {
+                Section("共\(visible.count)个应用") {
                     if visible.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Label(model.records.isEmpty ? "暂无应用" : "无匹配应用", systemImage: "tray")
@@ -84,6 +97,7 @@ struct ContentView: View {
                         .disabled(model.busy || model.records.isEmpty)
                 }
             }
+            .onChange(of: failureCount) { _, count in if count == 0 { onlyFailed = false } }
             .sheet(isPresented: $settings) { SettingsView() }
             .alert("提示", isPresented: Binding(get: { model.message != nil && !settings }, set: { if !$0 { model.message = nil } })) {
                 Button("好") { model.message = nil }
@@ -95,7 +109,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(value.formatted()).font(.title.bold().monospacedDigit())
             Text(title).font(.caption).foregroundStyle(.secondary)
-        }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -48,7 +48,14 @@ struct SettingsView: View {
                     }
                 }
                 Section("关于") {
-                    Text("ssstore · 0.4.2")
+                    NavigationLink("商店设置") { SettingView(embedded: true) }
+                    NavigationLink("开源许可") {
+                        ScrollView {
+                            Text((try? String(contentsOf: Bundle.main.url(forResource: "AssppLicense", withExtension: "txt")!, encoding: .utf8)) ?? "Asspp · MIT License")
+                                .font(.footnote).textSelection(.enabled).padding()
+                        }.navigationTitle("Asspp · MIT")
+                    }
+                    Text("ssstore · 0.5.0")
                 }
             }
             .disabled(model.busy)

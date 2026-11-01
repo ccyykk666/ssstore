@@ -2,11 +2,14 @@ import SwiftUI
 
 @main
 struct SSStoreApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
+
+    init() { StoreRuntime.prepare() }
 
     var body: some Scene {
         WindowGroup {
-            ContentView().environmentObject(model)
+            RootView().environmentObject(model)
                 .modifier(SoftTopScrollEdge())
         }
     }
