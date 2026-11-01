@@ -26,8 +26,11 @@ final class PairingRecordTests: XCTestCase {
         XCTAssertThrowsError(try PairingRecord.kind(of: Data("not a plist".utf8)))
     }
 
-    func testExistingLockdownImportRemainsSupported() throws {
-        XCTAssertEqual(try PairingRecord.kind(of: encode(["HostID": "host", "HostPrivateKey": Data([1])])), .lockdown)
+    func testRejectsLockdownWithoutTreatingItAsRemote() throws {
+        XCTAssertThrowsError(try PairingRecord.kind(of: encode(["HostID": "host", "HostPrivateKey": Data([1])]))) { error in
+            XCTAssertEqual(error as? PairingRecordError, .unsupported)
+        }
         XCTAssertThrowsError(try PairingRecord.kind(of: encode(["HostID": "host", "HostPrivateKey": Data()])))
     }
 }
+

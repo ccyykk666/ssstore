@@ -13,8 +13,8 @@ settings:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "0.4.1"
-    CURRENT_PROJECT_VERSION: "8"
+    MARKETING_VERSION: "0.4.2"
+    CURRENT_PROJECT_VERSION: "9"
 targets:
   ssstore:
     type: application
@@ -50,3 +50,4 @@ schemes:
     build:
       targets:
         ssstore: all
+

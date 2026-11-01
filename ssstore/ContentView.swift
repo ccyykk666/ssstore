@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 import UpdateCore
 
 struct ContentView: View {
@@ -8,7 +7,6 @@ struct ContentView: View {
     @State private var onlyDifferent = false
     @State private var includeSystem = false
     @State private var settings = false
-    @State private var importing = false
 
     private var visible: [AppRecord] {
         model.records.filter { record in
@@ -29,14 +27,10 @@ struct ContentView: View {
                             metric("标识不同", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .different }.count)
                             metric("待核对", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .unknown }.count)
                         }
-                        if let date = model.scannedAt {
-                            Text("\(model.inventoryOrigin) · \(date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
                     .padding(.vertical, 8)
-                    if !model.iconReadSummary.isEmpty { Text(model.iconReadSummary).font(.caption).foregroundStyle(.secondary) }
-                    if !model.checkSummary.isEmpty { Text(model.checkSummary).font(.caption).foregroundStyle(.secondary) }
+                    if !model.scanWarning.isEmpty { Text(model.scanWarning).font(.caption).foregroundStyle(.orange) }
+                    if !model.queryWarning.isEmpty { Text(model.queryWarning).font(.caption).foregroundStyle(.orange) }
                 }
                 if model.busy {
                     Section {
@@ -45,22 +39,24 @@ struct ContentView: View {
                     }
                 }
                 Section {
-                    Toggle("仅显示标识不同", isOn: $onlyDifferent)
+                    Toggle("显示差异项", isOn: $onlyDifferent)
                     Toggle("显示系统应用", isOn: $includeSystem)
-                } footer: {
-                    Text("商店：\(StoreQueryPolicy.label(model.country))")
                 }
                 Section("应用 · \(visible.count)") {
                     if visible.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
                             Label(model.records.isEmpty ? "暂无应用" : "无匹配应用", systemImage: "tray")
                                 .font(.headline)
-                            Text(model.records.isEmpty ? "设置连接后读取，或导入清单。" : "请调整搜索或筛选条件。")
+                            Text(model.records.isEmpty ? "设置连接后读取应用。" : "请调整搜索或筛选条件。")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }.padding(.vertical, 12)
                     }
                     ForEach(visible) { record in
                         NavigationLink { AppDetailView(id: record.id) } label: { AppRow(record: record, country: model.country) }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button { model.ignoreApp(record.id) } label: { Label("忽略", systemImage: "eye.slash") }
+                                    .tint(.orange).disabled(model.busy)
+                            }
                     }
                 }
             }
@@ -73,15 +69,8 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button { Task { await model.scan() } } label: { Label("读取应用", systemImage: "iphone") }
-                        Button { model.checkUpdates() } label: { Label("查询版本", systemImage: "arrow.clockwise") }
                         Button { model.checkUpdates(force: true) } label: { Label("刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
-                        Button { importing = true } label: { Label("导入应用清单", systemImage: "square.and.arrow.down") }
                         NavigationLink { InspectionView() } label: { Label("设备数据", systemImage: "server.rack") }
-                        NavigationLink { InventoryHistoryView() } label: { Label("清单记录", systemImage: "clock.arrow.circlepath") }
-                        if FileManager.default.fileExists(atPath: model.rawInventoryURL.path) {
-                            ShareLink(item: model.rawInventoryURL) { Label("导出原始数据", systemImage: "square.and.arrow.up") }
-                        }
                     } label: { Image(systemName: "ellipsis.circle") }
                     .disabled(model.busy)
                 }
@@ -96,12 +85,6 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $settings) { SettingsView() }
-            .fileImporter(isPresented: $importing, allowedContentTypes: [.item]) { result in
-                switch result {
-                case .success(let url): model.importInventory(from: url)
-                case .failure(let error): model.message = error.localizedDescription
-                }
-            }
             .alert("提示", isPresented: Binding(get: { model.message != nil && !settings }, set: { if !$0 { model.message = nil } })) {
                 Button("好") { model.message = nil }
             } message: { Text(model.message ?? "") }
@@ -131,8 +114,10 @@ private struct AppRow: View {
                 if record.error != nil { Text("查询失败").font(.caption2).foregroundStyle(.orange) }
             }
             Spacer(minLength: 2)
-            Text(status.rawValue).font(.caption2.bold())
-                .foregroundStyle(status == .different ? Color.orange : Color.secondary)
+            if status != .current {
+                Text(status.rawValue).font(.caption2.bold())
+                    .foregroundStyle(status == .different ? Color.orange : Color.secondary)
+            }
         }.padding(.vertical, 4)
     }
 
@@ -141,3 +126,4 @@ private struct AppRow: View {
         return "\(release.version) · \(release.country.uppercased())"
     }
 }
+

@@ -1,8 +1,8 @@
-# ssstore 0.4.0 device data interfaces
+# ssstore 0.4.2 device data interfaces
 
 This reference describes implemented calls, not guaranteed availability on a particular iOS release. The user's iOS 27.2 device has confirmed InstallationProxy metadata and SpringBoard icons. Other services must be tested on that device. The app displays actual errors rather than simulating unavailable data.
 
-Transport is the user's existing Loon loopback and Remote Pairing/RSD connection. Traditional paired TCP connections are supported where the corresponding published FFI offers them. CoreDevice and DVT entries require Remote Pairing in this app.
+Transport is the user's existing Loon loopback and Remote Pairing/RSD connection. Classic paired TCP connections and Lockdown pairing-file imports are no longer supported. Lockdown information services remain available through the authenticated RSD connection.
 
 ## Entry points
 
@@ -48,7 +48,7 @@ Export is limited to 32 MiB per file, read in 64 KiB chunks. The source is not m
 
 ## Interface research and exclusions
 
-The in-app **完整依赖接口索引** contains 661 C declarations parsed from the pinned v0.1.68 distributed `idevice.h`, including supporting resource-management and bundled plist functions. It marks the 125 declarations used by the inspector. An indexed declaration is not an executable button and does not imply device authorization.
+The in-app **完整依赖接口索引** contains 661 C declarations parsed from the pinned v0.1.68 distributed `idevice.h`, including supporting resource-management and bundled plist functions. It marks the 110 declarations used by the inspector. An indexed declaration is not an executable button and does not imply device authorization.
 
 The published Rust SpringBoard client implements `get_icon_state`, but the pinned C interface does not export that method. The icon-metrics entry therefore does not claim to expose the full desktop/folder arrangement.
 
@@ -62,9 +62,11 @@ Reproduce the index after extracting the pinned XCFramework:
 python3 scripts/generate-api-index.py /path/to/IDevice.xcframework/ios-arm64/IDevice.framework/Headers/idevice.h
 ```
 
-## Snapshot history
+## App visibility and main actions
 
-After a successful complete scan, ssstore compares the previous and final app list. It records discovered additions/removals and changed non-missing external version IDs, up to 1000 events. It does not compare the intermediate Lookup and Browse callbacks as independent scans. The first scan establishes a baseline. Event timestamps are observation times, not true installation times, and ID changes do not imply upgrade direction.
+The app list supports a trailing swipe to ignore an app by its exact Bundle ID. The ignored list persists across restarts. Subsequent scans omit these apps before icon caching, saved-list loading and merge also filter them, and version checks only target visible records. Settings provides a restore action; restored apps return on the next scan.
+
+The bottom toolbar provides **读取应用** and **查询版本**. The More menu contains **刷新全部版本** and **设备数据**. Inventory import, history recording/UI and raw-inventory export have been removed. Existing inventory files remain readable. Normal scan/query completion summaries are hidden; progress appears during work and failures retain their actual messages. The app detail query button is beside the app name; the mapping editor, source field and redundant equality explanations have been removed.
 
 ## Upstream sources
 
@@ -74,3 +76,4 @@ After a successful complete scan, ssstore compares the previous and final app li
 - [Provisioning profiles](https://github.com/jkcoxson/idevice/blob/v0.1.68/idevice/src/services/misagent.rs)
 - [AFC FFI and ownership](https://github.com/jkcoxson/idevice/blob/v0.1.68/ffi/src/afc.rs)
 - [CoreDevice file domains](https://github.com/jkcoxson/idevice/blob/v0.1.68/ffi/src/core_device/file_service.rs)
+

@@ -88,8 +88,9 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
 
 @implementation DeviceScanner
 + (NSData *)scanPairingPath:(NSString *)path host:(NSString *)host port:(uint16_t)port
-             remotePairing:(BOOL)remotePairing iconsDirectory:(NSString *)iconsDirectory
-                 inventory:(void (^)(NSData *))inventory progress:(void (^)(NSString *))progress error:(NSError **)error {
+            iconsDirectory:(NSString *)iconsDirectory ignoredBundleIDs:(NSArray<NSString *> *)ignoredBundleIDs
+                 inventory:(void (^)(NSData *))inventory progress:(void (^)(NSString *))progress
+                   warning:(void (^)(NSString *))warning error:(NSError **)error {
     struct sockaddr_in address = {0};
     address.sin_len = sizeof(address);
     address.sin_family = AF_INET;
@@ -99,9 +100,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     }
     if (!Probe(&address, error)) return nil;
 
-    struct IdevicePairingFile *classicPair = NULL;
     struct RpPairingFileHandle *remotePair = NULL;
-    struct IdeviceProviderHandle *provider = NULL;
     struct AdapterHandle *adapter = NULL;
     struct RsdHandshakeHandle *handshake = NULL;
     struct InstallationProxyClientHandle *client = NULL;
@@ -112,19 +111,12 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     void *raw = NULL;
     size_t count = 0;
     @try {
-        if (remotePairing) {
-            if (!Check(rp_pairing_file_read(path.UTF8String, &remotePair), @"读取 Remote Pairing 文件", error)) return nil;
-            if (!Check(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address),
-                                              "ssstore", remotePair, NULL, NULL, &adapter, &handshake),
-                       @"Remote Pairing 通道认证", error)) return nil;
-            if (!Check(installation_proxy_connect_rsd(adapter, handshake, &client), @"连接 RSD 应用服务", error)) return nil;
-        } else {
-            if (!Check(idevice_pairing_file_read(path.UTF8String, &classicPair), @"读取传统配对文件", error)) return nil;
-            if (!Check(idevice_tcp_provider_new((const idevice_sockaddr *)&address, classicPair,
-                                               "ssstore", &provider), @"创建 Lockdown 连接", error)) return nil;
-            classicPair = NULL; // The provider owns the pair record after success.
-            if (!Check(installation_proxy_connect(provider, &client), @"连接传统应用服务（新系统请改用 Remote Pairing）", error)) return nil;
-        }
+        if (!Check(rp_pairing_file_read(path.UTF8String, &remotePair), @"读取 Remote Pairing 文件", error)) return nil;
+        if (!Check(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address),
+                                          "ssstore", remotePair, NULL, NULL, &adapter, &handshake),
+                   @"Remote Pairing 通道认证", error)) return nil;
+        if (!Check(installation_proxy_connect_rsd(adapter, handshake, &client), @"连接 RSD 应用服务", error)) return nil;
+        NSSet<NSString *> *ignored = [NSSet setWithArray:ignoredBundleIDs];
         if (!Check(installation_proxy_get_apps(client, NULL, NULL, 0, &raw, &count), @"查询应用列表", error)) return nil;
         NSMutableArray *apps = [NSMutableArray array];
         plist_t *nodes = raw;
@@ -143,7 +135,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                                     @"CFBundleShortVersionString", @"CFBundleVersion", @"ApplicationType"]) {
                 if ([row[key] isKindOfClass:NSString.class]) item[key] = row[key];
             }
-            if (![item[@"CFBundleIdentifier"] length]) continue;
+            if (![item[@"CFBundleIdentifier"] length] || [ignored containsObject:item[@"CFBundleIdentifier"]]) continue;
             item[@"LocalIconKey"] = IconKey(item);
             MergeStoreMetadata(item, row);
             [apps addObject:item];
@@ -175,7 +167,10 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                 MergeStoreMetadata(item, row);
             }
             [versionNotes addObject:@"已读取 InstallationProxy Lookup / Browse"];
-        } else { [versionNotes addObject:readError.localizedDescription]; }
+        } else {
+            [versionNotes addObject:readError.localizedDescription];
+            warning(readError.localizedDescription);
+        }
         for (NSMutableDictionary *item in apps) {
             NSMutableArray *notes = [versionNotes mutableCopy];
             [notes addObject:item[@"externalVersionID"] ? @"系统提供了安装版本标识" : @"系统未提供安装版本标识"];
@@ -186,7 +181,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         NSFileManager *files = NSFileManager.defaultManager;
         NSError *iconError = nil;
         if (![files createDirectoryAtPath:iconsDirectory withIntermediateDirectories:YES attributes:nil error:&iconError]) {
-            progress([NSString stringWithFormat:@"清单已读取；无法缓存图标：%@", iconError.localizedDescription]);
+            warning([NSString stringWithFormat:@"无法缓存图标：%@", iconError.localizedDescription]);
             return result;
         }
         NSMutableArray *missing = [NSMutableArray array];
@@ -197,20 +192,16 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             else [missing addObject:item];
         }
         if (missing.count == 0) {
-            progress([NSString stringWithFormat:@"清单已读取 · %lu 个本地图标已缓存", (unsigned long)cached]);
             return result;
         }
         progress(@"正在连接图标服务…");
         // Reuse this authenticated tunnel, not one new connection per icon.
-        IdeviceFfiError *failure = remotePairing ? springboard_services_connect_rsd(adapter, handshake, &springboard)
-                                                : springboard_services_connect(provider, &springboard);
+        IdeviceFfiError *failure = springboard_services_connect_rsd(adapter, handshake, &springboard);
         if (!Check(failure, @"本地图标服务", &iconError)) {
-            // The classic FFI connect consumes its provider on failure.
-            if (!remotePairing) provider = NULL;
-            progress([NSString stringWithFormat:@"清单已读取；%@。查询版本后可获取商店图标。", iconError.localizedDescription]);
+            warning([NSString stringWithFormat:@"%@。查询版本后可获取商店图标。", iconError.localizedDescription]);
             return result;
         }
-        NSUInteger fetched = 0, failed = 0, attempted = 0;
+        NSUInteger failed = 0, attempted = 0;
         for (NSDictionary *item in missing) {
             @autoreleasepool {
                 void *png = NULL;
@@ -226,8 +217,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                 } else if (png && length > 0) {
                     NSData *image = [NSData dataWithBytes:png length:length];
                     NSString *file = [[iconsDirectory stringByAppendingPathComponent:item[@"LocalIconKey"]] stringByAppendingPathExtension:@"png"];
-                    if ([image writeToFile:file options:NSDataWritingAtomic error:&iconError]) fetched++;
-                    else failed++;
+                    if (![image writeToFile:file options:NSDataWritingAtomic error:&iconError]) failed++;
                 } else { failed++; }
                 if (png) idevice_data_free(png, length);
                 attempted++;
@@ -237,8 +227,9 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                 if (disconnected) break;
             }
         }
-        progress([NSString stringWithFormat:@"清单已读取 · 本地图标 %lu/%lu%@", (unsigned long)(cached + fetched),
-                  (unsigned long)apps.count, failed ? [NSString stringWithFormat:@"；部分未取得：%@", iconError.localizedDescription ?: @"系统未返回图标"] : @""]);
+        if (failed) {
+            warning([NSString stringWithFormat:@"部分图标未取得：%@", iconError.localizedDescription ?: @"系统未返回图标"]);
+        }
         return result;
     } @finally {
         if (browseRows) {
@@ -256,9 +247,8 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         springboard_services_free(springboard);
         rsd_handshake_free(handshake);
         adapter_free(adapter);
-        idevice_provider_free(provider);
-        idevice_pairing_file_free(classicPair);
         rp_pairing_file_free(remotePair);
     }
 }
 @end
+

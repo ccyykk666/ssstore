@@ -39,7 +39,6 @@ struct InspectionView: View {
             if bundleID == nil {
                 Section("接口资料") {
                     NavigationLink("接口索引") { NativeAPIIndexView() }
-                    NavigationLink("清单记录") { InventoryHistoryView() }
                 }.font(.footnote)
             }
         }
@@ -274,25 +273,6 @@ private struct QuickLookFile: UIViewControllerRepresentable {
     }
 }
 
-struct InventoryHistoryView: View {
-    @EnvironmentObject private var model: AppModel
-    var body: some View {
-        List {
-            Section { Text("最多保留 1000 条。时间为发现时间；标识变化不代表升级或降级。")
-                    .font(.footnote).foregroundStyle(.secondary) }
-            if model.history.isEmpty { Text("暂无记录") }
-            ForEach(model.history) { event in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(event.name).font(.headline)
-                    Text("\(event.kind) · \(event.date.formatted())").font(.caption).foregroundStyle(.secondary)
-                    if event.before != nil || event.after != nil { Text("\(event.before ?? "—") → \(event.after ?? "—")").font(.caption.monospaced()) }
-                    Text(event.bundleID).font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-        }.navigationTitle("清单记录")
-    }
-}
-
 private struct NativeAPIEntry: Decodable, Identifiable {
     let name: String
     let signature: String
@@ -334,3 +314,4 @@ private struct NativeAPIIndexView: View {
         }
     }
 }
+

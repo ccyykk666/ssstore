@@ -13,7 +13,7 @@ header = Path(sys.argv[1]).read_text(encoding="utf-8")
 source = (root / "ssstore/Bridge/DeviceInspector.m").read_text(encoding="utf-8")
 used = set(re.findall(r"\b([a-z][a-z0-9_]+)\s*\(", source))
 for base in re.findall(r"CONNECT\(\s*([a-z][a-z_]+)\s*,", source):
-    used.update([base + "_connect", base + "_connect_rsd"])
+    used.add(base + "_connect_rsd")
 for base in re.findall(r"PROBE_SERVICE\(\s*([a-z][a-z_]+)\s*,", source):
     used.add(base + "_connect_rsd")
 entries = []
@@ -42,3 +42,4 @@ unknown = sorted(name for name in used if name.startswith(prefixes) and name not
 if unknown:
     raise SystemExit(f"Unknown pinned device symbols: {unknown}")
 print(f"Indexed {len(entries)} C declarations; inspector uses {sum(entry['used'] for entry in entries)}.")
+

@@ -15,9 +15,6 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("协议", selection: $model.mode) {
-                        ForEach(PairingMode.allCases) { Text($0.rawValue).tag($0) }
-                    }
                     TextField("IPv4 地址", text: $model.host)
                         .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("端口", text: $model.port).keyboardType(.numberPad)
@@ -35,14 +32,6 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("本机连接")
-                } footer: {
-                    Text("默认端口：Remote Pairing 49152，Lockdown 62078。")
-                }
-                Section {
-                    Text("Loon 3.5.3（1007）及以上：启用回环插件和 VPN，保持设备解锁并连接 Wi-Fi。")
-                    Link("Loon 回环插件", destination: URL(string: "https://github.com/ios151/Rewrite/blob/main/dev-loopback/modules/dev-loopback.lpx")!)
-                } header: {
-                    Text("连接要求")
                 }
                 Section {
                     Picker("商店地区", selection: $model.country) {
@@ -52,12 +41,14 @@ struct SettingsView: View {
                         Text("香港 HK").tag("hk")
                         Text("日本 JP").tag("jp")
                     }
-                    Text("中国大陆优先：未找到时查询美国。更改后需重新查询。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                if !model.ignoredApps.names.isEmpty {
+                    Section {
+                        NavigationLink("已忽略应用（\(model.ignoredApps.names.count)）") { IgnoredAppsView() }
+                    }
                 }
                 Section("关于") {
-                    Text("ssstore · 0.4.1")
-                    Text("查询仅向 Apple 发送应用标识和地区。配对文件保存在本机。")
+                    Text("ssstore · 0.4.2")
                 }
             }
             .disabled(model.busy)
@@ -84,5 +75,31 @@ struct SettingsView: View {
                 Button("删除", role: .destructive) { model.removePairing() }
             } message: { Text("仅删除本 App 内的文件，设备信任不受影响。再次使用需重新配对或导入。") }
         }
+    }
+}
+
+
+private struct IgnoredAppsView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(model.ignoredApps.names.keys.sorted(), id: \.self) { id in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(model.ignoredApps.names[id] ?? id)
+                            Text(id).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("恢复") { model.restoreApp(id) }
+                            .buttonStyle(.bordered).disabled(model.busy)
+                    }
+                }
+            } footer: {
+                Text("恢复后重新读取应用。")
+            }
+        }
+        .navigationTitle("已忽略应用")
     }
 }

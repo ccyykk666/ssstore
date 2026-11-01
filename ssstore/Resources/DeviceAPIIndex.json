@@ -117,7 +117,7 @@
     "name": "afc_client_connect",
     "signature": "struct IdeviceFfiError *afc_client_connect(struct IdeviceProviderHandle *provider, struct AfcClientHandle **client);",
     "summary": "Connects to the AFC service using a TCP provider",
-    "used": true
+    "used": false
   },
   {
     "name": "afc_client_connect_rsd",
@@ -333,7 +333,7 @@
     "name": "companion_proxy_connect",
     "signature": "struct IdeviceFfiError *companion_proxy_connect(struct IdeviceProviderHandle *provider, struct CompanionProxyClientHandle **client);",
     "summary": "Automatically creates and connects to Companion Proxy, returning a client handle",
-    "used": true
+    "used": false
   },
   {
     "name": "companion_proxy_connect_rsd",
@@ -741,7 +741,7 @@
     "name": "crash_report_client_connect",
     "signature": "struct IdeviceFfiError *crash_report_client_connect(struct IdeviceProviderHandle *provider, struct CrashReportCopyMobileHandle **client);",
     "summary": "Automatically creates and connects to the crash report copy mobile service, returning a client handle",
-    "used": true
+    "used": false
   },
   {
     "name": "crash_report_client_connect_rsd",
@@ -987,7 +987,7 @@
     "name": "diagnostics_relay_client_connect",
     "signature": "struct IdeviceFfiError *diagnostics_relay_client_connect(struct IdeviceProviderHandle *provider, struct DiagnosticsRelayClientHandle **client);",
     "summary": "Automatically creates and connects to Diagnostics Relay, returning a client handle",
-    "used": true
+    "used": false
   },
   {
     "name": "diagnostics_relay_client_connect_rsd",
@@ -1527,7 +1527,7 @@
     "name": "house_arrest_client_connect",
     "signature": "struct IdeviceFfiError *house_arrest_client_connect(struct IdeviceProviderHandle *provider, struct HouseArrestClientHandle **client);",
     "summary": "Connects to the House Arrest service using a TCP provider",
-    "used": true
+    "used": false
   },
   {
     "name": "house_arrest_client_connect_rsd",
@@ -1563,7 +1563,7 @@
     "name": "installation_proxy_connect",
     "signature": "struct IdeviceFfiError *installation_proxy_connect(struct IdeviceProviderHandle *provider, struct InstallationProxyClientHandle **client);",
     "summary": "Automatically creates and connects to Installation Proxy, returning a client handle",
-    "used": true
+    "used": false
   },
   {
     "name": "installation_proxy_connect_rsd",
@@ -1701,7 +1701,7 @@
     "name": "lockdownd_connect",
     "signature": "struct IdeviceFfiError *lockdownd_connect(struct IdeviceProviderHandle *provider, struct LockdowndClientHandle **client);",
     "summary": "Connects to lockdownd service using provider",
-    "used": true
+    "used": false
   },
   {
     "name": "lockdownd_connect_rsd",
@@ -1767,7 +1767,7 @@
     "name": "misagent_connect",
     "signature": "struct IdeviceFfiError *misagent_connect(struct IdeviceProviderHandle *provider, struct MisagentClientHandle **client);",
     "summary": "Automatically creates and connects to Misagent, returning a client handle",
-    "used": true
+    "used": false
   },
   {
     "name": "misagent_connect_rsd",
@@ -1809,7 +1809,7 @@
     "name": "image_mounter_connect",
     "signature": "struct IdeviceFfiError *image_mounter_connect(struct IdeviceProviderHandle *provider, struct ImageMounterHandle **client);",
     "summary": "Connects to the Image Mounter service using a provider",
-    "used": true
+    "used": false
   },
   {
     "name": "image_mounter_connect_rsd",
@@ -2187,7 +2187,7 @@
     "name": "idevice_pairing_file_read",
     "signature": "struct IdeviceFfiError *idevice_pairing_file_read(const char *path, struct IdevicePairingFile **pairing_file);",
     "summary": "Reads a pairing file from the specified path",
-    "used": true
+    "used": false
   },
   {
     "name": "idevice_pairing_file_from_bytes",
@@ -2205,7 +2205,7 @@
     "name": "idevice_pairing_file_free",
     "signature": "void idevice_pairing_file_free(struct IdevicePairingFile *pairing_file);",
     "summary": "Frees a pairing file instance",
-    "used": true
+    "used": false
   },
   {
     "name": "pairable_host_prepare",
@@ -2313,13 +2313,13 @@
     "name": "idevice_tcp_provider_new",
     "signature": "struct IdeviceFfiError *idevice_tcp_provider_new(const idevice_sockaddr *ip, struct IdevicePairingFile *pairing_file, const char *label, struct IdeviceProviderHandle **provider);",
     "summary": "Creates a TCP provider for idevice",
-    "used": true
+    "used": false
   },
   {
     "name": "idevice_provider_free",
     "signature": "void idevice_provider_free(struct IdeviceProviderHandle *provider);",
     "summary": "Frees an IdeviceProvider handle",
-    "used": true
+    "used": false
   },
   {
     "name": "usbmuxd_provider_new",
@@ -2769,7 +2769,7 @@
     "name": "screenshotr_connect",
     "signature": "struct IdeviceFfiError *screenshotr_connect(struct IdeviceProviderHandle *provider, struct ScreenshotrClientHandle **client);",
     "summary": "Connects to screenshotr service using provider",
-    "used": true
+    "used": false
   },
   {
     "name": "screenshotr_connect_rsd",
@@ -2799,7 +2799,7 @@
     "name": "springboard_services_connect",
     "signature": "struct IdeviceFfiError *springboard_services_connect(struct IdeviceProviderHandle *provider, struct SpringBoardServicesClientHandle **client);",
     "summary": "Connects to the Springboard service using a provider",
-    "used": true
+    "used": false
   },
   {
     "name": "springboard_services_connect_rsd",

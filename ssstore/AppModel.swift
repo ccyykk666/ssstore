@@ -2,13 +2,6 @@ import Foundation
 import SwiftUI
 import UpdateCore
 
-enum PairingMode: String, CaseIterable, Identifiable {
-    case remote = "Remote Pairing"
-    case classic = "传统 Lockdown"
-    var id: String { rawValue }
-    var defaultPort: String { self == .remote ? "49152" : "62078" }
-}
-
 @MainActor
 final class AppModel: ObservableObject {
     @Published var records: [AppRecord] = []
@@ -20,26 +13,18 @@ final class AppModel: ObservableObject {
     @Published var inventoryOrigin = "尚未读取"
     @Published var hasPairing = false
     @Published var iconRevision = 0
-    @Published var iconReadSummary = ""
-    @Published var checkSummary = ""
+    @Published var scanWarning = ""
+    @Published var queryWarning = ""
+    @Published private(set) var ignoredApps: IgnoredApplications
     @Published var inspectionReceipts: [String: InspectionReceipt] = [:]
-    @Published var history: [InventoryEvent] = []
     @Published var country: String { didSet { UserDefaults.standard.set(country, forKey: "country") } }
     @Published var host: String { didSet { UserDefaults.standard.set(host, forKey: "host") } }
     @Published var port: String { didSet { UserDefaults.standard.set(port, forKey: "port") } }
-    @Published var mode: PairingMode {
-        didSet {
-            UserDefaults.standard.set(mode.rawValue, forKey: "pairingMode")
-            port = mode.defaultPort
-        }
-    }
     private var checkTask: Task<Void, Never>?
     private var nextLookupAt = Date.distantPast
     private let storage: URL
     let iconsDirectory: URL
     let pairingURL: URL
-    let rawInventoryURL: URL
-    private let historyURL: URL
     private let inspectionReceiptsURL: URL
     let pairingController = OnDevicePairingController()
 
@@ -51,27 +36,33 @@ final class AppModel: ObservableObject {
         prefs.set(initialCountry, forKey: "country")
         prefs.set(true, forKey: "chinaUSFallbackMigration")
         host = prefs.string(forKey: "host") ?? "10.7.0.1"
-        mode = PairingMode(rawValue: prefs.string(forKey: "pairingMode") ?? "") ?? .remote
-        port = prefs.string(forKey: "port") ?? "49152"
+        // Migrate the removed classic transport without retaining its default port.
+        let initialPort = prefs.string(forKey: "pairingMode") == "传统 Lockdown" ? "49152" : (prefs.string(forKey: "port") ?? "49152")
+        port = initialPort
+        prefs.set("Remote Pairing", forKey: "pairingMode")
+        prefs.set(initialPort, forKey: "port")
+        ignoredApps = prefs.data(forKey: "ignoredApplications")
+            .flatMap { try? JSONDecoder().decode(IgnoredApplications.self, from: $0) } ?? IgnoredApplications()
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ssstore", isDirectory: true)
         storage = folder.appendingPathComponent("inventory.json")
         iconsDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ssstore-icons", isDirectory: true)
         pairingURL = folder.appendingPathComponent("device-pairing.plist")
-        rawInventoryURL = folder.appendingPathComponent("device-inventory.json")
-        historyURL = folder.appendingPathComponent("inventory-history.json")
         inspectionReceiptsURL = folder.appendingPathComponent("inspection-receipts.json")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: storage.path) {
                 let saved = try JSONDecoder().decode(SavedInventory.self, from: Data(contentsOf: storage))
-                records = saved.records
+                records = ignoredApps.visible(saved.records)
                 scannedAt = saved.scannedAt
                 inventoryOrigin = saved.origin
             }
             hasPairing = FileManager.default.fileExists(atPath: pairingURL.path)
-            if let data = try? Data(contentsOf: historyURL) { history = (try? JSONDecoder().decode([InventoryEvent].self, from: data)) ?? [] }
+            if hasPairing {
+                do { _ = try PairingRecord.kind(of: Data(contentsOf: pairingURL)) }
+                catch { hasPairing = false; message = error.localizedDescription }
+            }
             if let data = try? Data(contentsOf: inspectionReceiptsURL) { inspectionReceipts = (try? JSONDecoder().decode([String: InspectionReceipt].self, from: data)) ?? [:] }
         } catch { message = "读取本地记录失败：\(error.localizedDescription)" }
     }
@@ -85,19 +76,18 @@ final class AppModel: ObservableObject {
         defer { busy = false; activity = "" }
         let path = pairingURL.path
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        let remote = mode == .remote
         let iconsPath = iconsDirectory.path
-        let before = records.map(\.installed)
+        let ignoredBundleIDs = Array(ignoredApps.bundleIDs)
+        scanWarning = ""
         do {
-            let finalData: Data = try await withCheckedThrowingContinuation { continuation in
+            let _: Data = try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
-                        let data = try DeviceScanner.scan(pairingPath: path, host: address, port: number, remotePairing: remote,
-                            iconsDirectory: iconsPath, inventory: { data in
+                        let data = try DeviceScanner.scan(pairingPath: path, host: address, port: number,
+                            iconsDirectory: iconsPath, ignoredBundleIDs: ignoredBundleIDs, inventory: { data in
                                 DispatchQueue.main.async {
                                     do {
                                         let apps = try InventoryParser.parse(data)
-                                        try data.write(to: self.rawInventoryURL, options: [.atomic, .completeFileProtection])
                                         self.merge(apps, origin: "本机读取")
                                     }
                                     catch { self.message = error.localizedDescription }
@@ -105,19 +95,17 @@ final class AppModel: ObservableObject {
                             }, progress: { text in
                                 DispatchQueue.main.async {
                                     self.activity = text
-                                    self.iconReadSummary = text
                                     self.iconRevision += 1
+                                }
+                            }, warning: { text in
+                                DispatchQueue.main.async {
+                                    self.scanWarning += (self.scanWarning.isEmpty ? "" : "\n") + text
                                 }
                             })
                         continuation.resume(returning: data)
                     }
                     catch { continuation.resume(throwing: error) }
                 }
-            }
-            let events = InventoryHistory.changes(previous: before, current: try InventoryParser.parse(finalData))
-            if !events.isEmpty {
-                history = Array((events + history).prefix(1000))
-                try JSONEncoder().encode(history).write(to: historyURL, options: [.atomic, .completeFileProtection])
             }
         } catch { message = error.localizedDescription }
     }
@@ -135,7 +123,6 @@ final class AppModel: ObservableObject {
         defer { busy = false; activity = "" }
         let pairingPath = pairingURL.path
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        let remote = mode == .remote
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ssstore-inspection", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
         let key = operation.rawValue + "|" + bundleID
@@ -146,7 +133,7 @@ final class AppModel: ObservableObject {
                         let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue,
                                                       "domain": domain, "groupID": groupID]
                         continuation.resume(returning: try DeviceInspector.run(pairingPath: pairingPath, host: address, port: number,
-                            remotePairing: remote, operation: operation.rawValue, options: options, outputDirectory: folder.path))
+                            operation: operation.rawValue, options: options, outputDirectory: folder.path))
                     } catch { continuation.resume(throwing: error) }
                 }
             }
@@ -187,10 +174,7 @@ final class AppModel: ObservableObject {
         guard !busy else { return }
         do {
             let data = try readSelectedFile(url)
-            let kind = try savePairing(data)
-            if kind == .lockdown {
-                message = "已导入 Lockdown 配对文件。iOS 26.4 或更高版本建议改用 Remote Pairing。"
-            }
+            _ = try savePairing(data)
         } catch { message = "导入配对失败：\(error.localizedDescription)" }
     }
 
@@ -222,7 +206,6 @@ final class AppModel: ObservableObject {
         values.isExcludedFromBackup = true
         try protectedURL.setResourceValues(values)
         hasPairing = true
-        mode = kind == .remote ? .remote : .classic
         return kind
     }
 
@@ -240,12 +223,6 @@ final class AppModel: ObservableObject {
         } catch { message = error.localizedDescription }
     }
 
-    func importInventory(from url: URL) {
-        guard !busy else { return }
-        do { merge(try InventoryParser.parse(readSelectedFile(url)), origin: "导入清单") }
-        catch { message = "导入清单失败：\(error.localizedDescription)" }
-    }
-
     private func readSelectedFile(_ url: URL) throws -> Data {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -254,24 +231,34 @@ final class AppModel: ObservableObject {
 
     private func merge(_ apps: [InstalledApp], origin: String) {
         let previous = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
-        records = apps.map { app in
+        records = ignoredApps.visible(apps.map { app in
             var record = previous[app.id] ?? AppRecord(installed: app)
             record.installed = app
             return record
-        }
+        })
         scannedAt = Date()
         inventoryOrigin = origin
         persist()
     }
 
-    func setMapping(id: String, bundleID: String) {
-        guard !busy, let index = records.firstIndex(where: { $0.id == id }) else { return }
-        let value = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
-        records[index].lookupBundleID = value.isEmpty ? nil : value
-        records[index].release = nil
-        records[index].checkedAt = nil
-        records[index].error = nil
+    func ignoreApp(_ id: String) {
+        guard !busy, let record = records.first(where: { $0.id == id }) else { return }
+        ignoredApps.ignore(record.installed)
+        saveIgnoredApps()
+        records = ignoredApps.visible(records)
+        queryWarning = ""
         persist()
+    }
+
+    func restoreApp(_ id: String) {
+        guard !busy else { return }
+        ignoredApps.restore(id)
+        saveIgnoredApps()
+    }
+
+    private func saveIgnoredApps() {
+        do { UserDefaults.standard.set(try JSONEncoder().encode(ignoredApps), forKey: "ignoredApplications") }
+        catch { message = "保存忽略名单失败：\(error.localizedDescription)" }
     }
 
     func checkUpdates(only id: String? = nil, force: Bool = false) {
@@ -279,7 +266,7 @@ final class AppModel: ObservableObject {
         let targets = records.filter { !$0.installed.isSystem }
         // Explicit selection includes system apps; default excludes apps updated with iOS.
         let ids = id.map { [$0] } ?? targets.map(\.id)
-        guard !ids.isEmpty else { message = "请先读取或导入应用清单。"; return }
+        guard !ids.isEmpty else { message = "请先读取应用。"; return }
         let region = country
         let refresh = force || id != nil
         let selected = records.filter { ids.contains($0.id) }
@@ -295,15 +282,16 @@ final class AppModel: ObservableObject {
         }
         busy = true
         isChecking = true
-        checkSummary = ""
+        queryWarning = ""
         checkTask = Task {
-            let started = Date()
             var completed = cached.count
             var failures = 0
             var warning: String?
             defer {
-                checkSummary = "\(Task.isCancelled ? "已停止" : "本轮检查")：\(completed)/\(ids.count) · 缓存 \(cached.count) · 未取得 \(failures) · \(String(format: "%.1f", Date().timeIntervalSince(started))) 秒"
-                if let warning { checkSummary += "\n" + warning }
+                var warnings: [String] = []
+                if failures > 0 { warnings.append("有 \(failures) 个应用未取得商店版本。") }
+                if let warning { warnings.append(warning) }
+                queryWarning = warnings.joined(separator: "\n")
                 busy = false; isChecking = false; activity = ""; checkTask = nil; persist()
             }
             for (offset, bundles) in batches.enumerated() {
@@ -365,3 +353,4 @@ private struct SavedInventory: Codable {
     var scannedAt: Date?
     var origin: String
 }
+

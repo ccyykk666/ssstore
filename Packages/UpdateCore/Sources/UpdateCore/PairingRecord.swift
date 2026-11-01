@@ -1,7 +1,7 @@
 import Foundation
 
 public enum PairingRecordKind: Equatable, Sendable {
-    case remote, lockdown
+    case remote
 }
 
 public enum PairingRecord {
@@ -19,15 +19,19 @@ public enum PairingRecord {
         }
         if let hostID = plist["HostID"] as? String, !hostID.isEmpty,
            let key = plist["HostPrivateKey"] as? Data, !key.isEmpty {
-            return .lockdown
+            throw PairingRecordError.unsupported
         }
         throw PairingRecordError.invalid
     }
 }
 
-public enum PairingRecordError: LocalizedError {
-    case invalid
+public enum PairingRecordError: LocalizedError, Equatable {
+    case invalid, unsupported
     public var errorDescription: String? {
-        "配对文件无效，原文件已保留。请重新配对或导入。"
+        switch self {
+        case .invalid: return "配对文件无效，原文件已保留。请重新配对或导入。"
+        case .unsupported: return "仅支持 Remote Pairing，请创建或导入对应的配对文件。"
+        }
     }
 }
+

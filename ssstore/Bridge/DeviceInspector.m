@@ -65,20 +65,18 @@ static void IFreeStrings(char **strings, size_t count) {
 @public
     struct AdapterHandle *adapter;
     struct RsdHandshakeHandle *handshake;
-    struct IdeviceProviderHandle *provider;
     struct RpPairingFileHandle *remotePair;
-    struct IdevicePairingFile *classicPair;
 }
 @end
 @implementation InspectionConnection
 - (void)dealloc {
-    rsd_handshake_free(handshake); adapter_free(adapter); idevice_provider_free(provider);
-    rp_pairing_file_free(remotePair); idevice_pairing_file_free(classicPair);
+    rsd_handshake_free(handshake); adapter_free(adapter);
+    rp_pairing_file_free(remotePair);
 }
 @end
 
 #define REQUIRE(call, stage) if (!ICheck((call), (stage), error)) return nil
-#define CONNECT(base, handle) (remote ? base##_connect_rsd(c->adapter, c->handshake, &(handle)) : base##_connect(c->provider, &(handle)))
+#define CONNECT(base, handle) base##_connect_rsd(c->adapter, c->handshake, &(handle))
 #define PROBE_SERVICE(base, handle, release, label) { \
     NSError *local = nil; \
     BOOL ok = ICheck(base##_connect_rsd(c->adapter, c->handshake, &(handle)), (label), &local); \
@@ -87,21 +85,14 @@ static void IFreeStrings(char **strings, size_t count) {
 }
 
 @implementation DeviceInspector
-+ (NSData *)runPairingPath:(NSString *)path host:(NSString *)host port:(uint16_t)port remotePairing:(BOOL)remote
++ (NSData *)runPairingPath:(NSString *)path host:(NSString *)host port:(uint16_t)port
                 operation:(NSString *)op options:(NSDictionary *)options outputDirectory:(NSString *)folder error:(NSError **)error {
     struct sockaddr_in address = {0}; address.sin_len = sizeof(address); address.sin_family = AF_INET; address.sin_port = htons(port);
     if (inet_pton(AF_INET, host.UTF8String, &address.sin_addr) != 1) { IError(error, @"请输入有效 IPv4 地址。"); return nil; }
     InspectionConnection *c = [InspectionConnection new];
-    if (remote) {
-        REQUIRE(rp_pairing_file_read(path.UTF8String, &c->remotePair), @"读取配对文件");
-        REQUIRE(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address), "ssstore-inspect",
-                                       c->remotePair, NULL, NULL, &c->adapter, &c->handshake), @"认证设备通道");
-    } else {
-        REQUIRE(idevice_pairing_file_read(path.UTF8String, &c->classicPair), @"读取传统配对");
-        struct IdevicePairingFile *record = c->classicPair;
-        c->classicPair = NULL; // The provider constructor consumes the record.
-        REQUIRE(idevice_tcp_provider_new((const idevice_sockaddr *)&address, record, "ssstore-inspect", &c->provider), @"创建传统连接");
-    }
+    REQUIRE(rp_pairing_file_read(path.UTF8String, &c->remotePair), @"读取配对文件");
+    REQUIRE(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address), "ssstore-inspect",
+                                   c->remotePair, NULL, NULL, &c->adapter, &c->handshake), @"认证设备通道");
     struct InstallationProxyClientHandle *installation = NULL;
     struct SpringBoardServicesClientHandle *spring = NULL;
     struct MisagentClientHandle *misagent = NULL;
@@ -136,7 +127,6 @@ static void IFreeStrings(char **strings, size_t count) {
     NSString *message = nil;
     @try {
         if ([op isEqualToString:@"probe"]) {
-            if (!remote) { IError(error, @"连接测试需要 Remote Pairing。Lockdown 请逐项读取。"); return nil; }
             NSMutableArray *rows = [NSMutableArray array];
             PROBE_SERVICE(installation_proxy, installation, installation_proxy_client_free, @"应用资料");
             PROBE_SERVICE(springboard_services, spring, springboard_services_free, @"SpringBoard");
@@ -156,7 +146,6 @@ static void IFreeStrings(char **strings, size_t count) {
             value = rows; message = @"连接结果不代表已获全部读取权限。";
         }
         else if ([op isEqualToString:@"services"]) {
-            if (!remote) { IError(error, @"RSD 服务发现需要 Remote Pairing。"); return nil; }
             REQUIRE(rsd_get_services(c->handshake, &services), @"发现服务");
             NSMutableArray *rows = [NSMutableArray array];
             for (size_t i = 0; i < services->count; i++) {
@@ -247,7 +236,6 @@ static void IFreeStrings(char **strings, size_t count) {
         }
         else if ([@[@"icon", @"homeWallpaper", @"lockWallpaper", @"iconMetrics", @"orientation"] containsObject:op]) {
             IdeviceFfiError *failure = CONNECT(springboard_services, spring);
-            if (failure && !remote) c->provider = NULL; // Classic upstream consumes provider on this failure.
             if (!ICheck(failure, @"连接 SpringBoard 服务", error)) return nil;
             if ([op isEqualToString:@"iconMetrics"]) {
                 REQUIRE(springboard_services_get_homescreen_icon_metrics(spring, &plist), @"读取图标参数"); value = IPlist(plist);
@@ -296,7 +284,6 @@ static void IFreeStrings(char **strings, size_t count) {
             value = IPlist(plist);
         }
         else if ([@[@"coreApps", @"coreProcesses"] containsObject:op]) {
-            if (!remote) { IError(error, @"此入口需要 Remote Pairing。"); return nil; }
             REQUIRE(app_service_connect_rsd(c->adapter, c->handshake, &appService), @"连接 CoreDevice 应用服务");
             NSMutableArray *rows = [NSMutableArray array];
             if ([op isEqualToString:@"coreApps"]) {
@@ -317,7 +304,6 @@ static void IFreeStrings(char **strings, size_t count) {
             value = rows;
         }
         else if ([op hasPrefix:@"dvt"]) {
-            if (!remote) { IError(error, @"此入口需要 Remote Pairing 与开发服务。"); return nil; }
             REQUIRE(remote_server_connect_rsd(c->adapter, c->handshake, &server), @"连接开发服务");
             if ([op isEqualToString:@"dvtApps"]) {
                 REQUIRE(application_listing_new(server, &appListing), @"创建开发应用查询");
@@ -368,7 +354,6 @@ static void IFreeStrings(char **strings, size_t count) {
             }
         }
         else if ([op isEqualToString:@"configuration"]) {
-            if (!remote) { IError(error, @"此入口需要 Remote Pairing。"); return nil; }
             REQUIRE(configuration_service_connect_rsd(c->adapter, c->handshake, &config), @"连接显示配置服务");
             NSMutableDictionary *fields = [NSMutableDictionary dictionary]; NSError *local = nil;
             enum IdeviceUserInterfaceStyle style;
@@ -414,7 +399,6 @@ static void IFreeStrings(char **strings, size_t count) {
         else if ([@[@"documents", @"container", @"media", @"crashes", @"filesystemInfo", @"coreFiles", @"fileInfo", @"fileRead"] containsObject:op]) {
             NSString *source = [options[@"source"] isKindOfClass:NSString.class] ? options[@"source"] : op;
             if ([source isEqualToString:@"coreFiles"]) {
-                if (!remote) { IError(error, @"CoreDevice 文件服务需要 Remote Pairing。"); return nil; }
                 if ([op isEqualToString:@"fileRead"] || [op isEqualToString:@"fileInfo"]) {
                     IError(error, @"此入口仅浏览目录。文件属性和导出请使用共享文档或应用容器。"); return nil;
                 }
@@ -515,3 +499,4 @@ static void IFreeStrings(char **strings, size_t count) {
     }
 }
 @end
+
