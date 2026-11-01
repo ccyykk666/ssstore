@@ -10,7 +10,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("本机连接") {
+                Section {
                     Picker("协议", selection: $model.mode) {
                         ForEach(PairingMode.allCases) { Text($0.rawValue).tag($0) }
                     }
@@ -20,15 +20,19 @@ struct SettingsView: View {
                     Label(model.hasPairing ? "已保存配对文件" : "尚未导入配对文件", systemImage: model.hasPairing ? "checkmark.circle" : "doc.badge.plus")
                     Button("导入配对文件") { importing = true }
                     if model.hasPairing { Button("移除本软件内的配对文件", role: .destructive) { removing = true } }
+                } header: {
+                    Text("本机连接")
                 } footer: {
                     Text("iOS 27.2 优先使用 Remote Pairing（默认 49152）。传统 Lockdown（62078）用于旧系统实验。导入的配对格式会自动选择协议。")
                 }
-                Section("配合 Loon 使用") {
+                Section {
                     Text("1. Loon 更新至 3.5.3（Build 1007）或更高版本。")
                     Text("2. 在 Loon 中启用“本机开发服务回环”插件并启动 VPN。")
                     Text("3. 在电脑上用 idevice_pair 创建 Remote Pairing，导出文件并导入这里。")
                     Text("4. 保持设备解锁，先在 Wi-Fi 环境中点击“读取本机”。")
                     Link("查看你提供的回环插件", destination: URL(string: "https://github.com/ios151/Rewrite/blob/main/dev-loopback/modules/dev-loopback.lpx")!)
+                } header: {
+                    Text("配合 Loon 使用")
                 } footer: {
                     Text("Loon 负责网络通路，配对文件负责设备认证。无需为此功能启用 HTTPS 解密。iOS 27.2 的读取能力尚待真机验证。")
                 }
