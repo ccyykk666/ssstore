@@ -8,6 +8,7 @@ struct AppIconView: View {
     let storeIconURL: URL?
     var size: CGFloat = 46
     @State private var localImage: UIImage?
+    @State private var loadedKey: String?
 
     var body: some View {
         Group {
@@ -24,8 +25,13 @@ struct AppIconView: View {
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22))
         .accessibilityLabel(localImage == nil ? "\(app.name)图标" : "\(app.name)本地图标")
         .task(id: "\(app.localIconKey ?? "")-\(model.iconRevision)") {
+            if loadedKey == app.localIconKey && localImage != nil { return }
+            localImage = nil
             guard let url = model.localIconURL(for: app) else { localImage = nil; return }
-            if let data = await LocalIconData.shared.read(url) { localImage = UIImage(data: data) }
+            if let data = await LocalIconData.shared.read(url) {
+                localImage = UIImage(data: data)
+                loadedKey = app.localIconKey
+            }
             else { localImage = nil }
         }
     }

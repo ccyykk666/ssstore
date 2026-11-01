@@ -34,6 +34,8 @@ final class CatalogTests: XCTestCase {
         var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "应用", version: "11.5.20", storeID: "123", externalVersionID: "456"))
         app.release = StoreRelease(bundleID: "a", name: "应用", version: "11.5.2", country: "cn", storeID: "123", externalVersionID: "456")
         XCTAssertEqual(app.status(country: "cn"), .current)
+        XCTAssertEqual(app.displayedVersion(country: "cn"), "11.5.2")
+        XCTAssertNotNil(app.versionExplanation(country: "cn"))
         app.release?.externalVersionID = "457"
         XCTAssertEqual(app.status(country: "cn"), .different)
         app.release?.storeID = "999"

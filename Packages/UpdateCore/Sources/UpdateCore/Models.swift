@@ -82,13 +82,16 @@ public struct AppRecord: Codable, Identifiable, Sendable {
     }
 
     public func displayedVersion(country: String) -> String? {
-        guard let release, release.country == country, usesBuildAsDisplay(release) else { return installed.version }
-        return installed.build
+        guard let release, release.country == country else { return installed.version }
+        if let localID = installed.externalVersionID, localID == release.externalVersionID,
+           installed.storeID == release.storeID, installed.storeID != nil { return release.version }
+        return usesBuildAsDisplay(release) ? installed.build : installed.version
     }
 
     private func usesBuildAsDisplay(_ release: StoreRelease) -> Bool {
         // Some apps (e.g. JD) put an integer counter in ShortVersionString and
-        // the dotted public release in BundleVersion. Only accept an exact match.
+        // the dotted public release in BundleVersion. Other apps require an
+        // exact match; JD's documented convention also covers future updates.
         guard let short = installed.version, !short.isEmpty,
               short.utf8.allSatisfy({ (48...57).contains($0) }),
               installed.build?.contains(".") == true else { return false }
@@ -100,6 +103,10 @@ public struct AppRecord: Codable, Identifiable, Sendable {
 
     public func versionExplanation(country: String) -> String? {
         guard let release, release.country == country else { return nil }
+        if let localID = installed.externalVersionID, localID == release.externalVersionID,
+           installed.storeID == release.storeID, installed.storeID != nil {
+            return "本机与商店的版本标识一致。列表采用此标识对应的商店展示版本，原始安装字段仍保留。"
+        }
         if displayedVersion(country: country) != installed.version {
             return installed.bundleID == "com.360buy.jdmobile" ?
                 "京东的设备清单将内部计数放在短版本字段、公开版本放在构建字段。列表按 CFBundleVersion 比较；两个原始字段仍保留。" :
