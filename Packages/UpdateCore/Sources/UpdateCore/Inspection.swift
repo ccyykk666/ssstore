@@ -106,7 +106,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
         case .crashes: return "只读取已经暴露的报告目录，不触发搬移或清空日志。"
         case .iconMetrics: return "读取图标网格等参数，当前 C 桥接没有导出完整桌面排列接口。"
         case .screenshot, .dvtScreenshot: return "手动截取当前屏幕并在本软件内预览、导出。"
-        case .coreApps, .coreProcesses, .configuration, .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot, .developerMode, .mountedImages: return "可手动尝试；系统可能未提供服务，或要求开发环境授权。失败不会改变版本检测结果。"
+        case .coreApps, .coreProcesses, .configuration, .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .developerMode, .mountedImages: return "可手动尝试；系统可能未提供服务，或要求开发环境授权。失败不会改变版本检测结果。"
         default: return "手动读取；仅展示设备实际返回的信息，不推断未返回的数据。"
         }
     }
