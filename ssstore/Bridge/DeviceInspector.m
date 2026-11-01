@@ -421,7 +421,7 @@ static void IFreeStrings(char **strings, size_t count) {
                 REQUIRE(file_service_connect_rsd(c->adapter, c->handshake, &fileService), @"连接 CoreDevice 文件服务");
                 int domain = [options[@"domain"] intValue];
                 if (domain != 2 && domain != 3 && domain != 5) domain = 1;
-                NSString *identifier = domain == 2 ? options[@"groupID"] : bundle;
+                NSString *identifier = domain == 2 ? options[@"groupID"] : domain == 1 ? bundle : nil;
                 REQUIRE(file_service_create_session(fileService, (enum IdeviceFileServiceDomain)domain, identifier.UTF8String, NULL), @"建立文件读取会话");
                 NSString *relative = [remotePath hasPrefix:@"/"] ? [remotePath substringFromIndex:1] : remotePath;
                 REQUIRE(file_service_retrieve_directory_list(fileService, relative.length ? relative.UTF8String : ".", &strings, &stringCount), @"读取 CoreDevice 目录");
@@ -431,7 +431,7 @@ static void IFreeStrings(char **strings, size_t count) {
                     [entries addObject:@{@"name":name, @"path":[remotePath stringByAppendingPathComponent:name]}];
                 }
                 file_service_free_directory_list(strings, stringCount); strings = NULL; stringCount = 0;
-                value = @{@"路径":remotePath, @"文件域":@(domain)};
+                value = @{@"路径":remotePath, @"文件域":@(domain), @"标识":identifier ?: @"此文件域不需要标识"};
                 message = @"此入口只浏览目录；读取文件请使用共享文档或应用容器入口。";
             } else {
                 if ([@[@"documents", @"container"] containsObject:source]) {

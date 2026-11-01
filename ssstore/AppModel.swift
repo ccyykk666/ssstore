@@ -128,7 +128,9 @@ final class AppModel: ObservableObject {
         guard !busy else { throw failure("另一项操作正在进行，请等待完成。") }
         guard hasPairing else { throw failure("请先在连接设置中创建或导入配对文件。") }
         guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
-        guard !operation.requiresApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
+        let needsApp = operation.requiresApp && !(operation == .coreFiles && domain != 1)
+        guard !needsApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
+        guard operation != .coreFiles || domain != 2 || !groupID.isEmpty else { throw failure("请输入 App Group 标识。") }
         busy = true; activity = "正在读取：\(operation.title)…"
         defer { busy = false; activity = "" }
         let pairingPath = pairingURL.path
@@ -148,7 +150,14 @@ final class AppModel: ObservableObject {
                     } catch { continuation.resume(throwing: error) }
                 }
             }
-            let result = try JSONDecoder().decode(InspectionResult.self, from: data)
+            var result = try JSONDecoder().decode(InspectionResult.self, from: data)
+            result.capturedAt = ISO8601DateFormatter().string(from: Date())
+            result.operation = operation.rawValue
+            result.bundleID = bundleID.isEmpty ? nil : bundleID
+            result.requestedPath = operation.isBrowser || operation.isFileHelper ? path : nil
+            if result.value == .null && result.files.isEmpty && result.entries.isEmpty && result.message == nil {
+                result.message = "方法调用完成，但设备没有返回数据。"
+            }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let reportURL = folder.appendingPathComponent("\(operation.rawValue)-report.json")
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

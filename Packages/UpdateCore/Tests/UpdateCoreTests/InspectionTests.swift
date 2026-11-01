@@ -4,7 +4,12 @@ import XCTest
 final class InspectionTests: XCTestCase {
     func testDeviceResultPreservesNestedValuesAndBinaryDescription() throws {
         let data = Data(#"{"value":{"enabled":true,"bytes":1234,"Entitlements":{"application-identifier":"TEAM.app"},"binary":{"类型":"二进制","字节数":20},"absent":null},"files":[{"name":"report.ips","path":"/cache/report.ips"}],"entries":[{"name":"Documents","path":"/Documents"}],"message":null}"#.utf8)
-        let result = try JSONDecoder().decode(InspectionResult.self, from: data)
+        var result = try JSONDecoder().decode(InspectionResult.self, from: data)
+        XCTAssertNil(result.capturedAt)
+        result.capturedAt = "2026-11-01T12:00:00Z"
+        result.operation = "documents"
+        result.bundleID = "app"
+        result.requestedPath = "/Documents"
         XCTAssertEqual(result.value["enabled"], .bool(true))
         XCTAssertEqual(result.value["bytes"], .number(1234))
         XCTAssertEqual(result.value["Entitlements"]?["application-identifier"]?.string, "TEAM.app")
@@ -12,6 +17,7 @@ final class InspectionTests: XCTestCase {
         XCTAssertEqual(result.files.first?.name, "report.ips")
         XCTAssertEqual(result.entries.first?.path, "/Documents")
         XCTAssertEqual(try JSONDecoder().decode(InspectionResult.self, from: JSONEncoder().encode(result)).value, result.value)
+        XCTAssertEqual(try JSONDecoder().decode(InspectionResult.self, from: JSONEncoder().encode(result)).requestedPath, "/Documents")
     }
 
     func testSnapshotTracksIdentifiersEvenWhenICBCBundleFieldsRemainUnchanged() {

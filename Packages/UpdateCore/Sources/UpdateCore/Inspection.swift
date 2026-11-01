@@ -165,6 +165,10 @@ public struct InspectionResult: Codable, Sendable {
     public var files: [InspectionFile]
     public var entries: [RemoteInspectionEntry]
     public var message: String?
+    public var capturedAt: String?
+    public var operation: String?
+    public var bundleID: String?
+    public var requestedPath: String?
 }
 public struct InspectionReceipt: Codable, Sendable {
     public var date: Date

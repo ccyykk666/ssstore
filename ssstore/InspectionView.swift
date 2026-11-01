@@ -28,7 +28,7 @@ struct InspectionView: View {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(operation.title)
                                     if let receipt = model.inspectionReceipts[operation.rawValue + "|" + (bundleID ?? "")] {
-                                        Text("上次\(receipt.success ? "调用成功" : "调用失败") · \(receipt.date.formatted(date: .omitted, time: .shortened))")
+                                        Text("上次\(receipt.success ? "已返回结果" : "读取失败") · \(receipt.date.formatted(date: .omitted, time: .shortened))")
                                             .font(.caption).foregroundStyle(receipt.success ? Color.secondary : Color.orange)
                                     }
                                 }
@@ -70,12 +70,21 @@ struct InspectionDetailView: View {
     @State private var loading = false
     @State private var initialized = false
     @State private var preview: InspectionFile?
+    private var needsApp: Bool { operation.requiresApp && !(operation == .coreFiles && domain != 1) }
+
+    init(operation: InspectionOperation, initialBundleID: String = "", initialPath: String = "/", autoRead: Bool = false,
+         initialDomain: Int = 1, initialGroupID: String = "") {
+        self.operation = operation; self.initialBundleID = initialBundleID; self.initialPath = initialPath
+        self.autoRead = autoRead; self.initialDomain = initialDomain; self.initialGroupID = initialGroupID
+        _bundleID = State(initialValue: initialBundleID); _path = State(initialValue: initialPath)
+        _domain = State(initialValue: initialDomain); _groupID = State(initialValue: initialGroupID)
+    }
 
     var body: some View {
         List {
             Section {
                 Text(operation.note).font(.footnote).foregroundStyle(.secondary)
-                if operation.requiresApp {
+                if needsApp {
                     Picker("应用", selection: $bundleID) {
                         Text("请选择").tag("")
                         ForEach(model.records) { Text($0.installed.name).tag($0.id) }
@@ -95,10 +104,15 @@ struct InspectionDetailView: View {
                 }
                 Button { Task { await read() } } label: {
                     HStack { if loading { ProgressView() }; Text(loading ? "正在读取…" : "读取\(operation.title)") }
-                }.disabled(model.busy || loading || (operation.requiresApp && bundleID.isEmpty))
-            }
+                }.disabled(model.busy || loading || (needsApp && bundleID.isEmpty) || (operation == .coreFiles && domain == 2 && groupID.isEmpty))
+            }.disabled(loading)
             if let failure { Section("未取得数据") { Text(failure).foregroundStyle(.orange).textSelection(.enabled) } }
             if let result {
+                Section("本次读取") {
+                    if let date = result.capturedAt { Text("读取时间：\(date)").font(.caption).foregroundStyle(.secondary) }
+                    if let target = result.bundleID { Text(target).font(.caption.monospaced()).textSelection(.enabled) }
+                    if let requestedPath = result.requestedPath { Text(requestedPath).font(.caption.monospaced()).textSelection(.enabled) }
+                }
                 if let message = result.message, !message.isEmpty { Section { Text(message).font(.footnote).foregroundStyle(.secondary) } }
                 if !result.entries.isEmpty {
                     Section("目录 · \(result.entries.count) 项") {
@@ -137,9 +151,12 @@ struct InspectionDetailView: View {
         }
         .navigationTitle(operation.title).navigationBarTitleDisplayMode(.inline)
         .sheet(item: $preview) { file in QuickLookFile(url: URL(fileURLWithPath: file.path)) }
+        .onChange(of: bundleID) { _, _ in clearResult() }
+        .onChange(of: path) { _, _ in clearResult() }
+        .onChange(of: domain) { _, _ in clearResult() }
+        .onChange(of: groupID) { _, _ in clearResult() }
         .task {
             guard !initialized else { return }; initialized = true
-            bundleID = initialBundleID; path = initialPath; domain = initialDomain; groupID = initialGroupID
             if autoRead { await read() }
         }
     }
@@ -150,6 +167,7 @@ struct InspectionDetailView: View {
         do { let response = try await model.inspect(operation, bundleID: bundleID, path: path, domain: domain, groupID: groupID); result = response.0; reportURL = response.1 }
         catch { failure = error.localizedDescription }
     }
+    private func clearResult() { result = nil; reportURL = nil; failure = nil }
 }
 
 private struct InspectionFileEntryView: View {
