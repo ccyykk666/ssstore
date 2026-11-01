@@ -1,4 +1,4 @@
-# ssstore 0.4.2 device data interfaces
+# ssstore 0.5.0 device data interfaces
 
 This reference describes implemented calls, not guaranteed availability on a particular iOS release. The user's iOS 27.2 device has confirmed InstallationProxy metadata and SpringBoard icons. Other services must be tested on that device. The app displays actual errors rather than simulating unavailable data.
 
@@ -77,3 +77,11 @@ The bottom toolbar provides **读取应用** and **查询版本**. The More menu
 - [AFC FFI and ownership](https://github.com/jkcoxson/idevice/blob/v0.1.68/ffi/src/afc.rs)
 - [CoreDevice file domains](https://github.com/jkcoxson/idevice/blob/v0.1.68/ffi/src/core_device/file_service.rs)
 
+
+## Store module integration (0.5.0)
+
+Asspp 4.2.2 at `6682eb8f831a7b5c62dc14ea97088769c6adba48` is vendored with its MIT license and current dependency pins. The matching user fork has been fast-forwarded to the same upstream revision. ApplePackage is pinned to 2.0.3. The store module provides account authentication, region/platform search, explicit license acquisition, current/historical downloads, pause/resume, IPA inspection/sharing and local OTA installation. Authentication and downloads require the user's own account; existing installed-app version comparisons still use the original login-free Catalog path. No account action executes merely because the app scans installed applications.
+
+The native device inspector remains read-only. Store installation is a separate explicit user action and retains the upstream certificate/trust requirements. Store files/configuration are isolated below Documents/Asspp and the store Keychain services; scan/pairing state stays in ssstore Application Support. Original standalone startup and welcome branding are excluded from the target; integration uses the ssstore scene and tabs.
+
+Inspection app selection uses a searchable sheet instead of a long system menu. File preview and export/share sheets include a Done action and visible drag indicator. Difference filtering includes unknown and failed records; a conditional failure counter toggles the failure filter. Ignored application behavior is unchanged.

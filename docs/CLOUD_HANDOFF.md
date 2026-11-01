@@ -5,14 +5,27 @@
 ## 当前状态
 
 - 私有仓库：<https://github.com/ccyykk666/ssstore>，目标分支 `main`。
-- 当前应用代码提交：`fb28436d05ec2e50db26402e75c2c038ff490dc0`。
-- 版本：**0.4.2（9）**；SwiftUI 自签 IPA，最低 iOS 17，使用 GitHub Xcode 27 环境 / iOS 27 SDK。
-- 0.4.1（8）已在此前核验并交付，旧交接中的取包任务已经完成。
-- 0.4.2 构建：<https://github.com/ccyykk666/ssstore/actions/runs/41319132477>。
-- 最终 Xcode 27 构建已成功，产物 `ssstore-unsigned`，artifact ID `13088890363`。已下载并直接提取 `ssstore-0.4.2-unsigned.ipa`；按用户要求未额外核验安装包。
-- 同一应用代码已先在旧 Xcode 26 工作流完成 39 项 XCTest、0 失败及 iOS Release 编译；用户随后要求改用 Xcode 27，最终交付应取上述新运行的产物。
+- 当前应用提交：`9387cc83d20788dbca76a8c849725c861b228191`。
+- 版本：**0.5.0（10）**；SwiftUI 自签 IPA，最低 iOS 17，GitHub `xcode-27` 构建环境。
+- 已交付 0.4.2（9）。本轮修复应用选择器、预览/分享关闭、差异和失败筛选，并集成 Asspp。
+- Asspp fork `ccyykk666/Asspp` 已快进同步到上游 `Lakr233/Asspp` 4.2.2：`6682eb8f831a7b5c62dc14ea97088769c6adba48`，8 个上游提交、无分叉冲突。
+- 对应源代码、MIT 许可、版本锁、下载协议测试及本地 TLS 安装资源位于 `Vendor/Asspp`；`Vendor/Asspp/UPSTREAM.json` 记录来源。
+- 当前运行：<https://github.com/ccyykk666/ssstore/actions/runs/41321461656>，核心测试、上游下载协议/本地化测试、iOS 编译打包及 IPA 上传均成功；产物 ssstore-unsigned，artifact ID 13089812094。已下载并提取 ssstore-0.5.0-unsigned.ipa。按用户要求未额外检查安装包。
 
-## 本轮用户请求及实现
+## 0.5.0 本轮修改
+
+- 设备数据中的应用 Picker 改成可搜索的选择弹窗；有取消按钮和下拉手势，规避系统长菜单的空白区。
+- 文件预览和导出分享使用可下拉关闭的 sheet，并显示“完成”按钮及拖动指示器。
+- “显示差异项”包含标识不同、待核对及失败应用，即排除已确认版本相同的应用。
+- 统计卡片有失败时显示“失败”数量，点按可筛选；无失败时隐藏。待核对统计不重复计入失败项。统计范围跟随“显示系统应用”，列表标题为“共 xx 个应用”（无多余分隔符）。
+- 新增应用、商店、下载、账户四个 Tab。iOS 26+ 使用原生 search-role Tab，并保留上游搜索激活行为；旧系统采用传统 tabItem。商店、账户、下载、历史版本、IPA 内容查看和本地 OTA 安装沿用 Asspp 4.2.2 当前实现及 ApplePackage 2.0.3。
+- 应用详情增加精确 Bundle ID 对应的商店详情与下载入口；不改原有 external ID 版本核对语义。
+- 连接设置中有“商店设置”和开源许可。商店数据使用单独的 Documents/Asspp 与钥匙串存储，不覆盖 ssstore 的配对和清单。
+- 为嵌入设置和本机详情页中的下载跳转，对上游 SettingView / ProductView 做了小范围适配；SimpleProgress / ProductHistoryView 的强调色改为标准 Color.accentColor，避免依赖未引入的上游资源生成符号。未使用上游独立 main、欢迎页、图标或 macOS 设备管理；完整来源保留在 Vendor 并由 target 排除。
+- 原生 inspector 仍只读；Asspp 的明确安装操作是用户本轮要求新增的功能，不能再将“全 App 没有安装入口”作为不变条件。
+- 用户已明确要求构建成功直接给 IPA，不额外检查安装包。
+
+## 0.4.2 已完成的界面精简
 
 1. 首页筛选更名为“显示差异项”；移除“商店：中国大陆优先”页脚。
 2. 移除正常读取时间、清单读取/图标缓存完成摘要、查询计数和耗时摘要。操作中显示进度，异常时保留实际错误与警告。
@@ -43,7 +56,7 @@
 
 工作流 `.github/workflows/build-ios.yml`：`xcode-27`，`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`，显式检查 Xcode 为 27 系列、iphoneos SDK 为 `27.*`，执行 `bash scripts/build-ipa.sh`。
 
-流程为核心 XCTest → 准备固定 DeviceKit → XcodeGen → 无签名 Release 编译 → `dist/ssstore.ipa`，产物名 `ssstore-unsigned`。应用代码 push 自动构建，纯 docs 修改不触发。接续时先查当前应用提交已有运行，只有失败或确有必要才重跑。
+流程为核心 XCTest → 上游 Asspp 下载协议/本地化测试 → 准备固定 DeviceKit → XcodeGen 和固定 SPM 依赖 → 无签名 Release 编译 → `dist/ssstore.ipa`，产物名 `ssstore-unsigned`。应用代码 push 自动构建，纯 docs 修改不触发。接续时先查当前应用提交已有运行，只有失败或确有必要才重跑。
 
 按用户最新要求，查询当前代码提交的运行状态，成功后下载该运行的 IPA 并直接交付；不做额外安装包核验。如失败，读取对应日志修复。安装包须自行签名；不能把旧运行的产物当作最新 `.soft` 版本。
 
@@ -59,7 +72,7 @@
 - `VersionOrder` 仅继续用于最低 iOS 判断，不恢复应用字符串版本比较或专用补丁。工商银行曾因原始 short/build 不同被误判，external ID 891257769 相同才应视为相同版本。
 - 默认大陆优先，仅成功查询且明确未找到的应用补查美国。超时、限流、网络失败不算未找到；美国失败保留大陆成功结果；429 停止批次。
 - 保留固定 CN/US/HK/JP。Bundle ID 去重，每批 25，已知数字 Store ID 可直查 Catalog。Lookup 发现后查 Catalog，不按应用名模糊冒充身份匹配。
-- Lookup 间隔 3.2 秒，按地区/策略缓存 5 分钟，强制刷新绕过缓存。无 Apple ID 登录或下载功能。
+- Lookup 间隔 3.2 秒，按地区/策略缓存 5 分钟，强制刷新绕过缓存。本机版本查询保持免登录；新增商店模块的 Apple ID 登录、下载和许可行为由 Asspp / ApplePackage 提供，不自动使用用户账户。
 
 ### 配对与设备读取
 
@@ -69,7 +82,6 @@
 - 固定 `jkcoxson/idevice v0.1.68` 发布 XCFramework 及 SHA-256 校验，不随意升级。
 - 扫描、配对、检查共用 busy 状态；FFI 资源在同一工作线程创建、使用和释放。忽略/恢复在 busy 时禁用。
 - 41 个主读取入口、2 个文件辅助操作，详见 `docs/API_REFERENCE.md`。新服务未全部真机验证；曾遇到 CoreDevice `ServiceNotFound 21`。
-- 文件只读，单文件 32 MiB、64 KiB 分块；CoreDevice 仅列目录，导出通过 AFC。无安装、卸载、设备写入/删除、恢复、连续日志、抓包或性能流执行入口。
+- 文件只读，单文件 32 MiB、64 KiB 分块；CoreDevice 仅列目录，导出通过 AFC。原生 inspector 无安装、卸载、设备写入/删除、恢复、连续日志、抓包或性能流执行入口；商店模块可在用户操作下通过 Asspp OTA 安装。
 - 固定 C FFI 无 `get_icon_state`，不能宣称完整桌面布局。描述文件解析不代表证书信任验证；动态占用不是可清理缓存；能力声明不是隐私授权。
 - 不提交配对文件、PIN、证书私钥等秘密；不假定可访问用户手机或旧环境本地文件。
-
