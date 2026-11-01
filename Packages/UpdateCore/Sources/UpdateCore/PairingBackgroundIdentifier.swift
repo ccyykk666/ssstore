@@ -13,6 +13,6 @@ public enum PairingBackgroundIdentifier {
 public enum PairingBackgroundConfigurationError: LocalizedError {
     case signatureMismatch
     public var errorDescription: String? {
-        "后台配对配置与当前应用标识不匹配。请在自签时保留原 Bundle ID，或让签名工具同步更新后台任务标识后重新安装。"
+        "后台任务标识不匹配。签名时请保留原 Bundle ID，或同步修改后台任务标识。"
     }
 }

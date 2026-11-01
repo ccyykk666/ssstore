@@ -116,18 +116,18 @@ public struct AppRecord: Codable, Identifiable, Sendable {
     public func versionExplanation(country: String) -> String? {
         guard let release, release.matches(scope: country), error == nil else { return nil }
         guard identityMatches(release) else {
-            return "本机与商店的应用身份无法确认一致，请核对 Bundle ID 绑定与商店应用 ID。"
+            return "无法确认应用身份，请核对 Bundle ID 和商店 ID。"
         }
         guard versionIdentifier(installed.externalVersionID) != nil else {
-            return "设备未返回有效的本机商店版本标识。请重新读取本机；本版仅按版本标识检测，原始版本与构建字段不参与判断。"
+            return "缺少有效的本机版本标识，请重新读取应用。"
         }
         guard versionIdentifier(release.externalVersionID) != nil else {
-            return "商店结果缺少有效版本标识，请重新查询苹果目录。仅有展示版本号时不推断更新状态。"
+            return "缺少有效的商店版本标识，请重新查询。"
         }
         if status(country: country) == .current {
-            return "检测依据：同一应用的本机与商店版本标识一致。上方显示该标识对应的商店版本，原始安装字段保留在下方。"
+            return "版本标识一致，显示对应的商店版本。"
         }
-        return "本机与所查地区商店的版本标识不同，尚未确认更新方向；不按标识数字大小或版本字符串猜测新旧。"
+        return "本机与商店的版本标识不同，无法判断更新方向。"
     }
 
 }

@@ -13,8 +13,8 @@ settings:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "0.4.0"
-    CURRENT_PROJECT_VERSION: "7"
+    MARKETING_VERSION: "0.4.1"
+    CURRENT_PROJECT_VERSION: "8"
 targets:
   ssstore:
     type: application
@@ -29,7 +29,7 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
-        NSLocalNetworkUsageDescription: 通过你启用的本地 VPN 连接本机设备管理服务，读取应用名称与版本。
+        NSLocalNetworkUsageDescription: 用于发现配对主机，并读取本机应用和设备信息。
         NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing._tcp]
         UIBackgroundModes: [processing]
         BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).pairing.*]

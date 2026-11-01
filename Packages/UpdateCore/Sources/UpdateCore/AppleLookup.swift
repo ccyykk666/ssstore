@@ -7,9 +7,9 @@ public enum LookupError: LocalizedError {
     case notFound, http(Int), invalidResponse
     public var errorDescription: String? {
         switch self {
-        case .notFound: return "该地区未查到此 Bundle ID。可能已下架、来自其他地区，或自签时修改了标识。"
-        case .http(let code): return "苹果接口返回 HTTP \(code)，请稍后重试。"
-        case .invalidResponse: return "苹果返回的数据缺少匹配的应用或版本号。"
+        case .notFound: return "该地区未找到此应用，请核对地区和 Bundle ID。"
+        case .http(let code): return "Apple 请求失败（HTTP \(code)），请稍后重试。"
+        case .invalidResponse: return "Apple 未返回匹配的应用版本。"
         }
     }
 }
@@ -28,10 +28,10 @@ public enum StoreQueryPolicy {
         return saved!
     }
     public static func label(_ scope: String) -> String {
-        scope == chinaThenUS ? "中国区优先 · 未找到时重试美区" : "\(scope.uppercased()) 区"
+        scope == chinaThenUS ? "中国大陆优先" : "\(scope.uppercased()) 区"
     }
     public static func notFoundMessage(scope: String) -> String {
-        scope == chinaThenUS ? "中国区和美区均未查到此 Bundle ID。可能已下架、仅在其他地区提供，或自签时修改了标识。" : LookupError.notFound.localizedDescription
+        scope == chinaThenUS ? "中国区和美区均未找到此应用，请核对 Bundle ID。" : LookupError.notFound.localizedDescription
     }
 }
 
@@ -124,8 +124,8 @@ public enum AppleLookup {
             catch {
                 if Task.isCancelled { throw CancellationError() }
                 // Keep successful CN entries if the US retry fails.
-                for bundle in missing { result.errors[bundle] = "中国区未找到；美区重试失败：\(error.localizedDescription)" }
-                result.catalogWarning = "美区补查失败，已保留中国区结果：\(error.localizedDescription)"
+                for bundle in missing { result.errors[bundle] = "中国大陆未找到，美国商店查询失败：\(error.localizedDescription)" }
+                result.catalogWarning = "美国商店查询失败，已保留中国大陆结果：\(error.localizedDescription)"
                 if case LookupError.http(429) = error { result.stopAfterBatch = true }
             }
         }
@@ -174,7 +174,7 @@ public enum AppleLookup {
                                                bundleIDs: missing, country: country)
                 releases.merge(fallback) { _, new in new }
             }
-            return LookupBatch(releases: releases, catalogWarning: "苹果目录暂不可用，本批使用公开 Lookup：\(error.localizedDescription)")
+            return LookupBatch(releases: releases, catalogWarning: "Apple Catalog 不可用，已使用 Lookup 数据：\(error.localizedDescription)")
         }
     }
 

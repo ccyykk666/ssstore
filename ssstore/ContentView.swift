@@ -24,21 +24,14 @@ struct ContentView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 14) {
-                        Label("ssstore", systemImage: "square.stack.3d.up.fill")
-                            .font(.title2.bold()).foregroundStyle(.tint)
-                        Text("所有版本，一处查看。")
-                            .font(.headline)
                         HStack(spacing: 28) {
-                            metric("已收录", value: model.records.filter { !$0.installed.isSystem }.count)
+                            metric("应用", value: model.records.filter { !$0.installed.isSystem }.count)
                             metric("标识不同", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .different }.count)
                             metric("待核对", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .unknown }.count)
                         }
                         if let date = model.scannedAt {
                             Text("\(model.inventoryOrigin) · \(date.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            Text("先在连接设置中创建或导入配对文件，再开启 Loon 回环读取应用。")
-                                .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 8)
@@ -48,21 +41,21 @@ struct ContentView: View {
                 if model.busy {
                     Section {
                         HStack { ProgressView(); Text(model.activity).font(.subheadline) }
-                        if model.isChecking { Button("停止版本查询", role: .cancel) { model.cancelCheck() } }
+                        if model.isChecking { Button("停止查询", role: .cancel) { model.cancelCheck() } }
                     }
                 }
                 Section {
-                    Toggle("只看版本标识不同", isOn: $onlyDifferent)
+                    Toggle("仅显示标识不同", isOn: $onlyDifferent)
                     Toggle("显示系统应用", isOn: $includeSystem)
                 } footer: {
-                    Text("全部应用按商店版本标识检测：相同确认同版，不同标注差异，缺失则待核对。\(StoreQueryPolicy.label(model.country))；美区补查标注 US，5 分钟内可复用缓存。")
+                    Text("商店：\(StoreQueryPolicy.label(model.country))")
                 }
                 Section("应用 · \(visible.count)") {
                     if visible.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
-                            Label(model.records.isEmpty ? "尚无应用清单" : "没有符合条件的应用", systemImage: "tray")
+                            Label(model.records.isEmpty ? "暂无应用" : "无匹配应用", systemImage: "tray")
                                 .font(.headline)
-                            Text(model.records.isEmpty ? "在连接设置中创建或导入 Remote Pairing 文件，然后点击“读取本机”。也可导入电脑导出的清单。" : "调整筛选条件，或点击检查更新获取商店版本。")
+                            Text(model.records.isEmpty ? "设置连接后读取，或导入清单。" : "请调整搜索或筛选条件。")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }.padding(.vertical, 12)
                     }
@@ -71,7 +64,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .navigationTitle("应用更新")
+            .navigationTitle("ssstore")
             .searchable(text: $search, prompt: "搜索应用或 Bundle ID")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -80,25 +73,25 @@ struct ContentView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
-                        Button { Task { await model.scan() } } label: { Label("读取本机", systemImage: "iphone") }
-                        Button { model.checkUpdates() } label: { Label("检查更新", systemImage: "arrow.clockwise") }
-                        Button { model.checkUpdates(force: true) } label: { Label("强制刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
+                        Button { Task { await model.scan() } } label: { Label("读取应用", systemImage: "iphone") }
+                        Button { model.checkUpdates() } label: { Label("查询版本", systemImage: "arrow.clockwise") }
+                        Button { model.checkUpdates(force: true) } label: { Label("刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
                         Button { importing = true } label: { Label("导入应用清单", systemImage: "square.and.arrow.down") }
-                        NavigationLink { InspectionView() } label: { Label("设备数据与接口", systemImage: "server.rack") }
-                        NavigationLink { InventoryHistoryView() } label: { Label("清单变更记录", systemImage: "clock.arrow.circlepath") }
+                        NavigationLink { InspectionView() } label: { Label("设备数据", systemImage: "server.rack") }
+                        NavigationLink { InventoryHistoryView() } label: { Label("清单记录", systemImage: "clock.arrow.circlepath") }
                         if FileManager.default.fileExists(atPath: model.rawInventoryURL.path) {
-                            ShareLink(item: model.rawInventoryURL) { Label("导出本机原始字段", systemImage: "square.and.arrow.up") }
+                            ShareLink(item: model.rawInventoryURL) { Label("导出原始数据", systemImage: "square.and.arrow.up") }
                         }
                     } label: { Image(systemName: "ellipsis.circle") }
                     .disabled(model.busy)
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    Button { Task { await model.scan() } } label: { Label("读取本机", systemImage: "iphone") }
+                    Button { Task { await model.scan() } } label: { Label("读取应用", systemImage: "iphone") }
                         .disabled(model.busy)
                 }
                 ToolbarItem(placement: .bottomBar) { Spacer() }
                 ToolbarItem(placement: .bottomBar) {
-                    Button { model.checkUpdates() } label: { Label("检查更新", systemImage: "arrow.clockwise") }
+                    Button { model.checkUpdates() } label: { Label("查询版本", systemImage: "arrow.clockwise") }
                         .disabled(model.busy || model.records.isEmpty)
                 }
             }
@@ -110,7 +103,7 @@ struct ContentView: View {
                 }
             }
             .alert("提示", isPresented: Binding(get: { model.message != nil && !settings }, set: { if !$0 { model.message = nil } })) {
-                Button("知道了") { model.message = nil }
+                Button("好") { model.message = nil }
             } message: { Text(model.message ?? "") }
         }
     }
@@ -135,7 +128,7 @@ private struct AppRow: View {
                 Text(record.installed.name).font(.headline).lineLimit(1)
                 Text("\(status == .current ? "本机" : "本机原始") \(record.displayedVersion(country: country) ?? "未知")  ·  商店 \(releaseLabel)")
                     .font(.caption).foregroundStyle(.secondary)
-                if record.error != nil { Text("查询失败，点按查看原因").font(.caption2).foregroundStyle(.orange) }
+                if record.error != nil { Text("查询失败").font(.caption2).foregroundStyle(.orange) }
             }
             Spacer(minLength: 2)
             Text(status.rawValue).font(.caption2.bold())

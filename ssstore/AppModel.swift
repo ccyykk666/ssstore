@@ -78,10 +78,10 @@ final class AppModel: ObservableObject {
 
     func scan() async {
         guard !busy else { return }
-        guard hasPairing else { message = "请先在连接设置中创建或导入 Remote Pairing 文件。"; return }
+        guard hasPairing else { message = "请先创建或导入 Remote Pairing 配对文件。"; return }
         guard let number = UInt16(port), number > 0 else { message = "端口应在 1 到 65535 之间。"; return }
         busy = true
-        activity = "正在连接本机并读取应用…"
+        activity = "正在读取应用…"
         defer { busy = false; activity = "" }
         let path = pairingURL.path
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,8 +125,8 @@ final class AppModel: ObservableObject {
     func inspect(_ operation: InspectionOperation, bundleID: String = "", path: String = "/",
                  source: String? = nil, domain: Int = 1, groupID: String = "") async throws -> (InspectionResult, URL) {
         func failure(_ text: String) -> NSError { NSError(domain: "ssstore.Inspection", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
-        guard !busy else { throw failure("另一项操作正在进行，请等待完成。") }
-        guard hasPairing else { throw failure("请先在连接设置中创建或导入配对文件。") }
+        guard !busy else { throw failure("请等待当前操作完成。") }
+        guard hasPairing else { throw failure("请先创建或导入配对文件。") }
         guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
         let needsApp = operation.requiresApp && !(operation == .coreFiles && domain != 1)
         guard !needsApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
@@ -156,7 +156,7 @@ final class AppModel: ObservableObject {
             result.bundleID = bundleID.isEmpty ? nil : bundleID
             result.requestedPath = operation.isBrowser || operation.isFileHelper ? path : nil
             if result.value == .null && result.files.isEmpty && result.entries.isEmpty && result.message == nil {
-                result.message = "方法调用完成，但设备没有返回数据。"
+                result.message = "设备未返回数据。"
             }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let reportURL = folder.appendingPathComponent("\(operation.rawValue)-report.json")
@@ -189,7 +189,7 @@ final class AppModel: ObservableObject {
             let data = try readSelectedFile(url)
             let kind = try savePairing(data)
             if kind == .lockdown {
-                message = "已导入传统配对文件。iOS 26.4 及更新系统的回环通常需要 Remote Pairing，请重新导出相应文件。"
+                message = "已导入 Lockdown 配对文件。iOS 26.4 或更高版本建议改用 Remote Pairing。"
             }
         } catch { message = "导入配对失败：\(error.localizedDescription)" }
     }
@@ -197,11 +197,11 @@ final class AppModel: ObservableObject {
     func createPairingOnDevice() {
         guard !busy else { return }
         guard #available(iOS 27.0, *) else {
-            message = "手机端创建配对需要 iOS 27 或更新版本。当前系统请使用导入功能。"
+            message = "创建配对需要 iOS 27 或更高版本，请导入配对文件。"
             return
         }
         busy = true
-        activity = "正在创建手机配对，请在连接设置中完成确认…"
+        activity = "正在配对，请在配对页面完成操作…"
         pairingController.start { [weak self] result in
             guard let self else { return }
             defer { busy = false; activity = "" }
@@ -242,7 +242,7 @@ final class AppModel: ObservableObject {
 
     func importInventory(from url: URL) {
         guard !busy else { return }
-        do { merge(try InventoryParser.parse(readSelectedFile(url)), origin: "文件快照（记录为导入时间）") }
+        do { merge(try InventoryParser.parse(readSelectedFile(url)), origin: "导入清单") }
         catch { message = "导入清单失败：\(error.localizedDescription)" }
     }
 
@@ -328,7 +328,7 @@ final class AppModel: ObservableObject {
                     }
                     persist()
                     if batch.stopAfterBatch {
-                        message = "苹果美区接口限流，本轮查询已停止，中国区成功结果已保留。请稍后重试。"
+                        message = "美国商店请求受限，已停止查询并保留中国大陆结果。请稍后重试。"
                         break
                     }
                 } catch is CancellationError { break }
@@ -342,7 +342,7 @@ final class AppModel: ObservableObject {
                     }
                     // A rate-limit response should end the batch instead of hammering the service.
                     if case LookupError.http(429) = error {
-                        message = "苹果接口限流，本轮查询已停止，已获得的结果会保留。请稍后重试。"
+                        message = "Apple 请求受限，已停止查询并保留结果。请稍后重试。"
                         break
                     }
                 }

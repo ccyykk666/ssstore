@@ -10,18 +10,15 @@ struct OnDevicePairingView: View {
         NavigationStack {
             List {
                 Section {
-                    Label("在这台 iPhone 上完成配对", systemImage: "iphone.and.arrow.forward")
-                        .font(.headline)
-                    Text("需要 iOS 27 或更新版本。请连接 Wi-Fi，并开启系统的开发者模式。无需 Apple ID。")
+                    Text("需要 iOS 27 及以上、Wi-Fi 和开发者模式。")
                         .foregroundStyle(.secondary)
                 }
                 Section("操作步骤") {
-                    Text("1. 点击下方“开始配对”，允许本地网络访问。等待显示“已发布 ssstore”后再离开本页。")
-                    Text("2. 前往“设置 → 隐私与安全 → 开发者模式”，在可配对主机中选择 ssstore。")
-                    Text("3. 输入 ssstore 通知或持续后台任务界面中的配对码；也可返回本页查看后再切回设置。")
-                    Text("4. 系统确认后返回本页，配对记录会自动保存。")
+                    Text("1. 开始配对，允许本地网络访问，等待主机就绪。")
+                    Text("2. 前往“设置 → 隐私与安全 → 开发者模式”，选择 ssstore。")
+                    Text("3. 输入通知或本页的配对码，完成后返回。")
                 }
-                Section("当前进度") {
+                Section("状态") {
                     if controller.isActive { ProgressView() }
                     Text(controller.status).textSelection(.enabled)
                     if let pin = controller.pin {
@@ -31,49 +28,43 @@ struct OnDevicePairingView: View {
                         Button("复制配对码") { UIPasteboard.general.string = pin }
                     }
                     if controller.isActive && !controller.notificationsAllowed {
-                        Text("未允许通知：配对码仍会显示在本页，可手动往返系统设置查看。")
+                        Text("通知未开启，请在本页查看配对码。")
                             .font(.footnote).foregroundStyle(.orange)
                     }
                     if controller.isActive {
-                        Text("配对期间会显示系统的持续后台任务，请勿点击它的停止按钮。若系统回收任务或等待超过两分钟，本页会说明停止原因。")
+                        Text("请勿停止后台任务。配对限时两分钟。")
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("停止配对", role: .cancel) { controller.cancel() }
                             .disabled(controller.phase == .stopping)
                     } else {
-                        Button(controller.phase == .idle ? "开始配对" : "重新开始配对") {
+                        Button(controller.phase == .idle ? "开始配对" : "重新配对") {
                             model.createPairingOnDevice()
                         }.disabled(model.busy)
                     }
                 }
                 if !controller.diagnostics.isEmpty {
                     Section {
-                        DisclosureGroup("配对阶段记录") {
+                        DisclosureGroup("配对日志") {
                             Text(controller.diagnostics.joined(separator: "\n"))
                                 .font(.caption.monospaced()).textSelection(.enabled)
-                            Button("复制阶段记录") {
+                            Button("复制日志") {
                                 UIPasteboard.general.string = controller.diagnostics.joined(separator: "\n")
                             }
                         }
-                    } footer: {
-                        Text("仅记录时间、阶段和错误，不包含配对码或配对私钥。")
                     }
                 }
                 if controller.phase == .completed && model.hasPairing {
                     Section {
-                        Label("配对文件已保存到本机", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
-                        Button("读取本机应用，验证连接") { Task { await model.scan() } }
+                        Label("配对文件已保存", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                        Button("读取应用") { Task { await model.scan() } }
                             .disabled(model.busy)
                         if model.busy { ProgressView(model.activity) }
                     } footer: {
-                        Text("请先启用 Loon 的本机回环插件。配对成功和读取服务可用需要分别验证。")
+                        Text("启用 Loon 回环后读取应用。")
                     }
                 }
-                Section {
-                    Text("配对主机不出现时，请检查 Wi-Fi、开发者模式及 ssstore 的本地网络权限。若 Loon 的其他规则影响局域网发现，可暂时停止 VPN 完成配对，再启用回环读取应用。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
             }
-            .navigationTitle("手机端配对")
+            .navigationTitle("创建配对")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("完成") { dismiss() }.disabled(controller.isActive)
@@ -81,7 +72,7 @@ struct OnDevicePairingView: View {
             }
             .interactiveDismissDisabled(controller.isActive)
             .alert("提示", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
-                Button("知道了") { model.message = nil }
+                Button("好") { model.message = nil }
             } message: { Text(model.message ?? "") }
         }
     }

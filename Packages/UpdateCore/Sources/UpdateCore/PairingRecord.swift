@@ -28,6 +28,6 @@ public enum PairingRecord {
 public enum PairingRecordError: LocalizedError {
     case invalid
     public var errorDescription: String? {
-        "配对记录格式无效，原有文件已保留。请创建新的 Remote Pairing 记录或导入有效文件。"
+        "配对文件无效，原文件已保留。请重新配对或导入。"
     }
 }

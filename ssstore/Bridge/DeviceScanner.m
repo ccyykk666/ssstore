@@ -82,7 +82,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         } else { result = -1; }
     }
     close(fd);
-    if (result != 0) SetError(error, @"目标端口不可达。请检查 Loon 已启动、回环插件已启用、允许本地网络访问，以及地址和端口是否正确。端口开放也不代表配对成功。");
+    if (result != 0) SetError(error, @"无法连接目标端口。请检查 Loon 回环、本地网络权限及地址和端口。");
     return result == 0;
 }
 
@@ -95,7 +95,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     address.sin_family = AF_INET;
     address.sin_port = htons(port);
     if (inet_pton(AF_INET, host.UTF8String, &address.sin_addr) != 1) {
-        SetError(error, @"请输入 IPv4 地址，例如 10.7.0.1。"); return nil;
+        SetError(error, @"请输入有效的 IPv4 地址，如 10.7.0.1。"); return nil;
     }
     if (!Probe(&address, error)) return nil;
 
@@ -132,7 +132,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             char *xml = NULL;
             uint32_t length = 0;
             plist_to_xml(nodes[index], &xml, &length);
-            if (!xml) { SetError(error, @"应用服务返回了无法解析的清单。"); return nil; }
+            if (!xml) { SetError(error, @"无法解析设备返回的应用清单。"); return nil; }
             NSData *data = [NSData dataWithBytes:xml length:length];
             plist_mem_free(xml);
             NSDictionary *row = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:error];
@@ -155,7 +155,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         for (NSMutableDictionary *item in apps) byID[item[@"CFBundleIdentifier"]] = item;
         NSMutableArray<NSString *> *versionNotes = [NSMutableArray array];
         NSError *readError = nil;
-        progress(@"清单已读取，正在补充安装元数据…");
+        progress(@"正在读取安装信息…");
         browseOptions = plist_new_dict();
         plist_dict_set_item(browseOptions, "ApplicationType", plist_new_string("Any"));
         plist_t attributes = plist_new_array();
@@ -200,14 +200,14 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             progress([NSString stringWithFormat:@"清单已读取 · %lu 个本地图标已缓存", (unsigned long)cached]);
             return result;
         }
-        progress(@"清单已读取，正在连接本地图标服务…");
+        progress(@"正在连接图标服务…");
         // Reuse this authenticated tunnel, not one new connection per icon.
         IdeviceFfiError *failure = remotePairing ? springboard_services_connect_rsd(adapter, handshake, &springboard)
                                                 : springboard_services_connect(provider, &springboard);
         if (!Check(failure, @"本地图标服务", &iconError)) {
             // The classic FFI connect consumes its provider on failure.
             if (!remotePairing) provider = NULL;
-            progress([NSString stringWithFormat:@"清单已读取；%@。可在检查更新后使用商店图标。", iconError.localizedDescription]);
+            progress([NSString stringWithFormat:@"清单已读取；%@。查询版本后可获取商店图标。", iconError.localizedDescription]);
             return result;
         }
         NSUInteger fetched = 0, failed = 0, attempted = 0;

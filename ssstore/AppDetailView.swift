@@ -19,21 +19,21 @@ struct AppDetailView: View {
                         }
                         Text(record.status(country: model.country).rawValue)
                             .foregroundStyle(record.status(country: model.country) == .different ? Color.orange : Color.secondary)
-                        field(record.status(country: model.country) == .current ? "本机对应商店版本" : "本机原始版本（未确认商店对应关系）", record.displayedVersion(country: model.country) ?? "未知")
-                        Text("检测方式：商店版本标识匹配").font(.caption).foregroundStyle(.secondary)
+                        field(record.status(country: model.country) == .current ? "本机版本（商店）" : "本机版本（原始）", record.displayedVersion(country: model.country) ?? "未知")
                         if let explanation = record.versionExplanation(country: model.country) {
                             Text(explanation).font(.footnote).foregroundStyle(.secondary)
                         }
-                        field("原始版本字段 · CFBundleShortVersionString", record.installed.version ?? "未提供")
-                        field("原始构建字段 · CFBundleVersion", record.installed.build ?? "未提供")
-                        field("本机商店版本标识", record.installed.externalVersionID ?? "未取得，请重新读取本机")
+                        field("原始版本 · CFBundleShortVersionString", record.installed.version ?? "未提供")
+                        field("原始构建号 · CFBundleVersion", record.installed.build ?? "未提供")
+                        field("本机版本标识", record.installed.externalVersionID ?? "未获取，请重新读取")
                         field("Bundle ID", record.id)
-                        if let date = model.scannedAt { field("清单记录时间", date.formatted()) }
+                        if let date = model.scannedAt { field("清单时间", date.formatted()) }
                     }
-                    Section("本机数据核对") {
-                        NavigationLink { InspectionView(bundleID: record.id) } label: { Label("读取此应用的详细数据", systemImage: "doc.text.magnifyingglass") }
-                        Text(record.installed.versionReadNote ?? "此记录尚未补充本机数据。请重新点击“读取本机”。")
-                            .font(.footnote).foregroundStyle(.secondary)
+                    Section("本机数据") {
+                        NavigationLink { InspectionView(bundleID: record.id) } label: { Label("应用数据", systemImage: "doc.text.magnifyingglass") }
+                        if let note = record.installed.versionReadNote {
+                            Text(note).font(.footnote).foregroundStyle(.secondary)
+                        }
                         if let version = record.installed.coreDeviceVersion { field("CoreDevice · version", version) }
                         if let build = record.installed.coreDeviceBuild { field("CoreDevice · bundleVersion", build) }
                         if let version = record.installed.browseVersion { field("Browse · CFBundleShortVersionString", version) }
@@ -46,44 +46,42 @@ struct AppDetailView: View {
                             field("最新版本", release.version)
                             field("更新时间", release.releasedAt ?? "未提供")
                             field("最低系统版本", release.minimumOS ?? "未提供")
-                            field("数据获取时间", release.fetchedAt.formatted())
+                            field("查询时间", release.fetchedAt.formatted())
                             field("数据来源", release.source ?? "iTunes Lookup（旧记录）")
-                            field("商店版本标识", release.externalVersionID ?? "未取得，请重新查询")
-                            if !release.matches(scope: model.country) { Text("这份结果不属于当前查询方式，请重新查询。").foregroundStyle(.orange) }
+                            field("商店版本标识", release.externalVersionID ?? "未获取，请重新查询")
+                            if !release.matches(scope: model.country) { Text("结果与当前查询设置不符，请重新查询。").foregroundStyle(.orange) }
                             if model.country == StoreQueryPolicy.chinaThenUS && release.country == "us" && release.lookupScope == model.country {
-                                Text("中国区未找到此应用，本次使用美区补查结果。能否更新取决于安装渠道与账号地区。")
+                                Text("美国商店结果。更新取决于安装渠道和账户地区。")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                             if let minimumOS = release.minimumOS,
                                VersionOrder.status(installed: UIDevice.current.systemVersion, latest: minimumOS) == .update {
-                                Label("此版本要求更新的 iOS 系统。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                                Label("需要更高版本的 iOS。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                             }
                         }
-                        Section("最新版本更新说明") {
-                            Text(release.notes?.isEmpty == false ? release.notes! : "开发者未提供更新说明。")
+                        Section("更新说明") {
+                            Text(release.notes?.isEmpty == false ? release.notes! : "暂无更新说明。")
                                 .textSelection(.enabled)
-                            Text("这里只展示最新版本说明，未合并你当前版本之后的所有历史日志。")
-                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     if let error = record.error {
                         Section("查询结果") {
                             Text(error).foregroundStyle(.orange).textSelection(.enabled)
-                            if record.release != nil { Text("上方保留的是上一次成功获取的数据。").font(.caption) }
+                            if record.release != nil { Text("显示上次查询结果。").font(.caption) }
                         }
                     }
                     Section {
-                        TextField("原始 Bundle ID（留空使用本机标识）", text: $mapping)
+                        TextField("原应用 Bundle ID（可选）", text: $mapping)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Button("保存绑定") { model.setMapping(id: id, bundleID: mapping) }
-                        Button("查询此应用") { model.checkUpdates(only: id) }
+                        Button("保存") { model.setMapping(id: id, bundleID: mapping) }
+                        Button("查询版本") { model.checkUpdates(only: id) }
                     } header: { Text("商店匹配") } footer: {
-                        Text("自签工具可能改写标识。请填原应用的 Bundle ID，不要填应用名称或数字商店 ID。单独查询会跳过 5 分钟缓存。")
+                        Text("自签后标识有变时填写原 Bundle ID，否则留空。")
                     }.disabled(model.busy)
                 }
                 .onAppear { mapping = record.lookupBundleID ?? "" }
             } else {
-                Text("此应用已不在当前清单中。")
+                Text("应用已不在清单中。")
             }
         }
         .navigationTitle("版本详情")

@@ -6,7 +6,7 @@ Transport is the user's existing Loon loopback and Remote Pairing/RSD connection
 
 ## Entry points
 
-The main More menu opens **设备数据与接口**. Each app's details opens **读取此应用的详细数据**. There are 41 main entries plus two file helpers. Requests run on a background queue with all FFI handles created, used, and released on that queue. App scanning, version checks, pairing, and inspection do not execute concurrently through the UI.
+The main More menu opens **设备数据**. Each app's details opens **应用数据**. There are 41 main entries plus two file helpers. Requests run on a background queue with all FFI handles created, used, and released on that queue. App scanning, version checks, pairing, and inspection do not execute concurrently through the UI.
 
 | Family | Implemented operations | Published interface |
 | --- | --- | --- |

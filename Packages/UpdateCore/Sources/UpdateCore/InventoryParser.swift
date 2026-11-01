@@ -56,8 +56,8 @@ public enum InventoryError: LocalizedError {
     case invalidFormat, empty
     public var errorDescription: String? {
         switch self {
-        case .invalidFormat: return "清单格式不支持，请导入 JSON 应用数组、apps 数组或 installation_proxy 的 LookupResult plist。"
-        case .empty: return "没有读到带 Bundle ID 的应用。原有清单已保留。"
+        case .invalidFormat: return "不支持此清单格式。请导入应用 JSON 或 LookupResult plist。"
+        case .empty: return "清单中没有有效的 Bundle ID，原清单已保留。"
         }
     }
 }

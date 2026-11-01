@@ -82,7 +82,7 @@ static void IFreeStrings(char **strings, size_t count) {
 #define PROBE_SERVICE(base, handle, release, label) { \
     NSError *local = nil; \
     BOOL ok = ICheck(base##_connect_rsd(c->adapter, c->handshake, &(handle)), (label), &local); \
-    [rows addObject:@{@"服务":(label), @"接口":@#base, @"连接成功":@(ok), @"结果":ok ? @"连接成功，具体读取方法需单独验证" : local.localizedDescription}]; \
+    [rows addObject:@{@"服务":(label), @"接口":@#base, @"连接成功":@(ok), @"结果":ok ? @"连接成功，读取权限待验证" : local.localizedDescription}]; \
     release(handle); handle = NULL; \
 }
 
@@ -136,7 +136,7 @@ static void IFreeStrings(char **strings, size_t count) {
     NSString *message = nil;
     @try {
         if ([op isEqualToString:@"probe"]) {
-            if (!remote) { IError(error, @"批量探测需要 Remote Pairing；传统连接请逐项手动读取。"); return nil; }
+            if (!remote) { IError(error, @"连接测试需要 Remote Pairing。Lockdown 请逐项读取。"); return nil; }
             NSMutableArray *rows = [NSMutableArray array];
             PROBE_SERVICE(installation_proxy, installation, installation_proxy_client_free, @"应用资料");
             PROBE_SERVICE(springboard_services, spring, springboard_services_free, @"SpringBoard");
@@ -153,10 +153,10 @@ static void IFreeStrings(char **strings, size_t count) {
             PROBE_SERVICE(image_mounter, mounter, image_mounter_free, @"开发镜像");
             PROBE_SERVICE(companion_proxy, companion, companion_proxy_client_free, @"伴侣设备");
             PROBE_SERVICE(remote_server, server, remote_server_free, @"开发服务");
-            value = rows; message = @"结果只代表本次服务连接是否成功，不代表该服务所有读取方法均被授权。";
+            value = rows; message = @"连接结果不代表已获全部读取权限。";
         }
         else if ([op isEqualToString:@"services"]) {
-            if (!remote) { IError(error, @"RSD 服务发现需要 Remote Pairing；传统连接可手动尝试其他读取入口。"); return nil; }
+            if (!remote) { IError(error, @"RSD 服务发现需要 Remote Pairing。"); return nil; }
             REQUIRE(rsd_get_services(c->handshake, &services), @"发现服务");
             NSMutableArray *rows = [NSMutableArray array];
             for (size_t i = 0; i < services->count; i++) {
@@ -166,7 +166,7 @@ static void IFreeStrings(char **strings, size_t count) {
                 [rows addObject:@{@"name":IString(s->name), @"port":@(s->port), @"requiredEntitlement":IString(s->entitlement),
                                  @"remoteXPC":@(s->uses_remote_xpc), @"features":features, @"version":@(s->service_version)}];
             }
-            value = rows; message = @"这些服务由设备广播，仍需逐项读取才能确认访问权限。";
+            value = rows; message = @"广播服务的读取权限需单独验证。";
         } else if ([@[@"appDetails", @"appCapabilities", @"appStorage", @"allStorage"] containsObject:op]) {
             REQUIRE(CONNECT(installation_proxy, installation), @"连接应用信息服务");
             query = plist_new_dict(); plist_dict_set_item(query, "ApplicationType", plist_new_string("Any"));
@@ -200,7 +200,7 @@ static void IFreeStrings(char **strings, size_t count) {
                 }];
             }
             value = rows;
-            if (bundle.length && rows.count == 0) message = @"服务未返回此应用；请先刷新本机清单。";
+            if (bundle.length && rows.count == 0) message = @"设备未返回此应用，请重新读取应用清单。";
         }
         else if ([op isEqualToString:@"profiles"]) {
             REQUIRE(CONNECT(misagent, misagent), @"连接描述文件服务");
@@ -224,7 +224,7 @@ static void IFreeStrings(char **strings, size_t count) {
                 NSString *name = [NSString stringWithFormat:@"profile-%lu.mobileprovision", (unsigned long)i + 1];
                 NSDictionary *file = IFile(data, name, folder, error); if (!file) return nil;
                 [files addObject:file];
-                NSMutableDictionary *row = [@{@"文件":name, @"内容":decoded ?: @"无法解析 CMS 中的 plist，仍可导出原文件", @"字节数":@(data.length)} mutableCopy];
+                NSMutableDictionary *row = [@{@"文件":name, @"内容":decoded ?: @"无法解析 plist，可导出原文件", @"字节数":@(data.length)} mutableCopy];
                 if ([decoded isKindOfClass:NSDictionary.class]) {
                     if ([decoded[@"Name"] isKindOfClass:NSString.class]) row[@"Name"] = decoded[@"Name"];
                     if ([decoded[@"ExpirationDate"] isKindOfClass:NSDate.class]) row[@"描述文件已过期"] = @([decoded[@"ExpirationDate"] timeIntervalSinceNow] < 0);
@@ -243,7 +243,7 @@ static void IFreeStrings(char **strings, size_t count) {
                 }
                 [rows addObject:row];
             }
-            value = rows; message = @"描述文件有效期不等于证书有效期；这里仅解析内容，没有进行签名信任或吊销验证。";
+            value = rows; message = @"描述文件有效期不代表证书有效期；未验证证书信任或撤销状态。";
         }
         else if ([@[@"icon", @"homeWallpaper", @"lockWallpaper", @"iconMetrics", @"orientation"] containsObject:op]) {
             IdeviceFfiError *failure = CONNECT(springboard_services, spring);
@@ -260,9 +260,9 @@ static void IFreeStrings(char **strings, size_t count) {
                     if (!bundle.length) { IError(error, @"请选择一个应用。"); return nil; }
                     REQUIRE(springboard_services_get_icon(spring, bundle.UTF8String, (void **)&bytes, &byteCount), @"读取本地图标");
                 } else if ([op isEqualToString:@"homeWallpaper"]) {
-                    REQUIRE(springboard_services_get_home_screen_wallpaper_preview(spring, (void **)&bytes, &byteCount), @"读取主屏壁纸预览");
+                    REQUIRE(springboard_services_get_home_screen_wallpaper_preview(spring, (void **)&bytes, &byteCount), @"读取主屏幕墙纸");
                 } else {
-                    REQUIRE(springboard_services_get_lock_screen_wallpaper_preview(spring, (void **)&bytes, &byteCount), @"读取锁屏壁纸预览");
+                    REQUIRE(springboard_services_get_lock_screen_wallpaper_preview(spring, (void **)&bytes, &byteCount), @"读取锁定屏幕墙纸");
                 }
                 NSDictionary *file = IFile([NSData dataWithBytes:bytes length:byteCount], [op stringByAppendingString:@".png"], folder, error);
                 if (!file) return nil; [files addObject:file]; value = @{@"字节数":@(byteCount)};
@@ -390,7 +390,7 @@ static void IFreeStrings(char **strings, size_t count) {
             else fields[@"降低透明度"] = local.localizedDescription;
             if (ICheck(configuration_service_get_show_borders(config, &enabled), @"布局调试边框", &local)) fields[@"布局调试边框"] = @(enabled);
             else fields[@"布局调试边框"] = local.localizedDescription;
-            value = fields; message = @"仅查询状态，没有更改设置。个别字段失败会在对应字段中显示。";
+            value = fields; message = @"读取失败的字段会显示错误原因。";
         }
         else if ([@[@"developerMode", @"mountedImages"] containsObject:op]) {
             REQUIRE(CONNECT(image_mounter, mounter), @"连接开发镜像服务");
@@ -416,7 +416,7 @@ static void IFreeStrings(char **strings, size_t count) {
             if ([source isEqualToString:@"coreFiles"]) {
                 if (!remote) { IError(error, @"CoreDevice 文件服务需要 Remote Pairing。"); return nil; }
                 if ([op isEqualToString:@"fileRead"] || [op isEqualToString:@"fileInfo"]) {
-                    IError(error, @"此入口提供 CoreDevice 目录浏览；文件属性及有大小限制的导出请使用共享文档或应用容器入口。"); return nil;
+                    IError(error, @"此入口仅浏览目录。文件属性和导出请使用共享文档或应用容器。"); return nil;
                 }
                 REQUIRE(file_service_connect_rsd(c->adapter, c->handshake, &fileService), @"连接 CoreDevice 文件服务");
                 int domain = [options[@"domain"] intValue];
@@ -432,7 +432,7 @@ static void IFreeStrings(char **strings, size_t count) {
                 }
                 file_service_free_directory_list(strings, stringCount); strings = NULL; stringCount = 0;
                 value = @{@"路径":remotePath, @"文件域":@(domain), @"标识":identifier ?: @"此文件域不需要标识"};
-                message = @"此入口只浏览目录；读取文件请使用共享文档或应用容器入口。";
+                message = @"读取文件请使用共享文档或应用容器。";
             } else {
                 if ([@[@"documents", @"container"] containsObject:source]) {
                     if (!bundle.length) { IError(error, @"请选择应用。"); return nil; }
@@ -463,23 +463,23 @@ static void IFreeStrings(char **strings, size_t count) {
                     size_t fileSize = info.size;
                     afc_file_info_free(&info);
                     if ([op isEqualToString:@"fileRead"]) {
-                        if (isDirectory) { IError(error, @"此项是目录，请打开目录浏览。"); return nil; }
+                        if (isDirectory) { IError(error, @"此项为目录，请打开目录。"); return nil; }
                         const NSUInteger limit = 32 * 1024 * 1024;
-                        if (fileSize > limit) { IError(error, @"此读取入口最多导出 32 MB 文件；大文件请使用原应用导出。"); return nil; }
+                        if (fileSize > limit) { IError(error, @"文件超过 32 MiB，请从原应用导出。"); return nil; }
                         REQUIRE(afc_file_open(afc, remotePath.UTF8String, AfcRdOnly, &fileHandle), @"只读打开文件");
                         NSMutableData *data = [NSMutableData data];
                         while (YES) {
                             uint8_t *chunk = NULL; size_t length = 0;
                             IdeviceFfiError *failure = afc_file_read(fileHandle, &chunk, 64 * 1024, &length);
                             if (!ICheck(failure, @"读取文件", error)) { if (chunk) afc_file_read_data_free(chunk, length); return nil; }
-                            if (data.length + length > limit) { if (chunk) afc_file_read_data_free(chunk, length); IError(error, @"文件超过 32 MB，本次读取已停止。"); return nil; }
+                            if (data.length + length > limit) { if (chunk) afc_file_read_data_free(chunk, length); IError(error, @"文件超过 32 MiB，已停止读取。"); return nil; }
                             if (length) [data appendBytes:chunk length:length];
                             if (chunk) afc_file_read_data_free(chunk, length);
                             if (!length) break;
                         }
                         NSDictionary *file = IFile(data, remotePath.lastPathComponent.length ? remotePath.lastPathComponent : @"export.bin", folder, error);
                         if (!file) return nil; [files addObject:file];
-                        message = @"文件已读取到本软件，可预览或导出；源文件未改动。";
+                        message = @"文件已读取，可预览或导出。";
                     }
                 } else {
                     REQUIRE(afc_list_directory(afc, remotePath.UTF8String, &strings, &stringCount), @"读取目录");

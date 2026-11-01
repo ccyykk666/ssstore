@@ -36,22 +36,22 @@ final class PairingBackgroundExecution {
         }
         guard registered else {
             identifier = nil
-            throw BackgroundExecutionError.message("系统未能注册后台配对任务，请返回前台重试。")
+            throw BackgroundExecutionError.message("无法注册后台任务，请返回 App 重试。")
         }
-        let request = BGContinuedProcessingTaskRequest(identifier: id, title: "ssstore 手机配对",
+        let request = BGContinuedProcessingTaskRequest(identifier: id, title: "ssstore 配对",
                                                       subtitle: "正在准备配对主机")
         request.strategy = .fail
         do { try BGTaskScheduler.shared.submit(request) }
         catch {
             identifier = nil
-            throw BackgroundExecutionError.message("系统未允许启动持续后台配对任务：\(error.localizedDescription)。请检查后台 App 刷新权限，并保持 App 在前台重新开始。")
+            throw BackgroundExecutionError.message("无法启动后台任务：\(error.localizedDescription)。请检查“后台 App 刷新”并在前台重试。")
         }
     }
 
     func update(completed: Int64, subtitle: String) {
         if #available(iOS 26.0, *), let task = task as? BGContinuedProcessingTask {
             task.progress.completedUnitCount = completed
-            task.updateTitle("ssstore 手机配对", subtitle: subtitle)
+            task.updateTitle("ssstore 配对", subtitle: subtitle)
         }
     }
 

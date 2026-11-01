@@ -21,9 +21,9 @@ struct SettingsView: View {
                     TextField("IPv4 地址", text: $model.host)
                         .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("端口", text: $model.port).keyboardType(.numberPad)
-                    Label(model.hasPairing ? "已保存配对文件" : "尚未导入配对文件", systemImage: model.hasPairing ? "checkmark.circle" : "doc.badge.plus")
+                    Label(model.hasPairing ? "已保存配对文件" : "未保存配对文件", systemImage: model.hasPairing ? "checkmark.circle" : "doc.badge.plus")
                     if #available(iOS 27.0, *) {
-                        Button("在手机上创建 Remote Pairing") { creating = true }
+                        Button("创建配对") { creating = true }
                     }
                     Button("导入配对文件") { importing = true }
                     if model.hasPairing {
@@ -31,42 +31,33 @@ struct SettingsView: View {
                             do { exportDocument = PairingFileDocument(data: try model.pairingDataForExport()); exporting = true }
                             catch { model.message = error.localizedDescription }
                         }
-                        Button("移除本软件内的配对文件", role: .destructive) { removing = true }
+                        Button("删除配对文件", role: .destructive) { removing = true }
                     }
                 } header: {
                     Text("本机连接")
                 } footer: {
-                    Text("iOS 27.2 优先使用 Remote Pairing（默认 49152）。传统 Lockdown（62078）用于旧系统实验。导入的配对格式会自动选择协议。")
+                    Text("默认端口：Remote Pairing 49152，Lockdown 62078。")
                 }
                 Section {
-                    Text("1. Loon 更新至 3.5.3（Build 1007）或更高版本。")
-                    Text("2. 在 Loon 中启用“本机开发服务回环”插件并启动 VPN。")
-                    Text("3. iOS 27 及更新版本可点击“在手机上创建 Remote Pairing”；也可导入电脑生成的文件。")
-                    Text("4. 保持设备解锁，先在 Wi-Fi 环境中点击“读取本机”。")
-                    Link("查看你提供的回环插件", destination: URL(string: "https://github.com/ios151/Rewrite/blob/main/dev-loopback/modules/dev-loopback.lpx")!)
+                    Text("Loon 3.5.3（1007）及以上：启用回环插件和 VPN，保持设备解锁并连接 Wi-Fi。")
+                    Link("Loon 回环插件", destination: URL(string: "https://github.com/ios151/Rewrite/blob/main/dev-loopback/modules/dev-loopback.lpx")!)
                 } header: {
-                    Text("配合 Loon 使用")
-                } footer: {
-                    Text("Loon 负责网络通路，配对文件负责设备认证。读取本机时会同时缓存本地图标，未取得时再使用商店图标。")
+                    Text("连接要求")
                 }
-                Section("版本数据") {
+                Section {
                     Picker("商店地区", selection: $model.country) {
-                        Text("中国区优先，未找到时查美区").tag(StoreQueryPolicy.chinaThenUS)
+                        Text("中国大陆优先").tag(StoreQueryPolicy.chinaThenUS)
                         Text("中国大陆 CN").tag("cn")
                         Text("美国 US").tag("us")
                         Text("香港 HK").tag("hk")
                         Text("日本 JP").tag("jp")
                     }
-                    Text("默认先查中国区，仅对未找到的应用重试美区；已在中国区查到的应用不会改用美区版本。也可手动固定单个地区。切换后请重新检查更新。")
+                    Text("中国大陆优先：未找到时查询美国。更改后需重新查询。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("关于") {
-                    Text("ssstore · 0.4.0")
-                    Text("批量查询仅向苹果发送 Bundle ID、数字商店 ID 与所选地区，无需 Apple ID 登录。配对文件与本地图标保存在本软件内，不会随版本查询上传。")
-                    Text("读取清单和检查更新是两个动作。安装、卸载或升级应用后，请重新读取本机；导入清单只是快照。")
-                    Text("所有应用统一读取 Lookup / Browse 安装元数据里的版本标识，与苹果目录匹配。标识不同仅代表存在差异；缺失则待核对。版本字符串与构建号只作原始信息展示。")
-                    Text("本版显示可用版本与更新说明。应用安装和签名续期仍由原安装渠道处理。")
-                    Text("更多菜单中可打开“设备数据与接口”。容量、文件、描述文件和诊断按需读取；服务广播、连接成功及成功返回数据会分别说明。")
+                    Text("ssstore · 0.4.1")
+                    Text("查询仅向 Apple 发送应用标识和地区。配对文件保存在本机。")
                 }
             }
             .disabled(model.busy)
@@ -87,11 +78,11 @@ struct SettingsView: View {
                 }
             }
             .alert("提示", isPresented: Binding(get: { model.message != nil && !creating }, set: { if !$0 { model.message = nil } })) {
-                Button("知道了") { model.message = nil }
+                Button("好") { model.message = nil }
             } message: { Text(model.message ?? "") }
-            .confirmationDialog("移除本软件保存的配对文件？", isPresented: $removing, titleVisibility: .visible) {
-                Button("移除", role: .destructive) { model.removePairing() }
-            } message: { Text("之后读取本机时需重新导入。设备上的信任关系不会被此操作撤销。") }
+            .confirmationDialog("删除配对文件？", isPresented: $removing, titleVisibility: .visible) {
+                Button("删除", role: .destructive) { model.removePairing() }
+            } message: { Text("仅删除本 App 内的文件，设备信任不受影响。再次使用需重新配对或导入。") }
         }
     }
 }
