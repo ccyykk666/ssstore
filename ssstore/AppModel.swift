@@ -41,7 +41,10 @@ final class AppModel: ObservableObject {
 
     init() {
         let prefs = UserDefaults.standard
-        country = prefs.string(forKey: "country") ?? "cn"
+        country = StoreQueryPolicy.initialScope(saved: prefs.string(forKey: "country"),
+                                                migrated: prefs.bool(forKey: "chinaUSFallbackMigration"))
+        prefs.set(country, forKey: "country")
+        prefs.set(true, forKey: "chinaUSFallbackMigration")
         host = prefs.string(forKey: "host") ?? "10.7.0.1"
         mode = PairingMode(rawValue: prefs.string(forKey: "pairingMode") ?? "") ?? .remote
         port = prefs.string(forKey: "port") ?? "49152"
@@ -242,18 +245,22 @@ final class AppModel: ObservableObject {
                 if Task.isCancelled { break }
                 nextLookupAt = Date().addingTimeInterval(3.2)
                 do {
-                    let batch = try await AppleLookup.fetchBatch(bundleIDs: bundles, country: region, knownStoreIDs: knownStoreIDs)
+                    let batch = try await AppleLookup.fetchForScope(bundleIDs: bundles, scope: region, knownStoreIDs: knownStoreIDs)
                     warning = batch.catalogWarning ?? warning
                     for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
                         let release = batch.releases[records[index].effectiveBundleID]
                         // Preserve a previous success on a failed lookup, clearly marked.
                         if let release { records[index].release = release }
-                        records[index].error = release == nil ? LookupError.notFound.localizedDescription : nil
+                        records[index].error = release == nil ? (batch.errors[records[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
                         records[index].checkedAt = Date()
                         completed += 1
                         if release == nil { failures += 1 }
                     }
                     persist()
+                    if batch.stopAfterBatch {
+                        message = "苹果美区接口限流，本轮查询已停止，中国区成功结果已保留。请稍后重试。"
+                        break
+                    }
                 } catch is CancellationError { break }
                 catch {
                     if Task.isCancelled { break }

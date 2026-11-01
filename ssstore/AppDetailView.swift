@@ -37,7 +37,11 @@ struct AppDetailView: View {
                             field("数据获取时间", release.fetchedAt.formatted())
                             field("数据来源", release.source ?? "iTunes Lookup（旧记录）")
                             if let external = release.externalVersionID { field("商店版本标识", external) }
-                            if release.country != model.country { Text("这份结果属于之前选择的地区，请重新查询。").foregroundStyle(.orange) }
+                            if !release.matches(scope: model.country) { Text("这份结果不属于当前查询方式，请重新查询。").foregroundStyle(.orange) }
+                            if model.country == StoreQueryPolicy.chinaThenUS && release.country == "us" && release.lookupScope == model.country {
+                                Text("中国区未找到此应用，本次使用美区补查结果。能否更新取决于安装渠道与账号地区。")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
                             if let minimumOS = release.minimumOS,
                                VersionOrder.status(installed: UIDevice.current.systemVersion, latest: minimumOS) == .update {
                                 Label("此版本要求更新的 iOS 系统。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)

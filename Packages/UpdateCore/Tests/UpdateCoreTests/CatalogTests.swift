@@ -30,6 +30,23 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(app.displayedVersion(country: "cn"), "2.0")
     }
 
+    func testQuarkDriveFullBuildMatchesStoreAndFutureUpdates() {
+        var app = AppRecord(installed: InstalledApp(bundleID: "com.quark.clouddrive", name: "夸克网盘",
+                                                     version: "10.19.5", build: "10.19.5.1091"))
+        app.release = StoreRelease(bundleID: app.id, name: "夸克网盘", version: "10.19.5.1091", country: "cn")
+        XCTAssertEqual(app.status(country: "cn-us"), .current)
+        XCTAssertEqual(app.displayedVersion(country: "cn-us"), "10.19.5.1091")
+        XCTAssertEqual(app.installed.version, "10.19.5")
+        XCTAssertNotNil(app.versionExplanation(country: "cn-us"))
+        app.release?.version = "10.19.5.1092"
+        XCTAssertEqual(app.status(country: "cn-us"), .update)
+        app.installed.build = "10.19.5.1095"
+        XCTAssertEqual(app.status(country: "cn-us"), .different)
+        app.release?.version = "10.19.5"
+        XCTAssertEqual(app.status(country: "cn-us"), .current)
+        XCTAssertEqual(app.displayedVersion(country: "cn-us"), "10.19.5")
+    }
+
     func testMatchingExternalIDResolvesDifferentDisplayFormats() {
         var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "应用", version: "11.5.20", storeID: "123", externalVersionID: "456"))
         app.release = StoreRelease(bundleID: "a", name: "应用", version: "11.5.2", country: "cn", storeID: "123", externalVersionID: "456")

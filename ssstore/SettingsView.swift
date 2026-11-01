@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UpdateCore
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
@@ -50,16 +51,17 @@ struct SettingsView: View {
                 }
                 Section("版本数据") {
                     Picker("商店地区", selection: $model.country) {
+                        Text("中国区优先，未找到时查美区").tag(StoreQueryPolicy.chinaThenUS)
                         Text("中国大陆 CN").tag("cn")
                         Text("美国 US").tag("us")
                         Text("香港 HK").tag("hk")
                         Text("日本 JP").tag("jp")
                     }
-                    Text("切换地区后请重新检查更新。下架、地区限定或改过 Bundle ID 的应用可能查不到，可在应用详情中绑定原始 Bundle ID。")
+                    Text("默认先查中国区，仅对未找到的应用重试美区；已在中国区查到的应用不会改用美区版本。也可手动固定单个地区。切换后请重新检查更新。")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("关于") {
-                    Text("ssstore · 0.3.0")
+                    Text("ssstore · 0.3.1")
                     Text("批量查询仅向苹果发送 Bundle ID、数字商店 ID 与所选地区，无需 Apple ID 登录。配对文件与本地图标保存在本软件内，不会随版本查询上传。")
                     Text("读取清单和检查更新是两个动作。安装、卸载或升级应用后，请重新读取本机；导入清单只是快照。")
                     Text("本版显示可用版本与更新说明。应用安装和签名续期仍由原安装渠道处理。")

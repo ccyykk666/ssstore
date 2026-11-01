@@ -38,6 +38,7 @@ public struct StoreRelease: Codable, Equatable, Sendable {
     public var storeID: String?
     public var externalVersionID: String?
     public var source: String?
+    public var lookupScope: String?
 
     public init(bundleID: String, name: String, version: String, notes: String? = nil,
                 releasedAt: String? = nil, minimumOS: String? = nil, iconURL: URL? = nil,
@@ -57,6 +58,13 @@ public struct StoreRelease: Codable, Equatable, Sendable {
         self.externalVersionID = externalVersionID
         self.source = source
     }
+
+    public func matches(scope: String) -> Bool {
+        if scope == StoreQueryPolicy.chinaThenUS {
+            return country == "cn" || (country == "us" && lookupScope == scope)
+        }
+        return country == scope
+    }
 }
 
 public struct AppRecord: Codable, Identifiable, Sendable {
@@ -71,7 +79,7 @@ public struct AppRecord: Codable, Identifiable, Sendable {
     public var effectiveBundleID: String { lookupBundleID ?? installed.bundleID }
 
     public func status(country: String) -> UpdateStatus {
-        guard error == nil, let release, release.country == country else { return .unknown }
+        guard error == nil, let release, release.matches(scope: country) else { return .unknown }
         if let localID = installed.externalVersionID, let remoteID = release.externalVersionID,
            installed.storeID == release.storeID, installed.storeID != nil {
             if localID == remoteID { return .current }
@@ -82,19 +90,25 @@ public struct AppRecord: Codable, Identifiable, Sendable {
     }
 
     public func displayedVersion(country: String) -> String? {
-        guard let release, release.country == country else { return installed.version }
+        guard let release, release.matches(scope: country) else { return installed.version }
         if let localID = installed.externalVersionID, localID == release.externalVersionID,
            installed.storeID == release.storeID, installed.storeID != nil { return release.version }
         return usesBuildAsDisplay(release) ? installed.build : installed.version
     }
 
     private func usesBuildAsDisplay(_ release: StoreRelease) -> Bool {
+        guard let short = installed.version, !short.isEmpty, let build = installed.build else { return false }
+        // Quark Drive appends its release counter to the short version, and the
+        // store displays that full build. Compare the same shape on both sides.
+        if build.hasPrefix(short + "."),
+           build.split(separator: ".").count == release.version.split(separator: ".").count,
+           VersionOrder.status(installed: build, latest: release.version) != .unknown {
+            return true
+        }
         // Some apps (e.g. JD) put an integer counter in ShortVersionString and
         // the dotted public release in BundleVersion. Other apps require an
         // exact match; JD's documented convention also covers future updates.
-        guard let short = installed.version, !short.isEmpty,
-              short.utf8.allSatisfy({ (48...57).contains($0) }),
-              installed.build?.contains(".") == true else { return false }
+        guard short.utf8.allSatisfy({ (48...57).contains($0) }), build.contains(".") else { return false }
         // JD has independently documented this field convention for years.
         // Keep comparing the build field when a newer store version arrives.
         return installed.bundleID == "com.360buy.jdmobile" ||
@@ -102,12 +116,15 @@ public struct AppRecord: Codable, Identifiable, Sendable {
     }
 
     public func versionExplanation(country: String) -> String? {
-        guard let release, release.country == country else { return nil }
+        guard let release, release.matches(scope: country) else { return nil }
         if let localID = installed.externalVersionID, localID == release.externalVersionID,
            installed.storeID == release.storeID, installed.storeID != nil {
             return "本机与商店的版本标识一致。列表采用此标识对应的商店展示版本，原始安装字段仍保留。"
         }
         if displayedVersion(country: country) != installed.version {
+            if let short = installed.version, installed.build?.hasPrefix(short + ".") == true {
+                return "商店采用带末尾发布编号的完整版本，本机 CFBundleVersion 提供同格式编号。列表使用构建字段进行比较，两个原始字段仍保留。"
+            }
             return installed.bundleID == "com.360buy.jdmobile" ?
                 "京东的设备清单将内部计数放在短版本字段、公开版本放在构建字段。列表按 CFBundleVersion 比较；两个原始字段仍保留。" :
                 "本机短版本为整数计数，且 CFBundleVersion 与商店展示版本一致，列表采用此字段；原始字段仍保留。"

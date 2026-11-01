@@ -55,7 +55,7 @@ struct ContentView: View {
                     Toggle("只看可更新", isOn: $onlyUpdates)
                     Toggle("显示系统应用", isOn: $includeSystem)
                 } footer: {
-                    Text("数据源：苹果目录与 Lookup · \(model.country.uppercased()) 区。5 分钟内可复用查询缓存；更多菜单可强制刷新。版本需核对表示本机内部编号与商店展示无法直接比较。")
+                    Text("数据源：苹果目录与 Lookup · \(StoreQueryPolicy.label(model.country))。5 分钟内可复用缓存；更多菜单可强制刷新。美区补查结果会标注 US。")
                 }
                 Section("应用 · \(visible.count)") {
                     if visible.isEmpty {
@@ -131,7 +131,7 @@ private struct AppRow: View {
             AppIconView(app: record.installed, storeIconURL: record.release?.iconURL)
             VStack(alignment: .leading, spacing: 5) {
                 Text(record.installed.name).font(.headline).lineLimit(1)
-                Text("本机 \(record.displayedVersion(country: country) ?? "未知")  ·  最新 \(record.release?.country == country ? record.release?.version ?? "—" : "—")")
+                Text("本机 \(record.displayedVersion(country: country) ?? "未知")  ·  最新 \(releaseLabel)")
                     .font(.caption).foregroundStyle(.secondary)
                 if record.error != nil { Text("查询失败，点按查看原因").font(.caption2).foregroundStyle(.orange) }
             }
@@ -139,5 +139,10 @@ private struct AppRow: View {
             Text(status.rawValue).font(.caption2.bold())
                 .foregroundStyle(status == .update ? Color.orange : Color.secondary)
         }.padding(.vertical, 4)
+    }
+
+    private var releaseLabel: String {
+        guard let release = record.release, release.matches(scope: country) else { return "—" }
+        return "\(release.version) · \(release.country.uppercased())"
     }
 }

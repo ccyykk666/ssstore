@@ -17,6 +17,22 @@ public enum LookupError: LocalizedError {
 public struct LookupBatch: Sendable {
     public var releases: [String: StoreRelease]
     public var catalogWarning: String? = nil
+    public var errors: [String: String] = [:]
+    public var stopAfterBatch = false
+}
+
+public enum StoreQueryPolicy {
+    public static let chinaThenUS = "cn-us"
+    public static func initialScope(saved: String?, migrated: Bool) -> String {
+        if saved == nil || (!migrated && saved == "cn") { return chinaThenUS }
+        return saved!
+    }
+    public static func label(_ scope: String) -> String {
+        scope == chinaThenUS ? "中国区优先 · 未找到时重试美区" : "\(scope.uppercased()) 区"
+    }
+    public static func notFoundMessage(scope: String) -> String {
+        scope == chinaThenUS ? "中国区和美区均未查到此 Bundle ID。可能已下架、仅在其他地区提供，或自签时修改了标识。" : LookupError.notFound.localizedDescription
+    }
 }
 
 public enum AppleLookup {
@@ -33,7 +49,7 @@ public enum AppleLookup {
     }
 
     public static func isFresh(_ release: StoreRelease?, country: String, now: Date = Date()) -> Bool {
-        guard let release, release.country == country, release.source == "Apple Catalog" else { return false }
+        guard let release, release.matches(scope: country), release.source == "Apple Catalog" else { return false }
         let age = now.timeIntervalSince(release.fetchedAt)
         return age >= 0 && age < cacheLifetime
     }
@@ -78,9 +94,48 @@ public enum AppleLookup {
     }
 
     public static func fetch(bundleID: String, country: String) async throws -> StoreRelease {
-        let batch = try await fetchBatch(bundleIDs: [bundleID], country: country)
+        let batch = try await fetchForScope(bundleIDs: [bundleID], scope: country)
         guard let release = batch.releases[bundleID] else { throw LookupError.notFound }
         return release
+    }
+
+    public static func fetchForScope(bundleIDs: [String], scope: String,
+                                     knownStoreIDs: [String: String] = [:]) async throws -> LookupBatch {
+        try await resolveScope(bundleIDs: bundleIDs, scope: scope, knownStoreIDs: knownStoreIDs) { ids, region, known in
+            try await fetchBatch(bundleIDs: ids, country: region, knownStoreIDs: known)
+        }
+    }
+
+    static func resolveScope(bundleIDs: [String], scope: String, knownStoreIDs: [String: String] = [:],
+                             lookup: @Sendable ([String], String, [String: String]) async throws -> LookupBatch) async throws -> LookupBatch {
+        guard scope == StoreQueryPolicy.chinaThenUS else {
+            return try await lookup(bundleIDs, scope, knownStoreIDs)
+        }
+        // A failed CN request throws: only a successful, missing result triggers US.
+        var result = try await lookup(bundleIDs, "cn", knownStoreIDs)
+        let missing = fallbackBundleIDs(requested: bundleIDs, primary: result.releases)
+        if !missing.isEmpty {
+            do {
+                let fallback = try await lookup(missing, "us", knownStoreIDs)
+                result.releases.merge(fallback.releases) { primary, _ in primary }
+                let warnings = [result.catalogWarning, fallback.catalogWarning].compactMap { $0 }
+                result.catalogWarning = warnings.isEmpty ? nil : warnings.joined(separator: "\n")
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                if Task.isCancelled { throw CancellationError() }
+                // Keep successful CN entries if the US retry fails.
+                for bundle in missing { result.errors[bundle] = "中国区未找到；美区重试失败：\(error.localizedDescription)" }
+                result.catalogWarning = "美区补查失败，已保留中国区结果：\(error.localizedDescription)"
+                if case LookupError.http(429) = error { result.stopAfterBatch = true }
+            }
+        }
+        for bundle in Array(result.releases.keys) { result.releases[bundle]?.lookupScope = scope }
+        return result
+    }
+
+    public static func fallbackBundleIDs(requested: [String], primary: [String: StoreRelease]) -> [String] {
+        var seen = Set<String>()
+        return requested.filter { primary[$0] == nil && seen.insert($0).inserted }
     }
 
     // Rechecks use saved numeric IDs. Discover unknown IDs in one multi-bundle
