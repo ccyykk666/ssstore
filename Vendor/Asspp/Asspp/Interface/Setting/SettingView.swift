@@ -46,7 +46,7 @@ struct StoreSettingsSections: View {
             } header: {
                 Text("商店连接")
             } footer: {
-                Text("本机安装需安装并信任证书。")
+                Text("仅证书安装方式需要安装并信任证书。")
             }
             Section("下载管理") {
                 Button("删除全部下载", role: .destructive) { Downloads.this.removeAll() }

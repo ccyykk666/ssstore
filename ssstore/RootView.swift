@@ -5,9 +5,9 @@ struct RootView: View {
     var body: some View {
         TabView {
             ContentView().tabItem { Label("应用", systemImage: "square.stack.3d.up") }
-            SearchView().tabItem { Label("商店", systemImage: "magnifyingglass") }
-            NavigationStack { InspectionView() }.tabItem { Label("设备数据", systemImage: "server.rack") }
+            NavigationStack { InspectionView() }.tabItem { Label("设备", systemImage: "iphone") }
             AccountView().tabItem { Label("账户", systemImage: "person.crop.circle") }
+            SearchView().tabItem { Label("搜索", systemImage: "magnifyingglass") }
         }
         .neverMinimizeTab()
         .sheet(item: $model.filePresentation) { item in

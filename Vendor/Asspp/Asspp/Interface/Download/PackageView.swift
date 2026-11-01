@@ -27,6 +27,8 @@ struct PackageView: View {
 
     @Environment(\.dismiss) var dismiss
     #if os(iOS)
+        @EnvironmentObject private var deviceModel: AppModel
+        @State private var pairingInstall = false
         @State private var installer: Installer?
         @State private var error: String = ""
     #endif
@@ -71,12 +73,18 @@ struct PackageView: View {
                 #endif
                 #if os(iOS)
                     Section {
+                        Button("配对安装") { pairingInstall = true }
+                            .disabled(deviceModel.busy)
+                            .sheet(isPresented: $pairingInstall) {
+                                PairingInstallView(packageURL: url, bundleID: archive.software.bundleID)
+                            }
                         AsyncButton {
                             installer = try await Installer(archive: archive, path: url)
                         } label: {
-                            Text("Install")
+                            Text("证书安装")
                         }
                         .disabledWhenLoading()
+                        .disabled(deviceModel.busy)
                         .sheet(item: $installer) {
                             installer?.destroy()
                             installer = nil

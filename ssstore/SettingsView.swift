@@ -5,12 +5,8 @@ import UpdateCore
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var importing = false
-    @State private var removing = false
-    @State private var creating = false
-    @State private var exporting = false
     @State private var choosingRegion = false
-    @State private var exportDocument = PairingFileDocument(data: Data())
+    @State private var showingPairing = false
 
     var body: some View {
         NavigationStack {
@@ -25,17 +21,8 @@ struct SettingsView: View {
                         TextField("49152", text: $model.port).keyboardType(.numberPad)
                             .multilineTextAlignment(.trailing)
                     }
-                    Label(model.hasPairing ? "已保存配对文件" : "未保存配对文件", systemImage: model.hasPairing ? "checkmark.circle" : "doc.badge.plus")
-                    if #available(iOS 27.0, *) {
-                        Button("创建配对") { creating = true }
-                    }
-                    Button("导入配对文件") { importing = true }
-                    if model.hasPairing {
-                        Button("导出配对文件") {
-                            do { exportDocument = PairingFileDocument(data: try model.pairingDataForExport()); exporting = true }
-                            catch { model.message = error.localizedDescription }
-                        }
-                        Button("删除配对文件", role: .destructive) { removing = true }
+                    NavigationLink(isActive: $showingPairing) { PairingSettingsView() } label: {
+                        LabeledContent("配对", value: model.hasPairing ? "已配对" : "未配对")
                     }
                 } header: {
                     Text("连接配置")
@@ -47,8 +34,10 @@ struct SettingsView: View {
                             Spacer()
                             Text(StoreRegionNames.name(model.country)).foregroundStyle(.secondary)
                             Image(systemName: "chevron.up.chevron.down").font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
                 StoreSettingsSections()
                 if !model.ignoredApps.names.isEmpty {
@@ -63,7 +52,7 @@ struct SettingsView: View {
                                 .font(.footnote).textSelection(.enabled).padding()
                         }.navigationTitle("Asspp · MIT")
                     }
-                    Text("ssstore · 0.5.1")
+                    Text("ssstore · 0.5.2")
                 }
             }
             .modifier(SoftTopScrollEdge())
@@ -71,6 +60,44 @@ struct SettingsView: View {
             .navigationTitle("设置")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             .sheet(isPresented: $choosingRegion) { StoreRegionPickerView(selection: $model.country) }
+            .alert("提示", isPresented: Binding(get: { model.message != nil && !showingPairing }, set: { if !$0 { model.message = nil } })) {
+                Button("好") { model.message = nil }
+            } message: { Text(model.message ?? "") }
+        }
+        .modifier(SoftTopScrollEdge())
+        .presentationDragIndicator(.visible)
+    }
+}
+
+private struct PairingSettingsView: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var importing = false
+    @State private var removing = false
+    @State private var creating = false
+    @State private var exporting = false
+    @State private var exportDocument = PairingFileDocument(data: Data())
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("状态", value: model.hasPairing ? "已配对" : "未配对")
+                if #available(iOS 27.0, *) {
+                    Button("创建配对") { creating = true }
+                }
+                Button("导入配对文件") { importing = true }
+                if model.hasPairing {
+                    Button("导出配对文件") {
+                        do { exportDocument = PairingFileDocument(data: try model.pairingDataForExport()); exporting = true }
+                        catch { model.message = error.localizedDescription }
+                    }
+                    Button("删除配对文件", role: .destructive) { removing = true }
+                }
+            }
+        }
+            .modifier(SoftTopScrollEdge())
+            .navigationTitle("配对")
+            .navigationBarTitleDisplayMode(.inline)
+            .disabled(model.busy)
             .sheet(isPresented: $creating) {
                 OnDevicePairingView(controller: model.pairingController)
                     .environment(\.isEnabled, true)
@@ -91,9 +118,6 @@ struct SettingsView: View {
             .confirmationDialog("删除配对文件？", isPresented: $removing, titleVisibility: .visible) {
                 Button("删除", role: .destructive) { model.removePairing() }
             } message: { Text("仅删除本 App 内的文件，设备信任不受影响。再次使用需重新配对或导入。") }
-        }
-        .modifier(SoftTopScrollEdge())
-        .presentationDragIndicator(.visible)
     }
 }
 

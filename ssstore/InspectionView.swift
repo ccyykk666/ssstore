@@ -37,7 +37,7 @@ struct InspectionView: View {
                 }.font(.footnote)
             }
         }
-        .navigationTitle(bundleID == nil ? "设备数据" : "应用数据")
+        .navigationTitle(bundleID == nil ? "设备" : "应用数据")
         .searchable(text: $search, prompt: "搜索数据或服务")
     }
 }

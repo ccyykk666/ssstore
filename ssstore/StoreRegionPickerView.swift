@@ -47,8 +47,9 @@ struct StoreRegionPickerView: View {
                 Text(StoreRegionNames.name(code)).foregroundStyle(.primary)
                 if code != StoreQueryPolicy.chinaThenUS { Text(code.uppercased()).font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                if code == selection { Image(systemName: "checkmark") }
+                if code == selection { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
             }
         }
+        .buttonStyle(.plain)
     }
 }

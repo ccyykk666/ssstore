@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import UpdateCore
 
 @MainActor
@@ -8,6 +9,8 @@ final class AppModel: ObservableObject {
     @Published var busy = false
     @Published var activity = ""
     @Published var isChecking = false
+    @Published private(set) var lookupCompleted = 0
+    @Published private(set) var lookupTotal = 0
     @Published var message: String?
     @Published var filePresentation: FilePresentation?
     @Published var scannedAt: Date?
@@ -178,6 +181,40 @@ final class AppModel: ObservableObject {
         return iconsDirectory.appendingPathComponent(key).appendingPathExtension("png")
     }
 
+    func installPackage(at url: URL, bundleID: String,
+                        progress: @escaping @MainActor (String, Double) -> Void) async throws {
+        func failure(_ text: String) -> NSError {
+            NSError(domain: "ssstore.Installation", code: 1, userInfo: [NSLocalizedDescriptionKey: text])
+        }
+        guard !busy else { throw failure("请等待当前操作完成。") }
+        guard hasPairing else { throw failure("请先在设置中完成配对。") }
+        guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
+        busy = true
+        activity = "正在连接设备…"
+        let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        defer {
+            UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
+            busy = false; activity = ""
+        }
+        let pairingPath = pairingURL.path
+        let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try DeviceInstaller.install(pairingPath: pairingPath, host: address, port: number,
+                        packagePath: url.path, bundleID: bundleID) { stage, fraction in
+                            DispatchQueue.main.async {
+                                self.activity = stage
+                                progress(stage, fraction)
+                            }
+                        }
+                    continuation.resume(returning: ())
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
     func importPairing(from url: URL) {
         guard !busy else { return }
         do {
@@ -290,6 +327,8 @@ final class AppModel: ObservableObject {
         }
         busy = true
         isChecking = true
+        lookupCompleted = cached.count
+        lookupTotal = ids.count
         queryWarning = ""
         checkTask = Task {
             var completed = cached.count
@@ -302,9 +341,8 @@ final class AppModel: ObservableObject {
                 queryWarning = warnings.joined(separator: "\n")
                 busy = false; isChecking = false; activity = ""; checkTask = nil; persist()
             }
-            for (offset, bundles) in batches.enumerated() {
+            for bundles in batches {
                 if Task.isCancelled { break }
-                activity = "批量查询 \(offset + 1)/\(batches.count) · 已完成 \(completed)/\(ids.count)"
                 // Throttle batches rather than sleeping once per app.
                 let wait = nextLookupAt.timeIntervalSinceNow
                 if wait > 0 { do { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) } catch { break } }
@@ -320,6 +358,7 @@ final class AppModel: ObservableObject {
                         records[index].error = release == nil ? (batch.errors[records[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
                         records[index].checkedAt = Date()
                         completed += 1
+                        lookupCompleted = completed
                         if release == nil { failures += 1 }
                     }
                     persist()
@@ -334,6 +373,7 @@ final class AppModel: ObservableObject {
                         records[index].error = error.localizedDescription
                         records[index].checkedAt = Date()
                         completed += 1
+                        lookupCompleted = completed
                         failures += 1
                     }
                     // A rate-limit response should end the batch instead of hammering the service.
