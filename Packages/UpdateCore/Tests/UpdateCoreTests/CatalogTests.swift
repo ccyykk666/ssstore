@@ -34,6 +34,7 @@ final class CatalogTests: XCTestCase {
         var app = AppRecord(installed: InstalledApp(bundleID: "com.quark.clouddrive", name: "夸克网盘",
                                                      version: "10.19.5", build: "10.19.5.1091"))
         app.release = StoreRelease(bundleID: app.id, name: "夸克网盘", version: "10.19.5.1091", country: "cn")
+        app.installed.metadataVersion = "10.19.5"
         XCTAssertEqual(app.status(country: "cn-us"), .current)
         XCTAssertEqual(app.displayedVersion(country: "cn-us"), "10.19.5.1091")
         XCTAssertEqual(app.installed.version, "10.19.5")

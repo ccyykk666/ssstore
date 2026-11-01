@@ -112,12 +112,12 @@ public struct AppRecord: Codable, Identifiable, Sendable {
         guard let release, release.matches(scope: country) else { return installed.version }
         if let localID = installed.externalVersionID, localID == release.externalVersionID,
            installed.storeID == release.storeID, installed.storeID != nil { return release.version }
-        if let metadata = installed.metadataVersion { return metadata }
         if let native = installed.coreDeviceVersion,
            VersionOrder.status(installed: native, latest: release.version) == .current { return native }
         if let browse = installed.browseVersion,
            VersionOrder.status(installed: browse, latest: release.version) == .current { return browse }
-        return usesBuildAsDisplay(release) ? installed.build : installed.version
+        if usesBuildAsDisplay(release) { return installed.build }
+        return installed.metadataVersion ?? installed.version
     }
 
     private func usesBuildAsDisplay(_ release: StoreRelease) -> Bool {
@@ -146,7 +146,6 @@ public struct AppRecord: Codable, Identifiable, Sendable {
             return "本机与商店的版本标识一致。列表采用此标识对应的商店展示版本，原始安装字段仍保留。"
         }
         if displayedVersion(country: country) != installed.version {
-            if installed.metadataVersion != nil { return "列表采用设备返回的安装元数据版本；原始 Bundle 字段与 CoreDevice 字段均保留，便于核对。" }
             if displayedVersion(country: country) == installed.coreDeviceVersion {
                 return "CoreDevice 返回的本机版本与商店展示一致，列表使用该字段；原始 Bundle 字段仍保留。"
             }
@@ -155,6 +154,9 @@ public struct AppRecord: Codable, Identifiable, Sendable {
             }
             if let short = installed.version, installed.build?.hasPrefix(short + ".") == true {
                 return "商店采用带末尾发布编号的完整版本，本机 CFBundleVersion 提供同格式编号。列表使用构建字段进行比较，两个原始字段仍保留。"
+            }
+            if displayedVersion(country: country) == installed.metadataVersion {
+                return "列表采用设备返回的安装元数据版本；原始 Bundle 字段与 CoreDevice 字段均保留，便于核对。"
             }
             return installed.bundleID == "com.360buy.jdmobile" ?
                 "京东的设备清单将内部计数放在短版本字段、公开版本放在构建字段。列表按 CFBundleVersion 比较；两个原始字段仍保留。" :
