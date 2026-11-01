@@ -41,9 +41,10 @@ final class AppModel: ObservableObject {
 
     init() {
         let prefs = UserDefaults.standard
-        country = StoreQueryPolicy.initialScope(saved: prefs.string(forKey: "country"),
-                                                migrated: prefs.bool(forKey: "chinaUSFallbackMigration"))
-        prefs.set(country, forKey: "country")
+        let initialCountry = StoreQueryPolicy.initialScope(saved: prefs.string(forKey: "country"),
+                                                           migrated: prefs.bool(forKey: "chinaUSFallbackMigration"))
+        country = initialCountry
+        prefs.set(initialCountry, forKey: "country")
         prefs.set(true, forKey: "chinaUSFallbackMigration")
         host = prefs.string(forKey: "host") ?? "10.7.0.1"
         mode = PairingMode(rawValue: prefs.string(forKey: "pairingMode") ?? "") ?? .remote

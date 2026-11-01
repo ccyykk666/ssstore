@@ -26,6 +26,13 @@ public enum InventoryParser {
                 storeID: identifier(row["storeID"] ?? row["itemID"] ?? metadata["itemId"]),
                 externalVersionID: identifier(row["externalVersionID"] ?? metadata["softwareVersionExternalIdentifier"])
             )
+            unique[id]?.coreDeviceVersion = text(row, ["CoreDeviceVersion"])
+            unique[id]?.coreDeviceBuild = text(row, ["CoreDeviceBuild"])
+            unique[id]?.browseVersion = text(row, ["BrowseVersion"])
+            unique[id]?.browseBuild = text(row, ["BrowseBuild"])
+            unique[id]?.metadataVersion = text(row, ["MetadataVersion"]) ?? text(metadata, ["bundleShortVersionString"])
+            unique[id]?.metadataBuild = text(row, ["MetadataBuild"]) ?? text(metadata, ["bundleVersion"])
+            unique[id]?.versionReadNote = text(row, ["VersionReadNote"])
         }
         guard !unique.isEmpty else { throw InventoryError.empty }
         return unique.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

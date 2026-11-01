@@ -29,6 +29,16 @@ struct AppDetailView: View {
                         field("Bundle ID", record.id)
                         if let date = model.scannedAt { field("清单记录时间", date.formatted()) }
                     }
+                    Section("本机数据核对") {
+                        Text(record.installed.versionReadNote ?? "此记录尚未补充本机数据。请重新点击“读取本机”。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if let version = record.installed.coreDeviceVersion { field("CoreDevice · version", version) }
+                        if let build = record.installed.coreDeviceBuild { field("CoreDevice · bundleVersion", build) }
+                        if let version = record.installed.browseVersion { field("Browse · CFBundleShortVersionString", version) }
+                        if let build = record.installed.browseBuild { field("Browse · CFBundleVersion", build) }
+                        if let version = record.installed.metadataVersion { field("安装元数据 · bundleShortVersionString", version) }
+                        if let build = record.installed.metadataBuild { field("安装元数据 · bundleVersion", build) }
+                    }
                     if let release = record.release {
                         Section("商店版本 · \(release.country.uppercased())") {
                             field("最新版本", release.version)

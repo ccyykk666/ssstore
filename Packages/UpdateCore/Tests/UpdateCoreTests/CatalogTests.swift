@@ -102,7 +102,7 @@ final class CatalogTests: XCTestCase {
     }
 
     func testOldSavedInventoryRemainsDecodable() throws {
-        let data = Data(#"{"installed":{"bundleID":"a","name":"a","version":"1","isSystem":false},"release":{"bundleID":"a","name":"a","version":"2","country":"cn","fetchedAt":0}}"#.utf8)
+        let data = Data(#"{"installed":{"bundleID":"a","name":"a","version":"1.0","isSystem":false},"release":{"bundleID":"a","name":"a","version":"1.1","country":"cn","fetchedAt":0}}"#.utf8)
         let app = try JSONDecoder().decode(AppRecord.self, from: data)
         XCTAssertEqual(app.status(country: "cn"), .update)
         XCTAssertNil(app.installed.localIconKey)
@@ -116,5 +116,42 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(app.externalVersionID, "456")
         XCTAssertEqual(app.localIconKey, "abc")
         XCTAssertEqual(app.version, "11.5.20")
+    }
+
+    func testICBCHistoricalFieldsRequireEvidence() {
+        var app = AppRecord(installed: InstalledApp(bundleID: "com.icbc.iphoneclient", name: "中国工商银行", version: "3.1.40", build: "1.2"))
+        app.release = StoreRelease(bundleID: app.id, name: "中国工商银行", version: "11.0.9.0", country: "cn", storeID: "123", externalVersionID: "456")
+        XCTAssertEqual(app.status(country: "cn-us"), .different)
+        app.installed.coreDeviceVersion = "11.0.9.0"
+        XCTAssertEqual(app.status(country: "cn-us"), .current)
+        app.installed.coreDeviceVersion = "3.1.40"
+        app.installed.storeID = "123"
+        app.installed.externalVersionID = "456"
+        XCTAssertEqual(app.status(country: "cn-us"), .current)
+        XCTAssertEqual(app.displayedVersion(country: "cn-us"), "11.0.9.0")
+    }
+
+    func testMetadataWithoutStoreIdentityStillRequiresCrossMajorReview() {
+        var app = AppRecord(installed: InstalledApp(bundleID: "a", name: "a", version: "3.1.40", build: "1.2"))
+        app.installed.metadataVersion = "10.0.0"
+        app.release = StoreRelease(bundleID: "a", name: "a", version: "11.0.9.0", country: "cn")
+        XCTAssertEqual(app.status(country: "cn"), .different)
+        app.installed.metadataVersion = nil
+        app.installed.version = "01.002"
+        app.release?.version = "1.3"
+        XCTAssertEqual(app.status(country: "cn"), .update)
+        app.installed.coreDeviceVersion = "1.4"
+        XCTAssertEqual(app.status(country: "cn"), .different)
+    }
+
+    func testEnrichedDeviceFieldsPreserveOriginalValues() throws {
+        let data = Data(#"[{"CFBundleIdentifier":"a","CFBundleShortVersionString":"3.1.40","CFBundleVersion":"1.2","CoreDeviceVersion":"11.0.9.0","CoreDeviceBuild":"456","BrowseVersion":"3.1.40","BrowseBuild":"1.2","MetadataVersion":"11.0.9.0","MetadataBuild":"456","VersionReadNote":"系统提供了安装版本标识"}]"#.utf8)
+        let app = try XCTUnwrap(InventoryParser.parse(data).first)
+        XCTAssertEqual(app.version, "3.1.40")
+        XCTAssertEqual(app.build, "1.2")
+        XCTAssertEqual(app.coreDeviceVersion, "11.0.9.0")
+        XCTAssertEqual(app.browseVersion, "3.1.40")
+        XCTAssertEqual(app.metadataVersion, "11.0.9.0")
+        XCTAssertNotNil(app.versionReadNote)
     }
 }

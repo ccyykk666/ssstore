@@ -18,6 +18,37 @@ static NSString *IconKey(NSDictionary *item) {
     return key;
 }
 
+static NSDictionary *ReadPlist(plist_t node) {
+    char *xml = NULL;
+    uint32_t length = 0;
+    plist_to_xml(node, &xml, &length);
+    if (!xml) return nil;
+    NSData *data = [NSData dataWithBytes:xml length:length];
+    plist_mem_free(xml);
+    id value = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL];
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+
+static void MergeStoreMetadata(NSMutableDictionary *item, NSDictionary *row) {
+    id metadata = row[@"iTunesMetadata"];
+    if ([metadata isKindOfClass:NSData.class]) {
+        metadata = [NSPropertyListSerialization propertyListWithData:metadata options:0 format:NULL error:NULL];
+    }
+    if ([metadata isKindOfClass:NSDictionary.class]) {
+        NSDictionary *keys = @{@"itemId": @"storeID", @"softwareVersionExternalIdentifier": @"externalVersionID",
+                               @"bundleShortVersionString": @"MetadataVersion", @"bundleVersion": @"MetadataBuild"};
+        for (NSString *key in keys) {
+            id value = metadata[key];
+            if ([value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class]) item[keys[key]] = [value description];
+        }
+    }
+    NSDictionary *keys = @{@"ExternalVersionIdentifier": @"externalVersionID", @"StoreItemIdentifier": @"storeID"};
+    for (NSString *key in keys) {
+        id value = row[key];
+        if ([value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class]) item[keys[key]] = [value description];
+    }
+}
+
 static void SetError(NSError **error, NSString *message) {
     if (error) *error = [NSError errorWithDomain:@"ssstore.Device" code:1
                                       userInfo:@{NSLocalizedDescriptionKey: message}];
@@ -75,6 +106,12 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     struct RsdHandshakeHandle *handshake = NULL;
     struct InstallationProxyClientHandle *client = NULL;
     struct SpringBoardServicesClientHandle *springboard = NULL;
+    struct AppServiceHandle *appService = NULL;
+    struct AppListEntryC *nativeApps = NULL;
+    uintptr_t nativeCount = 0;
+    plist_t browseOptions = NULL;
+    plist_t *browseRows = NULL;
+    size_t browseCount = 0;
     void *raw = NULL;
     size_t count = 0;
     @try {
@@ -111,25 +148,59 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             }
             if (![item[@"CFBundleIdentifier"] length]) continue;
             item[@"LocalIconKey"] = IconKey(item);
-            // Some OS versions expose store metadata; keep only identifiers,
-            // never the complete metadata (which may contain account details).
-            id metadata = row[@"iTunesMetadata"];
-            if ([metadata isKindOfClass:NSData.class]) {
-                metadata = [NSPropertyListSerialization propertyListWithData:metadata options:0 format:NULL error:NULL];
-            }
-            if ([metadata isKindOfClass:NSDictionary.class]) {
-                for (NSString *key in @[@"itemId", @"softwareVersionExternalIdentifier"]) {
-                    id value = metadata[key];
-                    if ([value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class]) {
-                        item[[key isEqualToString:@"itemId"] ? @"storeID" : @"externalVersionID"] = [value description];
-                    }
-                }
-            }
+            MergeStoreMetadata(item, row);
             [apps addObject:item];
         }
         NSData *result = [NSJSONSerialization dataWithJSONObject:apps options:0 error:error];
         if (!result) return nil;
         inventory(result); // Publish the list before the icon loop finishes.
+        NSMutableDictionary<NSString *, NSMutableDictionary *> *byID = [NSMutableDictionary dictionary];
+        for (NSMutableDictionary *item in apps) byID[item[@"CFBundleIdentifier"]] = item;
+        NSMutableArray<NSString *> *versionNotes = [NSMutableArray array];
+        NSError *readError = nil;
+        progress(@"清单已读取，正在补充安装元数据…");
+        browseOptions = plist_new_dict();
+        plist_dict_set_item(browseOptions, "ApplicationType", plist_new_string("Any"));
+        plist_t attributes = plist_new_array();
+        for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleShortVersionString", @"CFBundleVersion",
+                                @"iTunesMetadata", @"ExternalVersionIdentifier", @"StoreItemIdentifier"]) {
+            plist_array_append_item(attributes, plist_new_string(key.UTF8String));
+        }
+        plist_dict_set_item(browseOptions, "ReturnAttributes", attributes);
+        if (Check(installation_proxy_browse(client, browseOptions, &browseRows, &browseCount), @"补充安装元数据", &readError)) {
+            for (size_t index = 0; index < browseCount; index++) {
+                NSDictionary *row = ReadPlist(browseRows[index]);
+                if (![row[@"CFBundleIdentifier"] isKindOfClass:NSString.class]) continue;
+                NSMutableDictionary *item = byID[row[@"CFBundleIdentifier"]];
+                if (!item) continue;
+                if ([row[@"CFBundleShortVersionString"] isKindOfClass:NSString.class]) item[@"BrowseVersion"] = row[@"CFBundleShortVersionString"];
+                if ([row[@"CFBundleVersion"] isKindOfClass:NSString.class]) item[@"BrowseBuild"] = row[@"CFBundleVersion"];
+                MergeStoreMetadata(item, row);
+            }
+            [versionNotes addObject:@"已读取 InstallationProxy Lookup / Browse"];
+        } else { [versionNotes addObject:readError.localizedDescription]; }
+        if (remotePairing) {
+            progress(@"正在交叉读取 CoreDevice 应用信息…");
+            if (Check(app_service_connect_rsd(adapter, handshake, &appService), @"连接 CoreDevice 应用服务", &readError) &&
+                Check(app_service_list_apps(appService, 1, 1, 1, 1, 1, &nativeApps, &nativeCount), @"读取 CoreDevice 应用信息", &readError)) {
+                for (uintptr_t index = 0; index < nativeCount; index++) {
+                    struct AppListEntryC *entry = &nativeApps[index];
+                    if (!entry->bundle_identifier) continue;
+                    NSMutableDictionary *item = byID[[NSString stringWithUTF8String:entry->bundle_identifier]];
+                    if (!item) continue;
+                    if (entry->version) item[@"CoreDeviceVersion"] = [NSString stringWithUTF8String:entry->version];
+                    if (entry->bundle_version) item[@"CoreDeviceBuild"] = [NSString stringWithUTF8String:entry->bundle_version];
+                }
+                [versionNotes addObject:@"已读取 CoreDevice"];
+            } else { [versionNotes addObject:readError.localizedDescription]; }
+        }
+        for (NSMutableDictionary *item in apps) {
+            NSMutableArray *notes = [versionNotes mutableCopy];
+            [notes addObject:item[@"externalVersionID"] ? @"系统提供了安装版本标识" : @"系统未提供安装版本标识"];
+            item[@"VersionReadNote"] = [notes componentsJoinedByString:@"；"];
+        }
+        result = [NSJSONSerialization dataWithJSONObject:apps options:0 error:NULL] ?: result;
+        inventory(result);
         NSFileManager *files = NSFileManager.defaultManager;
         NSError *iconError = nil;
         if (![files createDirectoryAtPath:iconsDirectory withIntermediateDirectories:YES attributes:nil error:&iconError]) {
@@ -188,6 +259,13 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                   (unsigned long)apps.count, failed ? [NSString stringWithFormat:@"；部分未取得：%@", iconError.localizedDescription ?: @"系统未返回图标"] : @""]);
         return result;
     } @finally {
+        if (browseRows) {
+            idevice_plist_array_free(browseRows, browseCount);
+            free(browseRows);
+        }
+        plist_free(browseOptions);
+        app_service_free_app_list(nativeApps, nativeCount);
+        app_service_free(appService);
         if (raw) {
             idevice_plist_array_free((plist_t *)raw, count);
             // v0.1.68 frees each node but leaves the boxed pointer slice allocated.

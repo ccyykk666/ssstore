@@ -55,7 +55,7 @@ struct ContentView: View {
                     Toggle("只看可更新", isOn: $onlyUpdates)
                     Toggle("显示系统应用", isOn: $includeSystem)
                 } footer: {
-                    Text("数据源：苹果目录与 Lookup · \(StoreQueryPolicy.label(model.country))。5 分钟内可复用缓存；更多菜单可强制刷新。美区补查结果会标注 US。")
+                    Text("数据源：苹果目录与 Lookup · \(StoreQueryPolicy.label(model.country))。美区补查标注 US；5 分钟内可复用缓存。缺少可靠对应信息时，跨主版本差异标为待核对。")
                 }
                 Section("应用 · \(visible.count)") {
                     if visible.isEmpty {

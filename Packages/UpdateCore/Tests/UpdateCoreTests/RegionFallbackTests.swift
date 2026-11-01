@@ -30,7 +30,7 @@ final class RegionFallbackTests: XCTestCase {
         let result = try await AppleLookup.resolveScope(bundleIDs: ["a", "b", "b"], scope: "cn-us") { ids, region, _ in
             await trace.append(region, ids: ids)
             if region == "cn" { return LookupBatch(releases: ["a": Self.release("a", country: region)]) }
-            return LookupBatch(releases: ["b": Self.release("b", country: region)])
+            return LookupBatch(releases: ["b": Self.release("b", country: region, version: "2.1")])
         }
         let calls = await trace.regions
         let requests = await trace.ids
@@ -38,7 +38,7 @@ final class RegionFallbackTests: XCTestCase {
         XCTAssertEqual(requests.last, ["b"])
         XCTAssertEqual(result.releases["a"]?.country, "cn")
         XCTAssertEqual(result.releases["b"]?.country, "us")
-        var app = AppRecord(installed: InstalledApp(bundleID: "b", name: "b", version: "1.0"))
+        var app = AppRecord(installed: InstalledApp(bundleID: "b", name: "b", version: "2.0"))
         app.release = result.releases["b"]
         XCTAssertEqual(app.status(country: "cn-us"), .update)
         XCTAssertEqual(app.status(country: "cn"), .unknown)
