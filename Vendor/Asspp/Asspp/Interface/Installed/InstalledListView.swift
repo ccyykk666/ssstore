@@ -90,7 +90,7 @@
                         .font(.system(.footnote, design: .rounded))
                         .foregroundStyle(.secondary)
                     Text(String([app.info.region, app.info.accountID].joined(by: " - ")))
-                        .redacted(reason: .placeholder, isEnabled: vm.demoMode)
+
                         .font(.system(.footnote, design: .rounded))
                         .foregroundStyle(.secondary)
                 }
@@ -126,4 +126,5 @@
         }
     }
 #endif
+
 

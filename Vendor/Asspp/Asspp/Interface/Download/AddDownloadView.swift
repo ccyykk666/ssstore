@@ -58,7 +58,7 @@ struct AddDownloadView: View {
                 }
                 .pickerStyle(.menu)
                 .onAppear { selection = avm.accounts.first?.id ?? .init() }
-                .redacted(reason: .placeholder, isEnabled: avm.demoMode)
+
             } header: {
                 Text("Account")
             } footer: {
@@ -100,4 +100,5 @@ struct AddDownloadView: View {
         .navigationTitle("Direct Download")
     }
 }
+
 

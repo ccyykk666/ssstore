@@ -15,7 +15,7 @@ struct SSStoreApp: App {
     }
 }
 
-private struct SoftTopScrollEdge: ViewModifier {
+struct SoftTopScrollEdge: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
@@ -25,4 +25,5 @@ private struct SoftTopScrollEdge: ViewModifier {
         }
     }
 }
+
 

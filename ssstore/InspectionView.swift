@@ -14,10 +14,6 @@ struct InspectionView: View {
     }
     var body: some View {
         List {
-            Section {
-                Text("只读操作，可用性取决于系统和权限。")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
             ForEach(InspectionOperation.groups, id: \.self) { group in
                 let items = operations.filter { $0.group == group }
                 if !items.isEmpty {
@@ -26,9 +22,8 @@ struct InspectionView: View {
                             NavigationLink { InspectionDetailView(operation: operation, initialBundleID: bundleID ?? "") } label: {
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(operation.title)
-                                    if let receipt = model.inspectionReceipts[operation.rawValue + "|" + (bundleID ?? "")] {
-                                        Text("\(receipt.success ? "已返回结果" : "读取失败") · \(receipt.date.formatted(date: .omitted, time: .shortened))")
-                                            .font(.caption).foregroundStyle(receipt.success ? Color.secondary : Color.orange)
+                                    if let receipt = model.inspectionReceipts[operation.rawValue + "|" + (bundleID ?? "")], !receipt.success {
+                                        Text(receipt.message).font(.caption).foregroundStyle(.orange)
                                     }
                                 }
                             }
@@ -64,7 +59,6 @@ struct InspectionDetailView: View {
     @State private var failure: String?
     @State private var loading = false
     @State private var initialized = false
-    @State private var preview: InspectionFile?
     @State private var choosingApp = false
     private var needsApp: Bool { operation.requiresApp && !(operation == .coreFiles && domain != 1) }
 
@@ -111,12 +105,11 @@ struct InspectionDetailView: View {
             }.disabled(loading)
             if let failure { Section("未取得数据") { Text(failure).foregroundStyle(.orange).textSelection(.enabled) } }
             if let result {
-                Section("本次读取") {
-                    if let date = result.capturedAt { Text("读取时间：\(date)").font(.caption).foregroundStyle(.secondary) }
-                    if let target = result.bundleID { Text(target).font(.caption.monospaced()).textSelection(.enabled) }
-                    if let requestedPath = result.requestedPath { Text(requestedPath).font(.caption.monospaced()).textSelection(.enabled) }
+                if let message = result.message, !message.isEmpty,
+                   !["连接结果不代表已获全部读取权限。", "广播服务的读取权限需单独验证。",
+                     "读取失败的字段会显示错误原因。", "文件已读取，可预览或导出。"].contains(message) {
+                    Section { Text(message).font(.footnote).foregroundStyle(.secondary) }
                 }
-                if let message = result.message, !message.isEmpty { Section { Text(message).font(.footnote).foregroundStyle(.secondary) } }
                 if !result.entries.isEmpty {
                     Section("目录 · \(result.entries.count) 项") {
                         ForEach(result.entries.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }) { entry in
@@ -137,13 +130,13 @@ struct InspectionDetailView: View {
                     Section("已读取文件") {
                         ForEach(result.files) { file in
                             VStack(alignment: .leading, spacing: 8) {
-                                Button(file.name) { preview = file }
+                                Button(file.name) { model.filePresentation = FilePresentation(url: URL(fileURLWithPath: file.path), kind: .preview) }
                                 ShareFileButton(title: "导出文件", url: URL(fileURLWithPath: file.path))
                             }
                         }
                     }
                 }
-                Section("返回数据") { InspectionRows(value: result.value) }
+                Section { InspectionRows(value: result.value) }
                 if let reportURL { Section { ShareFileButton(title: "导出 JSON 报告", url: reportURL) } }
             }
             Section("服务") {
@@ -151,7 +144,6 @@ struct InspectionDetailView: View {
             }
         }
         .navigationTitle(operation.title).navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $preview) { file in FilePreviewSheet(url: URL(fileURLWithPath: file.path)) }
         .sheet(isPresented: $choosingApp) { ApplicationPickerView(selection: $bundleID) }
         .onChange(of: bundleID) { _, _ in clearResult() }
         .onChange(of: path) { _, _ in clearResult() }
@@ -180,7 +172,6 @@ private struct InspectionFileEntryView: View {
     @State private var result: InspectionResult?
     @State private var failure: String?
     @State private var loading = false
-    @State private var preview: InspectionFile?
     private var directory: Bool { result?.value["isDirectory"] == .bool(true) }
     var body: some View {
         List {
@@ -192,17 +183,16 @@ private struct InspectionFileEntryView: View {
                 if directory {
                     NavigationLink("打开目录") { InspectionDetailView(operation: source, initialBundleID: bundleID, initialPath: entry.path, autoRead: true) }
                 } else {
-                    Button("读取文件（最多 32 MiB）") { Task { await perform(.fileRead) } }.disabled(model.busy || loading)
+                    Button("读取文件") { Task { await perform(.fileRead) } }.disabled(model.busy || loading)
                 }
                 ForEach(result.files) { file in
-                    Button("预览 \(file.name)") { preview = file }
+                    Button("预览 \(file.name)") { model.filePresentation = FilePresentation(url: URL(fileURLWithPath: file.path), kind: .preview) }
                     ShareFileButton(title: "导出文件", url: URL(fileURLWithPath: file.path))
                 }
             }
         }
         .navigationTitle(entry.name).navigationBarTitleDisplayMode(.inline)
         .task { if result == nil && !loading { await perform(.fileInfo) } }
-        .sheet(item: $preview) { file in FilePreviewSheet(url: URL(fileURLWithPath: file.path)) }
     }
     private func perform(_ operation: InspectionOperation) async {
         loading = true; failure = nil; defer { loading = false }
@@ -241,7 +231,7 @@ private struct InspectionRows: View {
             }
         default:
             VStack(alignment: .leading, spacing: 5) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
+                Text(displayLabel(title)).font(.caption).foregroundStyle(.secondary)
                 Text(formatted(value, key: title)).textSelection(.enabled)
             }.padding(.vertical, 2)
         }
@@ -252,10 +242,25 @@ private struct InspectionRows: View {
         }
         return "第 \(index + 1) 项"
     }
+    private func displayLabel(_ key: String) -> String {
+        switch key {
+        case "字节数", "size": return "大小"
+        case "总字节数": return "总容量"
+        case "可用字节数": return "可用容量"
+        default: return key
+        }
+    }
     private func formatted(_ value: InspectionValue, key: String) -> String {
-        if ["StaticDiskUsage", "DynamicDiskUsage", "size", "总字节数", "可用字节数", "字节数"].contains(key), case .number(let count) = value,
-           count >= 0 && count < Double(Int64.max) {
-            return ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file) + "（\(value.text) 字节）"
+        let sizeKeys = ["StaticDiskUsage", "DynamicDiskUsage", "size", "总字节数", "可用字节数", "字节数", "块大小",
+                        "TotalSystemCapacity", "TotalDataCapacity", "AmountDataAvailable", "AmountDataReserved", "BlockSize"]
+        let count: Double?
+        switch value {
+        case .number(let number): count = number
+        case .string(let text): count = Double(text)
+        default: count = nil
+        }
+        if sizeKeys.contains(key), let count, count >= 0 && count < Double(Int64.max) {
+            return ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .file)
         }
         return value.text
     }
@@ -321,4 +326,5 @@ private struct NativeAPIIndexView: View {
         }
     }
 }
+
 

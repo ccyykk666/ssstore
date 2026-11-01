@@ -19,7 +19,7 @@ struct AccountDetailView: View {
         vm.accounts.first { $0.id == accountId }
     }
 
-    @State private var rotatingHint = ""
+    @State private var rotatingHint: Hint?
 
     var body: some View {
         Form {
@@ -28,11 +28,8 @@ struct AccountDetailView: View {
                     Text(account?.account.email ?? "")
                 }
                 .foregroundStyle(.primary)
-                .redacted(reason: .placeholder, isEnabled: vm.demoMode)
             } header: {
                 Text("Apple ID")
-            } footer: {
-                Text("This email is used to sign in to Apple services.")
             }
             Section {
                 Button { copyToClipboard(account?.account.store) } label: {
@@ -41,8 +38,6 @@ struct AccountDetailView: View {
                 .foregroundStyle(.primary)
             } header: {
                 Text("Country Code")
-            } footer: {
-                Text("App Store requires this country code to identify your package region.")
             }
             Section {
                 Button { copyToClipboard(account?.account.directoryServicesIdentifier) } label: {
@@ -50,22 +45,20 @@ struct AccountDetailView: View {
                         .font(.system(.body, design: .monospaced))
                 }
                 .foregroundStyle(.primary)
-                .redacted(reason: .placeholder, isEnabled: vm.demoMode)
             } header: {
                 Text("Directory Services ID")
-            } footer: {
-                Text("This ID, combined with a random seed generated on this device, can be used to download packages from the App Store.")
             }
             Section {
                 SecureField(text: .constant(account?.account.passwordToken ?? "")) {
                     Text("Password Token")
                 }
                 AsyncButton {
+                    rotatingHint = nil
                     do {
-                        try await vm.rotate(id: account?.id ?? "")
-                        rotatingHint = String(localized: "Success")
+                        _ = try await vm.rotate(id: accountId)
+                        rotatingHint = Hint(message: "已更新", color: .green)
                     } catch {
-                        rotatingHint = error.localizedDescription
+                        rotatingHint = Hint(message: error.localizedDescription, color: .red)
                         throw error
                     }
                 } label: {
@@ -75,11 +68,8 @@ struct AccountDetailView: View {
             } header: {
                 Text("Password Token")
             } footer: {
-                if rotatingHint.isEmpty {
-                    Text("If you fail to acquire a license for a product, rotating the password token may help. This will use the initial password to authenticate with the App Store again.")
-                } else {
-                    Text(rotatingHint)
-                        .foregroundStyle(.red)
+                if let rotatingHint {
+                    Text(rotatingHint.message).foregroundStyle(rotatingHint.color ?? .secondary)
                 }
             }
             Section {
@@ -94,4 +84,5 @@ struct AccountDetailView: View {
         .navigationTitle("Account Details")
     }
 }
+
 

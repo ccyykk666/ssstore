@@ -206,7 +206,7 @@ struct ProductView: View {
                 }
             }
             .pickerStyle(.menu)
-            .redacted(reason: .placeholder, isEnabled: vm.demoMode)
+
         } header: {
             Text("Account")
         } footer: {
@@ -277,4 +277,5 @@ struct LazyView<Content: View>: View {
         build()
     }
 }
+
 

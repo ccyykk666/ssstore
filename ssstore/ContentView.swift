@@ -6,7 +6,7 @@ struct ContentView: View {
     @State private var search = ""
     @State private var onlyFailed = false
     @State private var onlyDifferent = false
-    @State private var includeSystem = false
+    @AppStorage("includeSystemApps") private var includeSystem = false
     @State private var settings = false
 
     private var listedRecords: [AppRecord] {
@@ -53,7 +53,6 @@ struct ContentView: View {
                 }
                 Section {
                     Toggle("显示差异项", isOn: $onlyDifferent)
-                    Toggle("显示系统应用", isOn: $includeSystem)
                 }
                 Section("共\(visible.count)个应用") {
                     if visible.isEmpty {
@@ -78,12 +77,13 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button { settings = true } label: { Image(systemName: "gearshape") }
-                        .accessibilityLabel("连接设置")
+                        .accessibilityLabel("设置")
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button { model.checkUpdates(force: true) } label: { Label("刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
-                        NavigationLink { InspectionView() } label: { Label("设备数据", systemImage: "server.rack") }
+                        NavigationLink { DownloadView(embedded: true) } label: { Label("下载", systemImage: "arrow.down.circle") }
+                        Toggle("显示系统应用", isOn: $includeSystem)
                     } label: { Image(systemName: "ellipsis.circle") }
                     .disabled(model.busy)
                 }
@@ -137,7 +137,8 @@ private struct AppRow: View {
 
     private var releaseLabel: String {
         guard let release = record.release, release.matches(scope: country) else { return "—" }
-        return "\(release.version) · \(release.country.uppercased())"
+        return release.version
     }
 }
+
 

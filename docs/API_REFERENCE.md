@@ -1,4 +1,4 @@
-# ssstore 0.5.0 device data interfaces
+# ssstore 0.5.1 device data interfaces
 
 This reference describes implemented calls, not guaranteed availability on a particular iOS release. The user's iOS 27.2 device has confirmed InstallationProxy metadata and SpringBoard icons. Other services must be tested on that device. The app displays actual errors rather than simulating unavailable data.
 
@@ -85,3 +85,10 @@ Asspp 4.2.2 at `6682eb8f831a7b5c62dc14ea97088769c6adba48` is vendored with its M
 The native device inspector remains read-only. Store installation is a separate explicit user action and retains the upstream certificate/trust requirements. Store files/configuration are isolated below Documents/Asspp and the store Keychain services; scan/pairing state stays in ssstore Application Support. Original standalone startup and welcome branding are excluded from the target; integration uses the ssstore scene and tabs.
 
 Inspection app selection uses a searchable sheet instead of a long system menu. File preview and export/share sheets include a Done action and visible drag indicator. Difference filtering includes unknown and failed records; a conditional failure counter toggles the failure filter. Ignored application behavior is unchanged.
+
+
+## Interface refinements (0.5.1)
+
+Device data now has a bottom tab; Downloads is in the home More menu. Search uses a regular store tab with a visible navigation search field. A persisted includeSystemApps preference controls both the home list and inspection app selection. Store settings are embedded in the main Settings form and demo mode is removed. Store regions use the supported ApplePackage region list with localized search.
+
+Preview/share payloads live on AppModel and are presented from RootView, rather than from transient result rows. The share UI retains Done and drag dismissal; incomplete callbacks do not force dismissal. Inspector completion timestamps and redundant success labels are hidden, while actual failure messages remain visible. Byte values use ordinary size units without duplicated raw byte counts. The read limit remains 32 MiB, with a concise oversized-file error. Ignored app records retain icon metadata and decode legacy names-only lists.

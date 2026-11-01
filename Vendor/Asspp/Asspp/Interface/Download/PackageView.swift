@@ -173,7 +173,7 @@ struct PackageView: View {
 
             Section {
                 Text(pkg.account.account.email)
-                    .redacted(reason: .placeholder, isEnabled: vm.demoMode)
+
                 Text("\(pkg.account.account.store) - \(ApplePackage.Configuration.countryCode(for: pkg.account.account.store) ?? String(localized: "Unknown"))")
             } header: {
                 Text("Account")
@@ -199,4 +199,5 @@ struct PackageView: View {
         .navigationTitle(pkg.package.software.name)
     }
 }
+
 

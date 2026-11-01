@@ -19,23 +19,17 @@ struct AppDetailView: View {
                             Button("查询") { model.checkUpdates(only: id) }
                                 .buttonStyle(.bordered).disabled(model.busy)
                         }
-                        field(record.status(country: model.country) == .current ? "本机版本（商店）" : "本机版本（原始）", record.displayedVersion(country: model.country) ?? "未知")
-                        field("原始版本", record.installed.version ?? "未提供")
-                        field("原始构建号", record.installed.build ?? "未提供")
+                        field("本机版本", record.displayedVersion(country: model.country) ?? "未知")
+                        if let original = record.installed.version, !original.isEmpty,
+                           original != record.displayedVersion(country: model.country) {
+                            field("原始版本", original)
+                        }
+                        field("构建号", record.installed.build ?? "未提供")
                         field("本机版本标识", record.installed.externalVersionID ?? "未获取，请重新读取")
                         field("Bundle ID", record.id)
                     }
                     Section("本机数据") {
                         NavigationLink { InspectionView(bundleID: record.id) } label: { Label("应用数据", systemImage: "doc.text.magnifyingglass") }
-                        if let note = record.installed.versionReadNote {
-                            Text(note).font(.footnote).foregroundStyle(.secondary)
-                        }
-                        if let version = record.installed.coreDeviceVersion { field("CoreDevice · version", version) }
-                        if let build = record.installed.coreDeviceBuild { field("CoreDevice · bundleVersion", build) }
-                        if let version = record.installed.browseVersion { field("Browse · CFBundleShortVersionString", version) }
-                        if let build = record.installed.browseBuild { field("Browse · CFBundleVersion", build) }
-                        if let version = record.installed.metadataVersion { field("安装元数据 · bundleShortVersionString", version) }
-                        if let build = record.installed.metadataBuild { field("安装元数据 · bundleVersion", build) }
                     }
                     Section {
                         NavigationLink("商店详情与下载") {
@@ -48,7 +42,6 @@ struct AppDetailView: View {
                             field("最新版本", release.version)
                             field("更新时间", release.releasedAt ?? "未提供")
                             field("最低系统版本", release.minimumOS ?? "未提供")
-                            field("查询时间", release.fetchedAt.formatted())
                             field("商店版本标识", release.externalVersionID ?? "未获取，请重新查询")
                             if !release.matches(scope: model.country) { Text("结果与当前查询设置不符，请重新查询。").foregroundStyle(.orange) }
                             if model.country == StoreQueryPolicy.chinaThenUS && release.country == "us" && release.lookupScope == model.country {
@@ -87,4 +80,5 @@ struct AppDetailView: View {
         }.padding(.vertical, 2)
     }
 }
+
 

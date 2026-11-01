@@ -284,21 +284,11 @@ extension SearchView {
         }
 
         var navigationBarVisibility: Visibility {
-            switch horizontalSizeClass {
-            case .compact:
-                .hidden
-            default:
-                .automatic
-            }
+            .automatic
         }
 
         var searchablePlacement: SearchFieldPlacement {
-            switch horizontalSizeClass {
-            case .compact:
-                .automatic
-            default:
-                .toolbar
-            }
+            .navigationBarDrawer(displayMode: .always)
         }
     }
 #endif
@@ -337,4 +327,5 @@ extension ApplePackage.EntityType {
         }
     }
 }
+
 

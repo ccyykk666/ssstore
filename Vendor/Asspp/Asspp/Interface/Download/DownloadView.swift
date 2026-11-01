@@ -8,12 +8,13 @@
 import SwiftUI
 
 struct DownloadView: View {
+    var embedded = false
     @State private var vm = Downloads.this
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("Downloads")
+        Group {
+            if embedded { content.navigationTitle("Downloads") }
+            else { NavigationStack { content.navigationTitle("Downloads") } }
         }
     }
 
@@ -115,4 +116,5 @@ extension PackageManifest {
         }
     }
 }
+
 

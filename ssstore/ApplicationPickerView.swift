@@ -6,18 +6,19 @@ struct ApplicationPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var selection: String
     @State private var search = ""
+    @AppStorage("includeSystemApps") private var includeSystem = false
 
     private var apps: [AppRecord] {
         model.records.filter {
-            search.isEmpty || $0.installed.name.localizedCaseInsensitiveContains(search) ||
-            $0.id.localizedCaseInsensitiveContains(search)
+            (includeSystem || !$0.installed.isSystem) &&
+            (search.isEmpty || $0.installed.name.localizedCaseInsensitiveContains(search) ||
+             $0.id.localizedCaseInsensitiveContains(search))
         }.sorted { $0.installed.name.localizedStandardCompare($1.installed.name) == .orderedAscending }
     }
 
     var body: some View {
         NavigationStack {
             List {
-                if search.isEmpty { Button("不选择应用") { select("") } }
                 ForEach(apps) { record in
                     Button { select(record.id) } label: {
                         HStack(spacing: 12) {
@@ -43,3 +44,4 @@ struct ApplicationPickerView: View {
 
     private func select(_ id: String) { selection = id; dismiss() }
 }
+

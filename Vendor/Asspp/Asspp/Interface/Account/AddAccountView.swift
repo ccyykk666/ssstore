@@ -60,12 +60,10 @@ struct AddAccountView: View {
                     }
                     .disabled(password.isEmpty)
                 }
-            } footer: {
-                Text("Your account is saved in your Keychain and will be synced across devices with the same iCloud account signed in.")
             }
             if codeRequired {
                 Section {
-                    TextField("2FA Code (Optional)", text: $code)
+                    TextField("验证码", text: $code)
                     #if os(iOS)
                         .disableAutocorrection(true)
                         .autocapitalization(.none)
@@ -74,7 +72,7 @@ struct AddAccountView: View {
                 } header: {
                     Text("2FA Code")
                 } footer: {
-                    Text("Although the 2FA code is marked as optional, it's because we don't know if you have it enabled or just entered an incorrect password. Provide it if you have 2FA enabled.\n\nhttps://support.apple.com/102606")
+                    Text("启用双重认证的账户需填写验证码。")
                 }
                 .transition(.opacity)
             }
@@ -137,4 +135,5 @@ struct AddAccountView: View {
         error = nil
     }
 }
+
 

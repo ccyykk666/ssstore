@@ -50,21 +50,6 @@ class AppStore {
         }
     }
 
-    @ObservationIgnored
-    private var _demoMode = Persist<Bool>(key: "DemoMode", defaultValue: false)
-
-    var demoMode: Bool {
-        get {
-            access(keyPath: \.demoMode)
-            return _demoMode.wrappedValue
-        }
-        set {
-            withMutation(keyPath: \.demoMode) {
-                _demoMode.wrappedValue = newValue
-            }
-        }
-    }
-
     static let this = AppStore()
 
     static func normalizedDeviceIdentifier(_ value: String) -> String? {
@@ -148,4 +133,5 @@ class AppStore {
         return result
     }
 }
+
 

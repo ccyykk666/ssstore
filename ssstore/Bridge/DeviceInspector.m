@@ -449,14 +449,14 @@ static void IFreeStrings(char **strings, size_t count) {
                     if ([op isEqualToString:@"fileRead"]) {
                         if (isDirectory) { IError(error, @"此项为目录，请打开目录。"); return nil; }
                         const NSUInteger limit = 32 * 1024 * 1024;
-                        if (fileSize > limit) { IError(error, @"文件超过 32 MiB，请从原应用导出。"); return nil; }
+                        if (fileSize > limit) { IError(error, @"文件过大。"); return nil; }
                         REQUIRE(afc_file_open(afc, remotePath.UTF8String, AfcRdOnly, &fileHandle), @"只读打开文件");
                         NSMutableData *data = [NSMutableData data];
                         while (YES) {
                             uint8_t *chunk = NULL; size_t length = 0;
                             IdeviceFfiError *failure = afc_file_read(fileHandle, &chunk, 64 * 1024, &length);
                             if (!ICheck(failure, @"读取文件", error)) { if (chunk) afc_file_read_data_free(chunk, length); return nil; }
-                            if (data.length + length > limit) { if (chunk) afc_file_read_data_free(chunk, length); IError(error, @"文件超过 32 MiB，已停止读取。"); return nil; }
+                            if (data.length + length > limit) { if (chunk) afc_file_read_data_free(chunk, length); IError(error, @"文件过大。"); return nil; }
                             if (length) [data appendBytes:chunk length:length];
                             if (chunk) afc_file_read_data_free(chunk, length);
                             if (!length) break;
@@ -499,4 +499,5 @@ static void IFreeStrings(char **strings, size_t count) {
     }
 }
 @end
+
 

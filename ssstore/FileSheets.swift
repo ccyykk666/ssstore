@@ -1,6 +1,13 @@
 import SwiftUI
 import UIKit
 
+struct FilePresentation: Identifiable {
+    enum Kind { case preview, share }
+    let id = UUID()
+    let url: URL
+    let kind: Kind
+}
+
 struct FilePreviewSheet: View {
     let url: URL
     @Environment(\.dismiss) private var dismiss
@@ -18,13 +25,14 @@ struct FilePreviewSheet: View {
 }
 
 struct ShareFileButton: View {
+    @EnvironmentObject private var model: AppModel
     let title: String
     let url: URL
-    @State private var sharing = false
 
     var body: some View {
-        Button { sharing = true } label: { Label(title, systemImage: "square.and.arrow.up") }
-            .sheet(isPresented: $sharing) { FileShareSheet(url: url) }
+        Button { model.filePresentation = FilePresentation(url: url, kind: .share) } label: {
+            Label(title, systemImage: "square.and.arrow.up")
+        }
     }
 }
 
@@ -33,12 +41,14 @@ struct FileShareSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            ActivitySheet(items: [url]) { dismiss() }
-                .navigationTitle("分享")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
-        }
+        ActivitySheet(items: [url]) { dismiss() }
+            .safeAreaInset(edge: .top) {
+                HStack {
+                    Text("分享").font(.headline)
+                    Spacer()
+                    Button("完成") { dismiss() }
+                }.padding().background(.bar)
+            }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
@@ -50,9 +60,12 @@ private struct ActivitySheet: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        controller.completionWithItemsHandler = { _, _, _, _ in completion() }
+        controller.completionWithItemsHandler = { _, completed, _, _ in
+            if completed { completion() }
+        }
         return controller
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
+

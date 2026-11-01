@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     @Published var activity = ""
     @Published var isChecking = false
     @Published var message: String?
+    @Published var filePresentation: FilePresentation?
     @Published var scannedAt: Date?
     @Published var inventoryOrigin = "尚未读取"
     @Published var hasPairing = false
@@ -54,6 +55,7 @@ final class AppModel: ObservableObject {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: storage.path) {
                 let saved = try JSONDecoder().decode(SavedInventory.self, from: Data(contentsOf: storage))
+                ignoredApps.captureMetadata(from: saved.records.map(\.installed))
                 records = ignoredApps.visible(saved.records)
                 scannedAt = saved.scannedAt
                 inventoryOrigin = saved.origin
@@ -65,6 +67,12 @@ final class AppModel: ObservableObject {
             }
             if let data = try? Data(contentsOf: inspectionReceiptsURL) { inspectionReceipts = (try? JSONDecoder().decode([String: InspectionReceipt].self, from: data)) ?? [:] }
         } catch { message = "读取本地记录失败：\(error.localizedDescription)" }
+        if ignoredApps.names.keys.contains(where: { ignoredApps.applications?[$0] == nil }),
+           let data = try? Data(contentsOf: folder.appendingPathComponent("device-inventory.json")),
+           let apps = try? InventoryParser.parse(data) {
+            ignoredApps.captureMetadata(from: apps)
+        }
+        saveIgnoredApps()
     }
 
     func scan() async {
@@ -243,7 +251,7 @@ final class AppModel: ObservableObject {
 
     func ignoreApp(_ id: String) {
         guard !busy, let record = records.first(where: { $0.id == id }) else { return }
-        ignoredApps.ignore(record.installed)
+        ignoredApps.ignore(record.installed, iconURL: record.release?.iconURL)
         saveIgnoredApps()
         records = ignoredApps.visible(records)
         queryWarning = ""
@@ -353,4 +361,5 @@ private struct SavedInventory: Codable {
     var scannedAt: Date?
     var origin: String
 }
+
 

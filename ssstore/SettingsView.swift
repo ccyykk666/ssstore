@@ -9,15 +9,22 @@ struct SettingsView: View {
     @State private var removing = false
     @State private var creating = false
     @State private var exporting = false
+    @State private var choosingRegion = false
     @State private var exportDocument = PairingFileDocument(data: Data())
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("IPv4 地址", text: $model.host)
-                        .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    TextField("端口", text: $model.port).keyboardType(.numberPad)
+                    LabeledContent("IP 地址") {
+                        TextField("10.7.0.1", text: $model.host)
+                            .keyboardType(.numbersAndPunctuation).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("端口") {
+                        TextField("49152", text: $model.port).keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
                     Label(model.hasPairing ? "已保存配对文件" : "未保存配对文件", systemImage: model.hasPairing ? "checkmark.circle" : "doc.badge.plus")
                     if #available(iOS 27.0, *) {
                         Button("创建配对") { creating = true }
@@ -31,36 +38,39 @@ struct SettingsView: View {
                         Button("删除配对文件", role: .destructive) { removing = true }
                     }
                 } header: {
-                    Text("本机连接")
+                    Text("连接配置")
                 }
                 Section {
-                    Picker("商店地区", selection: $model.country) {
-                        Text("中国大陆优先").tag(StoreQueryPolicy.chinaThenUS)
-                        Text("中国大陆 CN").tag("cn")
-                        Text("美国 US").tag("us")
-                        Text("香港 HK").tag("hk")
-                        Text("日本 JP").tag("jp")
+                    Button { choosingRegion = true } label: {
+                        HStack {
+                            Text("商店地区").foregroundStyle(.primary)
+                            Spacer()
+                            Text(StoreRegionNames.name(model.country)).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.up.chevron.down").font(.caption)
+                        }
                     }
                 }
+                StoreSettingsSections()
                 if !model.ignoredApps.names.isEmpty {
                     Section {
                         NavigationLink("已忽略应用（\(model.ignoredApps.names.count)）") { IgnoredAppsView() }
                     }
                 }
                 Section("关于") {
-                    NavigationLink("商店设置") { SettingView(embedded: true) }
                     NavigationLink("开源许可") {
                         ScrollView {
                             Text((try? String(contentsOf: Bundle.main.url(forResource: "AssppLicense", withExtension: "txt")!, encoding: .utf8)) ?? "Asspp · MIT License")
                                 .font(.footnote).textSelection(.enabled).padding()
                         }.navigationTitle("Asspp · MIT")
                     }
-                    Text("ssstore · 0.5.0")
+                    Text("ssstore · 0.5.1")
                 }
             }
+            .modifier(SoftTopScrollEdge())
             .disabled(model.busy)
-            .navigationTitle("连接设置")
+            .navigationTitle("设置")
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .sheet(isPresented: $choosingRegion) { StoreRegionPickerView(selection: $model.country) }
             .sheet(isPresented: $creating) {
                 OnDevicePairingView(controller: model.pairingController)
                     .environment(\.isEnabled, true)
@@ -82,6 +92,8 @@ struct SettingsView: View {
                 Button("删除", role: .destructive) { model.removePairing() }
             } message: { Text("仅删除本 App 内的文件，设备信任不受影响。再次使用需重新配对或导入。") }
         }
+        .modifier(SoftTopScrollEdge())
+        .presentationDragIndicator(.visible)
     }
 }
 
@@ -93,7 +105,8 @@ private struct IgnoredAppsView: View {
         List {
             Section {
                 ForEach(model.ignoredApps.names.keys.sorted(), id: \.self) { id in
-                    HStack {
+                    HStack(spacing: 12) {
+                        AppIconView(app: model.ignoredApps.application(for: id), storeIconURL: model.ignoredApps.iconURLs?[id])
                         VStack(alignment: .leading, spacing: 4) {
                             Text(model.ignoredApps.names[id] ?? id)
                             Text(id).font(.caption).foregroundStyle(.secondary)
@@ -110,3 +123,4 @@ private struct IgnoredAppsView: View {
         .navigationTitle("已忽略应用")
     }
 }
+

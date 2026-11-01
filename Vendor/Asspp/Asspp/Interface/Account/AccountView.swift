@@ -61,7 +61,6 @@ struct AccountView: View {
             Table(vm.accounts, selection: $selectedID) {
                 TableColumn("Email") { account in
                     Text(account.account.email)
-                        .redacted(reason: .placeholder, isEnabled: vm.demoMode)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .width(min: 240, ideal: 400, max: .infinity)
@@ -141,7 +140,6 @@ struct AccountView: View {
                                     NavigationLink(value: account.id) {
                                         HStack {
                                             Text(account.account.email)
-                                                .redacted(reason: .placeholder, isEnabled: vm.demoMode)
                                             Spacer()
                                         }
                                         .badge(ApplePackage.Configuration.countryCode(for: account.account.store) ?? account.account.store)
@@ -149,8 +147,6 @@ struct AccountView: View {
                                 }
                             } header: {
                                 Text("Apple IDs")
-                            } footer: {
-                                Text("Your accounts are saved in your Keychain and will be synced across devices with the same iCloud account signed in.")
                             }
                         }
                         .formStyle(.grouped)
@@ -178,4 +174,5 @@ struct AccountView: View {
         }
     #endif
 }
+
 
