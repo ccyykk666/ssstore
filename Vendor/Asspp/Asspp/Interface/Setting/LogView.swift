@@ -11,7 +11,8 @@ struct LogView: View {
     @State private var messages: [String] = []
 
     private func fill() {
-        messages = LogManager.shared.getMessages()
+        let current = LogManager.shared.getMessages()
+        if current != messages { messages = current }
     }
 
     var body: some View {
@@ -32,7 +33,13 @@ struct LogView: View {
                 }
             }
         }
-        .onAppear { fill() }
+        .task {
+            while !Task.isCancelled {
+                fill()
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
+            }
+        }
         .navigationTitle("Logs")
     }
 }

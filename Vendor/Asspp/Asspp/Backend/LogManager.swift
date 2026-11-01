@@ -15,7 +15,11 @@ final nonisolated class LogManager: Sendable {
 
     private let messageQueue = DispatchQueue(label: "wiki.qaq.log")
     // Confined to messageQueue, so a single formatter instance is safe to reuse.
-    private nonisolated(unsafe) let timestampFormatter = ISO8601DateFormatter()
+    private nonisolated(unsafe) let timestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.timeZone = TimeZone(secondsFromGMT: 8 * 60 * 60)!
+        return formatter
+    }()
     private nonisolated(unsafe) var messages: [String] = []
 
     func write(_ content: String) {
@@ -60,4 +64,5 @@ struct LogManagerHandler: LogHandler {
         LogManager.shared.write(text)
     }
 }
+
 

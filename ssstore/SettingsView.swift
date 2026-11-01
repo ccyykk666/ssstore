@@ -52,7 +52,7 @@ struct SettingsView: View {
                                 .font(.footnote).textSelection(.enabled).padding()
                         }.navigationTitle("Asspp · MIT")
                     }
-                    Text("ssstore · 0.5.3")
+                    Text("ssstore · 0.5.4")
                 }
             }
             .modifier(SoftTopScrollEdge())
