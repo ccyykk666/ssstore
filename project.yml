@@ -13,8 +13,8 @@ settings:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "0.2.0"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "0.2.1"
+    CURRENT_PROJECT_VERSION: "3"
 targets:
   ssstore:
     type: application
@@ -31,6 +31,8 @@ targets:
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: 通过你启用的本地 VPN 连接本机设备管理服务，读取应用名称与版本。
         NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing._tcp]
+        UIBackgroundModes: [processing]
+        BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).pairing.*]
         UIApplicationSupportsIndirectInputEvents: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:

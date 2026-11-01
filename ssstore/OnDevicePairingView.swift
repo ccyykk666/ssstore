@@ -16,9 +16,9 @@ struct OnDevicePairingView: View {
                         .foregroundStyle(.secondary)
                 }
                 Section("操作步骤") {
-                    Text("1. 点击下方“开始配对”，允许本地网络访问。建议允许通知，便于在设置中查看配对码。")
+                    Text("1. 点击下方“开始配对”，允许本地网络访问。等待显示“已发布 ssstore”后再离开本页。")
                     Text("2. 前往“设置 → 隐私与安全 → 开发者模式”，在可配对主机中选择 ssstore。")
-                    Text("3. 输入 ssstore 通知中的配对码；若看不到通知，返回本页查看后再切回设置。")
+                    Text("3. 输入 ssstore 通知或持续后台任务界面中的配对码；也可返回本页查看后再切回设置。")
                     Text("4. 系统确认后返回本页，配对记录会自动保存。")
                 }
                 Section("当前进度") {
@@ -35,7 +35,7 @@ struct OnDevicePairingView: View {
                             .font(.footnote).foregroundStyle(.orange)
                     }
                     if controller.isActive {
-                        Text("请尽快完成。切到系统设置后可用的后台时间由 iOS 决定；超时停止后可重新开始。")
+                        Text("配对期间会显示系统的持续后台任务，请勿点击它的停止按钮。若系统回收任务或等待超过两分钟，本页会说明停止原因。")
                             .font(.footnote).foregroundStyle(.secondary)
                         Button("停止配对", role: .cancel) { controller.cancel() }
                             .disabled(controller.phase == .stopping)
@@ -43,6 +43,19 @@ struct OnDevicePairingView: View {
                         Button(controller.phase == .idle ? "开始配对" : "重新开始配对") {
                             model.createPairingOnDevice()
                         }.disabled(model.busy)
+                    }
+                }
+                if !controller.diagnostics.isEmpty {
+                    Section {
+                        DisclosureGroup("配对阶段记录") {
+                            Text(controller.diagnostics.joined(separator: "\n"))
+                                .font(.caption.monospaced()).textSelection(.enabled)
+                            Button("复制阶段记录") {
+                                UIPasteboard.general.string = controller.diagnostics.joined(separator: "\n")
+                            }
+                        }
+                    } footer: {
+                        Text("仅记录时间、阶段和错误，不包含配对码或配对私钥。")
                     }
                 }
                 if controller.phase == .completed && model.hasPairing {
@@ -67,7 +80,6 @@ struct OnDevicePairingView: View {
                 }
             }
             .interactiveDismissDisabled(controller.isActive)
-            .onDisappear { controller.cancel() }
             .alert("提示", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
                 Button("知道了") { model.message = nil }
             } message: { Text(model.message ?? "") }

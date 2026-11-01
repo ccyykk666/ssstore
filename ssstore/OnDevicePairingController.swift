@@ -20,6 +20,7 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
     @Published private(set) var status = "准备在手机上创建配对记录。"
     @Published private(set) var pin: String?
     @Published private(set) var notificationsAllowed = false
+    @Published private(set) var diagnostics: [String] = []
 
     var isActive: Bool { phase.isActive }
     private var service: NetService?
@@ -27,16 +28,42 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
     private var host: PairingHost?
     private var acceptedSocket: Int32 = -1
     private var timeout: Timer?
-    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private let backgroundExecution = PairingBackgroundExecution()
+    private var observers: [NSObjectProtocol] = []
+    private var awaitingForeground = false
+    private var startedAt = Date()
     private var permissionTask: Task<Void, Never>?
     private var completion: ((Result<Data, Error>) -> Void)?
     private var stopReason: String?
     private let notificationID = "ssstore.pairing-code"
 
+    override init() {
+        super.init()
+        let center = NotificationCenter.default
+        for name in [UIApplication.didEnterBackgroundNotification, UIApplication.willEnterForegroundNotification,
+                     UIApplication.didBecomeActiveNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] event in
+                MainActor.assumeIsolated {
+                    guard let self, self.isActive else { return }
+                    if event.name == UIApplication.didEnterBackgroundNotification { self.record("App 已进入后台") }
+                    else if event.name == UIApplication.willEnterForegroundNotification { self.record("App 正在返回前台") }
+                    else {
+                        self.record("App 已回到活动状态")
+                        if self.awaitingForeground { self.awaitingForeground = false; self.beginBackgroundExecution() }
+                    }
+                }
+            })
+        }
+    }
+
     func start(completion: @escaping (Result<Data, Error>) -> Void) {
         guard !isActive else { return }
         self.completion = completion
         stopReason = nil
+        awaitingForeground = false
+        startedAt = Date()
+        diagnostics = []
+        record("用户开始配对")
         pin = nil
         phase = .preparing
         status = "正在准备配对主机…"
@@ -44,8 +71,13 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
             notificationsAllowed = (try? await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound])) ?? false
             guard !Task.isCancelled else { return }
-            do { try publishHost() }
-            catch { finish(.failure(error)) }
+            record(notificationsAllowed ? "允许配对码通知" : "未允许通知，配对码仍在 App 与后台任务界面显示")
+            if UIApplication.shared.applicationState == .active { beginBackgroundExecution() }
+            else {
+                awaitingForeground = true
+                status = "请先返回 ssstore 前台，等待后台配对任务就绪后再前往系统设置。"
+                record("等待 App 回到前台再申请后台任务")
+            }
         }
     }
 
@@ -53,19 +85,33 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
         stop(reason: "已停止配对。你可以重新开始，原有配对文件仍保留。")
     }
 
+    private func beginBackgroundExecution() {
+        guard phase == .preparing else { return }
+        guard #available(iOS 26.0, *) else {
+            finish(.failure(OnDevicePairingError.message("当前系统不支持持续后台配对。请导入电脑生成的记录。")))
+            return
+        }
+        status = "正在申请持续后台配对任务，请暂时留在本页…"
+        record("申请 iOS 持续后台任务")
+        timeout = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.stop(reason: "等待配对超时。请确认已连接 Wi-Fi，并在开发者模式中选择 ssstore 后重试。") }
+        }
+        do {
+            try backgroundExecution.start(onReady: { [weak self] in
+                guard let self, self.phase == .preparing else { return }
+                self.record("持续后台任务已启动")
+                do { try self.publishHost() }
+                catch { self.finish(.failure(error)) }
+            }, onStop: { [weak self] in
+                self?.stop(reason: "系统结束了后台配对任务（可能由系统回收或后台任务的停止按钮触发）。请返回 App 重试。")
+            })
+        } catch { finish(.failure(error)) }
+    }
+
     private func publishHost() throws {
         let identity = try PairingHost(name: "ssstore")
         let (socketFD, port) = try makeListener()
         host = identity
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ssstore.remote-pairing") { [weak self] in
-            Task { @MainActor in
-                self?.stop(reason: "系统后台时间已用尽。请返回 App，重新开始并尽快在设置中完成配对。")
-                self?.endBackgroundTask()
-            }
-        }
-        timeout = Timer.scheduledTimer(withTimeInterval: 120, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.stop(reason: "等待配对超时。请确认已连接 Wi-Fi，并在开发者模式中选择 ssstore 后重试。") }
-        }
 
         let source = DispatchSource.makeReadSource(fileDescriptor: socketFD, queue: .main)
         source.setEventHandler { [weak self] in self?.acceptConnection(on: socketFD) }
@@ -80,22 +126,28 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
         self.service = service
         service.publish()
         status = "正在发布 ssstore 配对主机。请允许本地网络访问。"
+        record("正在发布配对主机，等待系统发现")
     }
 
     private func acceptConnection(on socketFD: Int32) {
-        guard phase == .advertising || phase == .preparing, let host else { return }
+        guard isActive, let host else { return }
         let fd = Darwin.accept(socketFD, nil, nil)
         guard fd >= 0 else {
             if errno != EAGAIN && errno != EWOULDBLOCK { finish(.failure(socketError())) }
             return
         }
+        guard acceptedSocket < 0, phase != .stopping else {
+            Darwin.close(fd)
+            record("已保留当前握手，关闭额外的连接请求")
+            return
+        }
         acceptedSocket = fd
-        listener?.cancel()
-        listener = nil
-        service?.stop()
-        service = nil
+        // Settings must keep seeing this host while it confirms the passcode
+        // and pairing PIN. Withdraw the advertisement only when the run ends.
         phase = .exchanging
         status = "系统已连接。正在协商配对，请等待配对码…"
+        record("系统 TCP 连接已建立；广播保持发布")
+        backgroundExecution.update(completed: 3, subtitle: "系统已连接，正在协商配对")
 
         DispatchQueue.global(qos: .userInitiated).async {
             let result: Result<Data, Error>
@@ -110,7 +162,10 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
                 Darwin.close(fd)
                 acceptedSocket = -1
                 if let stopReason { finish(.failure(OnDevicePairingError.message(stopReason))) }
-                else { finish(result) }
+                else {
+                    if case .failure(let error) = result { record("设备握手返回失败：\(error.localizedDescription)") }
+                    finish(result)
+                }
             }
         }
     }
@@ -119,17 +174,26 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
         guard phase == .exchanging, stopReason == nil else { return }
         pin = value
         status = "请在系统设置中输入下方配对码。"
+        record("进入配对码确认阶段（不记录配对码内容）")
+        backgroundExecution.update(completed: 4, subtitle: "配对码：\(value)，请在系统设置中输入")
         guard notificationsAllowed else { return }
         let content = UNMutableNotificationContent()
         content.title = "ssstore 配对码：\(value)"
         content.body = "在设置 → 隐私与安全 → 开发者模式的配对提示中输入此码。"
         content.sound = .default
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: notificationID, content: content, trigger: nil), withCompletionHandler: nil)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: notificationID, content: content, trigger: nil)) { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.isActive else { return }
+                self.record(error == nil ? "配对码通知已提交给系统" : "配对码通知提交失败：\(error!.localizedDescription)")
+            }
+        }
     }
 
     private func stop(reason: String) {
         guard isActive, phase != .stopping else { return }
         stopReason = reason
+        record("停止原因：\(reason)")
+        awaitingForeground = false
         permissionTask?.cancel()
         listener?.cancel()
         listener = nil
@@ -146,6 +210,7 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
     private func finish(_ result: Result<Data, Error>) {
         guard let completion else { return }
         self.completion = nil
+        awaitingForeground = false
         permissionTask = nil
         timeout?.invalidate()
         timeout = nil
@@ -154,7 +219,7 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
         service?.stop()
         service = nil
         host = nil
-        endBackgroundTask()
+        record("握手已结束，停止发布配对主机")
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notificationID])
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notificationID])
         pin = nil
@@ -172,33 +237,38 @@ final class OnDevicePairingController: NSObject, ObservableObject, NetServiceDel
             }
         }
         completion(result)
+        // Save the record via completion before handing background time back.
+        backgroundExecution.finish(success: phase == .completed)
     }
 
     func reportSaveResult(_ error: Error?) {
         if let error {
             phase = .failed
             status = "系统已完成配对，但保存记录失败：\(error.localizedDescription)。请重新配对。"
+            record("配对记录保存失败：\(error.localizedDescription)")
         } else {
             status = "配对记录已保存。开启 Loon 回环后，点击“读取本机”验证连接。"
+            record("配对记录已保存")
         }
     }
 
-    private func endBackgroundTask() {
-        if backgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
-        }
+    private func record(_ event: String) {
+        let elapsed = Date().timeIntervalSince(startedAt)
+        diagnostics.append(String(format: "%.1fs · %@", elapsed, event))
+        if diagnostics.count > 60 { diagnostics.removeFirst(diagnostics.count - 60) }
     }
 
     func netServiceDidPublish(_ sender: NetService) {
         guard sender === service, phase == .preparing else { return }
         phase = .advertising
         status = "已发布 ssstore。请前往设置 → 隐私与安全 → 开发者模式，选择 ssstore 进行配对。"
+        record("配对主机发布成功，可以前往系统设置")
+        backgroundExecution.update(completed: 2, subtitle: "请在开发者模式中选择 ssstore")
     }
 
     func netService(_ sender: NetService, didNotPublish errorDict: [String: NSNumber]) {
         guard sender === service else { return }
-        finish(.failure(OnDevicePairingError.message("无法发布配对主机。请检查本地网络权限和 Wi-Fi 连接（\(errorDict)）。")))
+        stop(reason: "无法发布配对主机。请检查本地网络权限和 Wi-Fi 连接（\(errorDict)）。")
     }
 
     private func makeListener() throws -> (Int32, UInt16) {

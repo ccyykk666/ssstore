@@ -59,7 +59,7 @@ struct SettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("关于") {
-                    Text("ssstore · 0.2.0")
+                    Text("ssstore · 0.2.1")
                     Text("查询仅发送应用 Bundle ID 与所选商店地区到苹果。配对文件保存在本软件本地，不会随版本查询上传。")
                     Text("读取清单和检查更新是两个动作。安装、卸载或升级应用后，请重新读取本机；导入清单只是快照。")
                     Text("本版显示可用版本与更新说明。应用安装和签名续期仍由原安装渠道处理。")
