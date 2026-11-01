@@ -31,7 +31,7 @@ struct ContentView: View {
                         HStack(spacing: 28) {
                             metric("已收录", value: model.records.filter { !$0.installed.isSystem }.count)
                             metric("可更新", value: model.records.filter { $0.status(country: model.country) == .update }.count)
-                            metric("待确认", value: model.records.filter { !$0.installed.isSystem && $0.status(country: model.country) == .unknown }.count)
+                            metric("待确认", value: model.records.filter { !$0.installed.isSystem && [.unknown, .different].contains($0.status(country: model.country)) }.count)
                         }
                         if let date = model.scannedAt {
                             Text("\(model.inventoryOrigin) · \(date.formatted(date: .abbreviated, time: .shortened))")
@@ -42,6 +42,8 @@ struct ContentView: View {
                         }
                     }
                     .padding(.vertical, 8)
+                    if !model.iconReadSummary.isEmpty { Text(model.iconReadSummary).font(.caption).foregroundStyle(.secondary) }
+                    if !model.checkSummary.isEmpty { Text(model.checkSummary).font(.caption).foregroundStyle(.secondary) }
                 }
                 if model.busy {
                     Section {
@@ -53,7 +55,7 @@ struct ContentView: View {
                     Toggle("只看可更新", isOn: $onlyUpdates)
                     Toggle("显示系统应用", isOn: $includeSystem)
                 } footer: {
-                    Text("数据源：苹果公开接口 · \(model.country.uppercased()) 区。更新说明对应商店最新版本；系统应用可能随 iOS 更新。")
+                    Text("数据源：苹果目录与 Lookup · \(model.country.uppercased()) 区。5 分钟内可复用查询缓存；更多菜单可强制刷新。版本需核对表示本机内部编号与商店展示无法直接比较。")
                 }
                 Section("应用 · \(visible.count)") {
                     if visible.isEmpty {
@@ -80,7 +82,11 @@ struct ContentView: View {
                     Menu {
                         Button { Task { await model.scan() } } label: { Label("读取本机", systemImage: "iphone") }
                         Button { model.checkUpdates() } label: { Label("检查更新", systemImage: "arrow.clockwise") }
+                        Button { model.checkUpdates(force: true) } label: { Label("强制刷新全部版本", systemImage: "arrow.triangle.2.circlepath") }
                         Button { importing = true } label: { Label("导入应用清单", systemImage: "square.and.arrow.down") }
+                        if FileManager.default.fileExists(atPath: model.rawInventoryURL.path) {
+                            ShareLink(item: model.rawInventoryURL) { Label("导出本机原始字段", systemImage: "square.and.arrow.up") }
+                        }
                     } label: { Image(systemName: "ellipsis.circle") }
                     .disabled(model.busy)
                 }
@@ -122,14 +128,10 @@ private struct AppRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color.accentColor.opacity(0.1))
-                Image(systemName: record.installed.isSystem ? "gearshape.2" : "app.dashed")
-                    .font(.title2).foregroundStyle(.tint)
-            }.frame(width: 46, height: 46)
+            AppIconView(app: record.installed, storeIconURL: record.release?.iconURL)
             VStack(alignment: .leading, spacing: 5) {
                 Text(record.installed.name).font(.headline).lineLimit(1)
-                Text("本机 \(record.installed.version ?? "未知")  ·  最新 \(record.release?.country == country ? record.release?.version ?? "—" : "—")")
+                Text("本机 \(record.displayedVersion(country: country) ?? "未知")  ·  最新 \(record.release?.country == country ? record.release?.version ?? "—" : "—")")
                     .font(.caption).foregroundStyle(.secondary)
                 if record.error != nil { Text("查询失败，点按查看原因").font(.caption2).foregroundStyle(.orange) }
             }

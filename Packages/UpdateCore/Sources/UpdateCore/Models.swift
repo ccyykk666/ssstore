@@ -7,13 +7,20 @@ public struct InstalledApp: Codable, Identifiable, Equatable, Sendable {
     public var version: String?
     public var build: String?
     public var isSystem: Bool
+    public var localIconKey: String?
+    public var storeID: String?
+    public var externalVersionID: String?
 
-    public init(bundleID: String, name: String, version: String?, build: String? = nil, isSystem: Bool = false) {
+    public init(bundleID: String, name: String, version: String?, build: String? = nil, isSystem: Bool = false,
+                localIconKey: String? = nil, storeID: String? = nil, externalVersionID: String? = nil) {
         self.bundleID = bundleID
         self.name = name
         self.version = version
         self.build = build
         self.isSystem = isSystem
+        self.localIconKey = localIconKey
+        self.storeID = storeID
+        self.externalVersionID = externalVersionID
     }
 }
 
@@ -28,10 +35,14 @@ public struct StoreRelease: Codable, Equatable, Sendable {
     public var storeURL: URL?
     public var country: String
     public var fetchedAt: Date
+    public var storeID: String?
+    public var externalVersionID: String?
+    public var source: String?
 
     public init(bundleID: String, name: String, version: String, notes: String? = nil,
                 releasedAt: String? = nil, minimumOS: String? = nil, iconURL: URL? = nil,
-                storeURL: URL? = nil, country: String, fetchedAt: Date = Date()) {
+                storeURL: URL? = nil, country: String, fetchedAt: Date = Date(), storeID: String? = nil,
+                externalVersionID: String? = nil, source: String? = nil) {
         self.bundleID = bundleID
         self.name = name
         self.version = version
@@ -42,6 +53,9 @@ public struct StoreRelease: Codable, Equatable, Sendable {
         self.storeURL = storeURL
         self.country = country
         self.fetchedAt = fetchedAt
+        self.storeID = storeID
+        self.externalVersionID = externalVersionID
+        self.source = source
     }
 }
 
@@ -58,7 +72,43 @@ public struct AppRecord: Codable, Identifiable, Sendable {
 
     public func status(country: String) -> UpdateStatus {
         guard error == nil, let release, release.country == country else { return .unknown }
-        return VersionOrder.status(installed: installed.version, latest: release.version)
+        if let localID = installed.externalVersionID, let remoteID = release.externalVersionID,
+           installed.storeID == release.storeID, installed.storeID != nil {
+            if localID == remoteID { return .current }
+            return VersionOrder.status(installed: displayedVersion(country: country), latest: release.version) == .update ? .update : .different
+        }
+        let order = VersionOrder.status(installed: displayedVersion(country: country), latest: release.version)
+        return order == .ahead ? .different : order
+    }
+
+    public func displayedVersion(country: String) -> String? {
+        guard let release, release.country == country, usesBuildAsDisplay(release) else { return installed.version }
+        return installed.build
+    }
+
+    private func usesBuildAsDisplay(_ release: StoreRelease) -> Bool {
+        // Some apps (e.g. JD) put an integer counter in ShortVersionString and
+        // the dotted public release in BundleVersion. Only accept an exact match.
+        guard let short = installed.version, !short.isEmpty,
+              short.utf8.allSatisfy({ (48...57).contains($0) }),
+              installed.build?.contains(".") == true else { return false }
+        // JD has independently documented this field convention for years.
+        // Keep comparing the build field when a newer store version arrives.
+        return installed.bundleID == "com.360buy.jdmobile" ||
+            VersionOrder.status(installed: installed.build, latest: release.version) == .current
+    }
+
+    public func versionExplanation(country: String) -> String? {
+        guard let release, release.country == country else { return nil }
+        if displayedVersion(country: country) != installed.version {
+            return installed.bundleID == "com.360buy.jdmobile" ?
+                "京东的设备清单将内部计数放在短版本字段、公开版本放在构建字段。列表按 CFBundleVersion 比较；两个原始字段仍保留。" :
+                "本机短版本为整数计数，且 CFBundleVersion 与商店展示版本一致，列表采用此字段；原始字段仍保留。"
+        }
+        if status(country: country) == .different {
+            return "本机内部版本或版本标识与商店展示不同。公开目录不足以证明本机更新或落后，暂不计入可更新；不会截断数字或强行换算为相同版本。"
+        }
+        return nil
     }
 }
 
@@ -67,6 +117,7 @@ public enum UpdateStatus: String, Sendable {
     case current = "版本相同"
     case ahead = "本机版本较新"
     case unknown = "待确认"
+    case different = "版本需核对"
 }
 
 public enum VersionOrder {

@@ -1,5 +1,7 @@
 # Third-party references and dependencies
 
+The public Apple catalog query design (`mdm-lockup` lookup and external version ID) was researched from the user's MIT-licensed [AssppWeb](https://github.com/ccyykk666/AssppWeb/blob/main/backend/src/routes/search.ts). The Swift client is implemented here and calls Apple directly; AssppWeb's account, purchase, and download flows are not included.
+
 The device transport links the published **idevice v0.1.68** Apple XCFramework from [jkcoxson/idevice](https://github.com/jkcoxson/idevice). The Rust `idevice` crate declares MIT licensing in its [package metadata](https://github.com/jkcoxson/idevice/blob/v0.1.68/idevice/Cargo.toml). Its distributed static binary also contains transitive dependencies; consult the upstream repository and release for their applicable license terms before distributing a finished build.
 
 Pinned release asset: `idevice-xcframework-v0.1.68.zip`.

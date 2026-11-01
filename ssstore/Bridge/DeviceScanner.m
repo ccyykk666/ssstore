@@ -5,6 +5,18 @@
 #include <errno.h>
 #include <poll.h>
 #include <unistd.h>
+#import <CommonCrypto/CommonDigest.h>
+
+static NSString *IconKey(NSDictionary *item) {
+    NSString *identity = [NSString stringWithFormat:@"%@|%@|%@", item[@"CFBundleIdentifier"] ?: @"",
+                          item[@"CFBundleShortVersionString"] ?: @"", item[@"CFBundleVersion"] ?: @""];
+    NSData *input = [identity dataUsingEncoding:NSUTF8StringEncoding];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(input.bytes, (CC_LONG)input.length, digest);
+    NSMutableString *key = [NSMutableString string];
+    for (NSUInteger index = 0; index < sizeof(digest); index++) [key appendFormat:@"%02x", digest[index]];
+    return key;
+}
 
 static void SetError(NSError **error, NSString *message) {
     if (error) *error = [NSError errorWithDomain:@"ssstore.Device" code:1
@@ -45,7 +57,8 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
 
 @implementation DeviceScanner
 + (NSData *)scanPairingPath:(NSString *)path host:(NSString *)host port:(uint16_t)port
-             remotePairing:(BOOL)remotePairing error:(NSError **)error {
+             remotePairing:(BOOL)remotePairing iconsDirectory:(NSString *)iconsDirectory
+                 inventory:(void (^)(NSData *))inventory progress:(void (^)(NSString *))progress error:(NSError **)error {
     struct sockaddr_in address = {0};
     address.sin_len = sizeof(address);
     address.sin_family = AF_INET;
@@ -61,6 +74,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     struct AdapterHandle *adapter = NULL;
     struct RsdHandshakeHandle *handshake = NULL;
     struct InstallationProxyClientHandle *client = NULL;
+    struct SpringBoardServicesClientHandle *springboard = NULL;
     void *raw = NULL;
     size_t count = 0;
     @try {
@@ -95,9 +109,84 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                                     @"CFBundleShortVersionString", @"CFBundleVersion", @"ApplicationType"]) {
                 if ([row[key] isKindOfClass:NSString.class]) item[key] = row[key];
             }
+            if (![item[@"CFBundleIdentifier"] length]) continue;
+            item[@"LocalIconKey"] = IconKey(item);
+            // Some OS versions expose store metadata; keep only identifiers,
+            // never the complete metadata (which may contain account details).
+            id metadata = row[@"iTunesMetadata"];
+            if ([metadata isKindOfClass:NSData.class]) {
+                metadata = [NSPropertyListSerialization propertyListWithData:metadata options:0 format:NULL error:NULL];
+            }
+            if ([metadata isKindOfClass:NSDictionary.class]) {
+                for (NSString *key in @[@"itemId", @"softwareVersionExternalIdentifier"]) {
+                    id value = metadata[key];
+                    if ([value isKindOfClass:NSString.class] || [value isKindOfClass:NSNumber.class]) {
+                        item[[key isEqualToString:@"itemId"] ? @"storeID" : @"externalVersionID"] = [value description];
+                    }
+                }
+            }
             [apps addObject:item];
         }
-        return [NSJSONSerialization dataWithJSONObject:apps options:0 error:error];
+        NSData *result = [NSJSONSerialization dataWithJSONObject:apps options:0 error:error];
+        if (!result) return nil;
+        inventory(result); // Publish the list before the icon loop finishes.
+        NSFileManager *files = NSFileManager.defaultManager;
+        NSError *iconError = nil;
+        if (![files createDirectoryAtPath:iconsDirectory withIntermediateDirectories:YES attributes:nil error:&iconError]) {
+            progress([NSString stringWithFormat:@"清单已读取；无法缓存图标：%@", iconError.localizedDescription]);
+            return result;
+        }
+        NSMutableArray *missing = [NSMutableArray array];
+        NSUInteger cached = 0;
+        for (NSDictionary *item in apps) {
+            NSString *file = [[iconsDirectory stringByAppendingPathComponent:item[@"LocalIconKey"]] stringByAppendingPathExtension:@"png"];
+            if ([files fileExistsAtPath:file]) cached++;
+            else [missing addObject:item];
+        }
+        if (missing.count == 0) {
+            progress([NSString stringWithFormat:@"清单已读取 · %lu 个本地图标已缓存", (unsigned long)cached]);
+            return result;
+        }
+        progress(@"清单已读取，正在连接本地图标服务…");
+        // Reuse this authenticated tunnel, not one new connection per icon.
+        IdeviceFfiError *failure = remotePairing ? springboard_services_connect_rsd(adapter, handshake, &springboard)
+                                                : springboard_services_connect(provider, &springboard);
+        if (!Check(failure, @"本地图标服务", &iconError)) {
+            // The classic FFI connect consumes its provider on failure.
+            if (!remotePairing) provider = NULL;
+            progress([NSString stringWithFormat:@"清单已读取；%@。可在检查更新后使用商店图标。", iconError.localizedDescription]);
+            return result;
+        }
+        NSUInteger fetched = 0, failed = 0, attempted = 0;
+        for (NSDictionary *item in missing) {
+            @autoreleasepool {
+                void *png = NULL;
+                size_t length = 0;
+                failure = springboard_services_get_icon(springboard, [item[@"CFBundleIdentifier"] UTF8String], &png, &length);
+                // Pinned idevice codes: socket, timeout, inactive session,
+                // disconnected, locked. A missing app icon is not a dead tunnel.
+                BOOL disconnected = failure && (failure->code == 1 || failure->code == 109 ||
+                    failure->code == 17 || failure->code == 19 || failure->code == 23);
+                if (failure) {
+                    Check(failure, @"读取图标", &iconError);
+                    failed++;
+                } else if (png && length > 0) {
+                    NSData *image = [NSData dataWithBytes:png length:length];
+                    NSString *file = [[iconsDirectory stringByAppendingPathComponent:item[@"LocalIconKey"]] stringByAppendingPathExtension:@"png"];
+                    if ([image writeToFile:file options:NSDataWritingAtomic error:&iconError]) fetched++;
+                    else failed++;
+                } else { failed++; }
+                if (png) idevice_data_free(png, length);
+                attempted++;
+                progress([NSString stringWithFormat:@"本地图标 %lu/%lu · 缓存 %lu · 未取得 %lu", (unsigned long)attempted,
+                          (unsigned long)missing.count, (unsigned long)cached, (unsigned long)failed]);
+                // A dead connection should not cause a timeout for every app.
+                if (disconnected) break;
+            }
+        }
+        progress([NSString stringWithFormat:@"清单已读取 · 本地图标 %lu/%lu%@", (unsigned long)(cached + fetched),
+                  (unsigned long)apps.count, failed ? [NSString stringWithFormat:@"；部分未取得：%@", iconError.localizedDescription ?: @"系统未返回图标"] : @""]);
+        return result;
     } @finally {
         if (raw) {
             idevice_plist_array_free((plist_t *)raw, count);
@@ -106,6 +195,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             free(raw);
         }
         installation_proxy_client_free(client);
+        springboard_services_free(springboard);
         rsd_handshake_free(handshake);
         adapter_free(adapter);
         idevice_provider_free(provider);

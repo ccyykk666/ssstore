@@ -19,6 +19,9 @@ final class AppModel: ObservableObject {
     @Published var scannedAt: Date?
     @Published var inventoryOrigin = "尚未读取"
     @Published var hasPairing = false
+    @Published var iconRevision = 0
+    @Published var iconReadSummary = ""
+    @Published var checkSummary = ""
     @Published var country: String { didSet { UserDefaults.standard.set(country, forKey: "country") } }
     @Published var host: String { didSet { UserDefaults.standard.set(host, forKey: "host") } }
     @Published var port: String { didSet { UserDefaults.standard.set(port, forKey: "port") } }
@@ -31,7 +34,9 @@ final class AppModel: ObservableObject {
     private var checkTask: Task<Void, Never>?
     private var nextLookupAt = Date.distantPast
     private let storage: URL
+    let iconsDirectory: URL
     let pairingURL: URL
+    let rawInventoryURL: URL
     let pairingController = OnDevicePairingController()
 
     init() {
@@ -43,7 +48,10 @@ final class AppModel: ObservableObject {
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ssstore", isDirectory: true)
         storage = folder.appendingPathComponent("inventory.json")
+        iconsDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ssstore-icons", isDirectory: true)
         pairingURL = folder.appendingPathComponent("device-pairing.plist")
+        rawInventoryURL = folder.appendingPathComponent("device-inventory.json")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: storage.path) {
@@ -66,15 +74,40 @@ final class AppModel: ObservableObject {
         let path = pairingURL.path
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let remote = mode == .remote
+        let iconsPath = iconsDirectory.path
         do {
-            let data: Data = try await withCheckedThrowingContinuation { continuation in
+            let _: Data = try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
-                    do { continuation.resume(returning: try DeviceScanner.scan(pairingPath: path, host: address, port: number, remotePairing: remote)) }
+                    do {
+                        let data = try DeviceScanner.scan(pairingPath: path, host: address, port: number, remotePairing: remote,
+                            iconsDirectory: iconsPath, inventory: { data in
+                                DispatchQueue.main.async {
+                                    do {
+                                        let apps = try InventoryParser.parse(data)
+                                        try data.write(to: self.rawInventoryURL, options: [.atomic, .completeFileProtection])
+                                        self.merge(apps, origin: "本机读取")
+                                    }
+                                    catch { self.message = error.localizedDescription }
+                                }
+                            }, progress: { text in
+                                DispatchQueue.main.async {
+                                    self.activity = text
+                                    self.iconReadSummary = text
+                                    self.iconRevision += 1
+                                }
+                            })
+                        continuation.resume(returning: data)
+                    }
                     catch { continuation.resume(throwing: error) }
                 }
             }
-            merge(try InventoryParser.parse(data), origin: "本机读取")
         } catch { message = error.localizedDescription }
+    }
+
+    func localIconURL(for app: InstalledApp) -> URL? {
+        guard let key = app.localIconKey, key.count == 64,
+              key.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
+        return iconsDirectory.appendingPathComponent(key).appendingPathExtension("png")
     }
 
     func importPairing(from url: URL) {
@@ -168,36 +201,68 @@ final class AppModel: ObservableObject {
         persist()
     }
 
-    func checkUpdates(only id: String? = nil) {
+    func checkUpdates(only id: String? = nil, force: Bool = false) {
         guard !busy else { return }
         let targets = records.filter { !$0.installed.isSystem }
         // Explicit selection includes system apps; default excludes apps updated with iOS.
         let ids = id.map { [$0] } ?? targets.map(\.id)
         guard !ids.isEmpty else { message = "请先读取或导入应用清单。"; return }
         let region = country
+        let refresh = force || id != nil
+        let selected = records.filter { ids.contains($0.id) }
+        let cached = selected.filter { !refresh && $0.error == nil && AppleLookup.isFresh($0.release, country: region) }
+        let cachedIDs = Set(cached.map(\.id))
+        let pending = selected.filter { !cachedIDs.contains($0.id) }
+        let batches = AppleLookup.batches(bundleIDs: pending.map(\.effectiveBundleID))
+        var knownStoreIDs: [String: String] = [:]
+        for record in pending {
+            if let storeID = record.release?.storeID ?? (record.lookupBundleID == nil ? record.installed.storeID : nil) {
+                knownStoreIDs[record.effectiveBundleID] = storeID
+            }
+        }
         busy = true
         isChecking = true
+        checkSummary = ""
         checkTask = Task {
-            defer { busy = false; isChecking = false; activity = ""; checkTask = nil; persist() }
-            for (offset, appID) in ids.enumerated() {
+            let started = Date()
+            var completed = cached.count
+            var failures = 0
+            var warning: String?
+            defer {
+                checkSummary = "\(Task.isCancelled ? "已停止" : "本轮检查")：\(completed)/\(ids.count) · 缓存 \(cached.count) · 未取得 \(failures) · \(String(format: "%.1f", Date().timeIntervalSince(started))) 秒"
+                if let warning { checkSummary += "\n" + warning }
+                busy = false; isChecking = false; activity = ""; checkTask = nil; persist()
+            }
+            for (offset, bundles) in batches.enumerated() {
                 if Task.isCancelled { break }
-                guard let index = records.firstIndex(where: { $0.id == appID }) else { continue }
-                activity = "查询 \(offset + 1)/\(ids.count)：\(records[index].installed.name)"
-                // About 20 requests/minute, matching Apple's documented approximate limit.
+                activity = "批量查询 \(offset + 1)/\(batches.count) · 已完成 \(completed)/\(ids.count)"
+                // Throttle batches rather than sleeping once per app.
                 let wait = nextLookupAt.timeIntervalSinceNow
                 if wait > 0 { do { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) } catch { break } }
                 if Task.isCancelled { break }
                 nextLookupAt = Date().addingTimeInterval(3.2)
                 do {
-                    let release = try await AppleLookup.fetch(bundleID: records[index].effectiveBundleID, country: region)
-                    records[index].release = release
-                    records[index].error = nil
-                    records[index].checkedAt = Date()
+                    let batch = try await AppleLookup.fetchBatch(bundleIDs: bundles, country: region, knownStoreIDs: knownStoreIDs)
+                    warning = batch.catalogWarning ?? warning
+                    for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
+                        let release = batch.releases[records[index].effectiveBundleID]
+                        // Preserve a previous success on a failed lookup, clearly marked.
+                        if let release { records[index].release = release }
+                        records[index].error = release == nil ? LookupError.notFound.localizedDescription : nil
+                        records[index].checkedAt = Date()
+                        completed += 1
+                        if release == nil { failures += 1 }
+                    }
+                    persist()
                 } catch is CancellationError { break }
                 catch {
                     if Task.isCancelled { break }
-                    records[index].error = error.localizedDescription
-                    records[index].checkedAt = Date()
+                    for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
+                        records[index].error = error.localizedDescription
+                        records[index].checkedAt = Date()
+                        completed += 1
+                        failures += 1
+                    }
                     // A rate-limit response should end the batch instead of hammering the service.
                     if case LookupError.http(429) = error {
                         message = "苹果接口限流，本轮查询已停止，已获得的结果会保留。请稍后重试。"

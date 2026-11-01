@@ -15,16 +15,26 @@ public enum InventoryParser {
         var unique: [String: InstalledApp] = [:]
         for row in rows {
             guard let id = text(row, ["bundleID", "CFBundleIdentifier"]), !id.isEmpty else { continue }
+            let metadata = row["iTunesMetadata"] as? [String: Any] ?? [:]
             unique[id] = InstalledApp(
                 bundleID: id,
                 name: text(row, ["name", "CFBundleDisplayName", "CFBundleName"]) ?? id,
                 version: text(row, ["version", "CFBundleShortVersionString"]),
                 build: text(row, ["build", "CFBundleVersion"]),
-                isSystem: (row["isSystem"] as? Bool) ?? (row["ApplicationType"] as? String == "System")
+                isSystem: (row["isSystem"] as? Bool) ?? (row["ApplicationType"] as? String == "System"),
+                localIconKey: text(row, ["LocalIconKey"]),
+                storeID: identifier(row["storeID"] ?? row["itemID"] ?? metadata["itemId"]),
+                externalVersionID: identifier(row["externalVersionID"] ?? metadata["softwareVersionExternalIdentifier"])
             )
         }
         guard !unique.isEmpty else { throw InventoryError.empty }
         return unique.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private static func identifier(_ value: Any?) -> String? {
+        let string = (value as? String) ?? (value as? NSNumber)?.stringValue
+        guard let string, !string.isEmpty, string != "0", string.utf8.allSatisfy({ (48...57).contains($0) }) else { return nil }
+        return string
     }
 
     private static func text(_ row: [String: Any], _ keys: [String]) -> String? {

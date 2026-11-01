@@ -46,7 +46,7 @@ struct SettingsView: View {
                 } header: {
                     Text("配合 Loon 使用")
                 } footer: {
-                    Text("Loon 负责网络通路，配对文件负责设备认证。无需为此功能启用 HTTPS 解密。iOS 27.2 的读取能力尚待真机验证。")
+                    Text("Loon 负责网络通路，配对文件负责设备认证。读取本机时会同时缓存本地图标，未取得时再使用商店图标。")
                 }
                 Section("版本数据") {
                     Picker("商店地区", selection: $model.country) {
@@ -59,8 +59,8 @@ struct SettingsView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("关于") {
-                    Text("ssstore · 0.2.1")
-                    Text("查询仅发送应用 Bundle ID 与所选商店地区到苹果。配对文件保存在本软件本地，不会随版本查询上传。")
+                    Text("ssstore · 0.3.0")
+                    Text("批量查询仅向苹果发送 Bundle ID、数字商店 ID 与所选地区，无需 Apple ID 登录。配对文件与本地图标保存在本软件内，不会随版本查询上传。")
                     Text("读取清单和检查更新是两个动作。安装、卸载或升级应用后，请重新读取本机；导入清单只是快照。")
                     Text("本版显示可用版本与更新说明。应用安装和签名续期仍由原安装渠道处理。")
                 }
