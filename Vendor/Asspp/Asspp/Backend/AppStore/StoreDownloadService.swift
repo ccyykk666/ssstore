@@ -123,7 +123,11 @@ enum StoreDownloadService {
     {
         var components = URLComponents()
         components.scheme = "https"
-        components.host = endpoint == .volumeStore ? Configuration.storeAPIHost(pod: account.pod) : "downloaddispatch.itunes.apple.com"
+        if endpoint == .volumeStore {
+            components.host = try StoreDownloadProtocol.storeHost(pod: account.pod)
+        } else {
+            components.host = "downloaddispatch.itunes.apple.com"
+        }
         components.path = endpoint.path
         if endpoint == .update {
             let bag = try? await Bag.fetchBag()
@@ -150,10 +154,13 @@ enum StoreDownloadService {
             request.setValue(Locale.preferredLanguages.prefix(3).joined(separator: ", "), forHTTPHeaderField: "Accept-Language")
             request.setValue(account.directoryServicesIdentifier, forHTTPHeaderField: "iCloud-DSID")
             request.setValue(account.directoryServicesIdentifier, forHTTPHeaderField: "X-Dsid")
-            for (name, value) in account.cookie.buildCookieHeader(url) {
-                request.setValue(value, forHTTPHeaderField: name)
+            let cookies = account.cookie.map {
+                StoreProtocol.SessionCookie(name: $0.name, value: $0.value, path: $0.path, domain: $0.domain,
+                                            expiresAt: $0.expiresAt, secure: $0.secure)
             }
-            logger.info("Store download [\(trace)]: endpoint=\(endpoint.rawValue) hop=\(redirect) sessionCookie=\(request.value(forHTTPHeaderField: "Cookie") != nil)")
+            request.setValue(StoreProtocol.cookieHeader(cookies, for: url), forHTTPHeaderField: "Cookie")
+            let dottedDomains = cookies.filter { $0.domain?.hasPrefix(".") == true }.count
+            logger.info("Store download [\(trace)]: endpoint=\(endpoint.rawValue) host=\(url.host ?? "unknown") hop=\(redirect) sessionCookie=\(request.value(forHTTPHeaderField: "Cookie") != nil) storedCookies=\(cookies.count) dottedDomains=\(dottedDomains)")
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw StoreDownloadError.response(0) }
             mergeCookies(response: response, url: url, account: &account)
@@ -170,6 +177,11 @@ enum StoreDownloadService {
                 logger.info("Store download [\(trace)]: \(StoreDownloadProtocol.summary(plist))")
             }
             guard response.statusCode == 200, let plist else {
+                if response.statusCode == 403 {
+                    let bodyKind = data.isEmpty ? "empty" : (plist == nil ? "non-plist" : "plist")
+                    logger.error("Store download [\(trace)]: HTTP denial endpoint=\(endpoint.rawValue) host=\(url.host ?? "unknown") status=403 response=\(bodyKind)")
+                    throw StoreDownloadError.serviceResponse(403, endpoint.rawValue)
+                }
                 if data.isEmpty {
                     throw StoreDownloadError.emptyResponse(response.statusCode)
                 }
@@ -218,4 +230,5 @@ enum StoreDownloadService {
                                   bundleVersion: build, iTunesMetadata: PropertyListSerialization.data(fromPropertyList: metadata, format: .binary, options: 0))
     }
 }
+
 

@@ -3,6 +3,53 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        // Domain cookies from login may retain the leading dot. They must reach the wire.
+        let storeURL = URL(string: "https://p71-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct")!
+        let dispatchURL = URL(string: "https://downloaddispatch.itunes.apple.com/r/redownload")!
+        let fixtureNow = Date(timeIntervalSince1970: 1000)
+        func cookie(_ name: String, domain: String? = ".itunes.apple.com", path: String = "/",
+                    expires: TimeInterval? = nil) -> StoreProtocol.SessionCookie {
+            .init(name: name, value: "synthetic", path: path, domain: domain, expiresAt: expires, secure: true)
+        }
+        for domain in [".itunes.apple.com", "itunes.apple.com", ".ITUNES.APPLE.COM"] {
+            var request = URLRequest(url: storeURL)
+            request.setValue(StoreProtocol.cookieHeader([cookie("session", domain: domain)], for: storeURL, now: fixtureNow), forHTTPHeaderField: "Cookie")
+            precondition(request.value(forHTTPHeaderField: "Cookie") == "session=synthetic")
+            precondition(StoreProtocol.cookieHeader([cookie("session", domain: domain)], for: dispatchURL, now: fixtureNow) == "session=synthetic")
+        }
+        let selected = StoreProtocol.cookieHeader([
+            cookie("expired", expires: 999), cookie("session"), cookie("wrong-path", path: "/r"),
+            cookie("other-pod", domain: "p25-buy.itunes.apple.com"), cookie("parent", domain: ".apple.com"),
+            cookie("wrong-domain", domain: "itunes.apple.com.attacker.invalid"), cookie("public-suffix", domain: "com"),
+        ], for: storeURL, now: fixtureNow)
+        precondition(selected == "session=synthetic; parent=synthetic")
+        precondition(StoreProtocol.cookieHeader([cookie("scope", path: "/r")], for: dispatchURL, now: fixtureNow) == "scope=synthetic")
+        precondition(StoreProtocol.cookieHeader([cookie("boundary", path: "/red")], for: dispatchURL, now: fixtureNow) == nil)
+        precondition(StoreProtocol.cookieHeader([cookie("expired", expires: 1000)], for: storeURL, now: fixtureNow) == nil)
+        precondition(StoreProtocol.cookieHeader([cookie("bad\r\nInjected")], for: storeURL, now: fixtureNow) == nil)
+        precondition(StoreProtocol.cookieHeader([cookie("session")], for: URL(string: "http://buy.itunes.apple.com/")!, now: fixtureNow) == nil)
+        precondition(StoreProtocol.cookieHeader([cookie("session")], for: URL(string: "https://itunes.apple.com.attacker.invalid/")!, now: fixtureNow) == nil)
+        let noPodHost = try StoreDownloadProtocol.storeHost(pod: nil)
+        let emptyPodHost = try StoreDownloadProtocol.storeHost(pod: "")
+        let assignedPodHost = try StoreDownloadProtocol.storeHost(pod: "71")
+        precondition(noPodHost == "buy.itunes.apple.com" && emptyPodHost == noPodHost)
+        precondition(assignedPodHost == "p71-buy.itunes.apple.com")
+        do {
+            _ = try StoreDownloadProtocol.storeHost(pod: "71.attacker.invalid")
+            fatalError("Accepted an invalid account pod")
+        } catch StoreDownloadError.invalidRedirect {}
+        // A transport 403 remains 403; it never becomes a missing-license recovery.
+        var deniedCalls = 0
+        do {
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "123") { _, _ in
+                deniedCalls += 1
+                throw StoreDownloadError.serviceResponse(403, "volumeStore")
+            } resolveVersion: { fatalError("403 must not trigger a catalog lookup") }
+                onFallback: { _ in fatalError("403 must not blindly retry other endpoints") }
+            fatalError("Ignored HTTP 403")
+        } catch StoreDownloadError.serviceResponse(403, "volumeStore") {}
+        precondition(deniedCalls == 1)
+
         let empty: [String: Any] = ["songList": [], "status": 0, "jingleDocType": "purchaseSuccess"]
         let success: [String: Any] = ["songList": [["metadata": ["softwareVersionBundleId": "example.app"]]]]
         var requests: [(StoreDownloadProtocol.Endpoint, String?)] = []
@@ -204,4 +251,5 @@ struct DownloadProtocolChecks {
         print("Download protocol regression checks passed.")
     }
 }
+
 

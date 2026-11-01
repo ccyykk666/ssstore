@@ -4,17 +4,35 @@
 
 ## 当前状态
 
-- 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前已交付 **0.5.2（12）**，iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。
+- 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前准备发布 **0.5.3（14）**，修复下载/历史查询的会话传输问题；iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。
 - 0.5.1（11）已推送并构建交付，源码提交 `e2c0027562fc3e2fb9189ea08f3d18dba9507781`，构建 `41329740686`，41 项核心测试及上游下载协议/本地化检查通过；实际工具链 Xcode 27.1、iOS 27.1 SDK。
 - 0.5.2 的九项界面和安装通道调整已推送 `40fe1576df3074a65cab8f9d6bb307cc9dbffac1`，构建 `41331962262` 成功并交付 IPA。新增配对安装仅通过编译，尚未实机验证。
-- 本轮仅调整 CI 的测试选择策略，不改应用版本：用户要求只在相关代码变更时运行对应测试，避免每次构建重复执行无关测试。
+- CI 按变更选择测试的修改已在 `87ce4fd82d990d1d554384bd3ccdd1e9ba93f8aa` 推送并通过构建 `41333205147`。
+- 曾仅凭截图 License required 实现授权恢复（提交 `2f77aa2ca5467edc8f3c06ff4f18b0deb3967307`，废弃版本 0.5.3/13）。用户纠正为 HTTP 403 并要求暂停后，已通过 `d84239cfb5f252be9ed2c4c50265b07456fd3a58` 完整撤回该轮修改；未交付该产物。用户随后明确要求排查 403 并修复推送，不要恢复已撤回的购买/授权 UI。
 - 依旧按用户要求：构建成功后直接交付 IPA，不额外检查 IPA 内容或哈希。若遇到需要用户决定的问题，先询问。
+
+## 0.5.3（14）403 排查与修复
+
+- 对照固定 ApplePackage 2.0.3 的 Supplement/Cookie.swift，发现其 matchesDomain 只转小写，未移除 Domain 前导点：`.itunes.apple.com` 既不等于请求主机，又会形成 `..itunes.apple.com` 的后缀，导致有效登录 Cookie 被排除。登录返回的 Cookie 复制时保留原 domain，旧账号记录同样可能保留前导点；ssstore 原来仅在接收下载响应 Cookie 时归一化，首次请求仍调用有缺陷的库方法。
+- 本轮在 StoreProtocol 添加纯 Cookie 头选择函数，并在 StoreDownloadService 的每次请求/受限重定向中使用。按 RFC 6265 忽略前导点，验证 Apple 域名后缀边界、HTTPS、路径边界、有效期和头注入字符，较长路径优先。不会把 Cookie 转发到非 Apple 地址，不记录 Cookie 值。
+- 对照 ipatool 的 volumeStoreEndpoint：账号无已分配 pod 时使用 `buy.itunes.apple.com`，由 Apple 路由，不再猜测固定 `p25`。已有数字 pod 保持使用对应主机，无效 pod 拒绝生成请求。
+- HTTP 403 保留为带 endpoint 的 serviceResponse 错误，不转换成 9610，也不自动领取授权、不盲目刷新密码令牌或跨端点重试。日志添加无查询参数的主机、Cookie 是否发送/数量、前导点数量及响应形态（空/plist/非 plist）；从而可以区分会话漏发与已发送会话后仍被服务端拒绝。
+- 新增的下载协议回归用合成会话验证 Cookie 进入 URLRequest、前导点/大小写、不同 pod/路径/过期/恶意域名过滤、无 pod 路由和 403 不误重试。CI 只跑相关协议/本地化/选择器检查，UpdateCore 不变。
+- 上游 issue #637 报告已购应用也会因缺少 kbsync 而在历史/下载接口返回空体 403；评论称更新上游后恢复。ipatool 当前源码确有 ent/download + kbsync，而 ApplePackage 2.0.3 的 SAPIntegration.md 明确尚未实现此独立数据。SAP 登录签名不等于 kbsync，不能随便给旧下载 POST 加 SAP 签名来替代。
+- 未取得用户设备的 403 请求日志，也没有用户账号可重放。因此已确认并修复的是可复现的会话漏发和错误默认 pod 缺陷，不能断言这是用户那次 403 的唯一原因，更不能声称已在设备上确认恢复。若新版仍返回 403，需查看 endpoint、sessionCookie、response 形态后确定是否落在 kbsync 限制或其他服务端策略，勿再次无证据归为“缺授权”。
+
+依据：
+- https://github.com/Lakr233/ApplePackage/blob/2.0.3/Sources/ApplePackage/Supplement/Cookie.swift
+- https://github.com/Lakr233/ApplePackage/blob/2.0.3/SAPIntegration.md
+- https://github.com/majd/ipatool/blob/d9c0247daea564d3ec7d04a9b015d0a29af66b04/pkg/appstore/appstore_download_product.go
+- https://github.com/majd/ipatool/issues/637
+- https://www.rfc-editor.org/rfc/rfc6265.html#section-5.2.3
 
 ## CI 测试选择策略
 
 - `.github/workflows/build-ios.yml` 全量拉取 git 历史，由 `scripts/select-ci-tests.py` 查询本分支最近成功的 push/手动构建（无记录则使用基准分支），比较该成功提交与当前实际 checkout 的代码。重跑已成功的相同提交时可复用对应成功基准。不会把上一次失败的提交作为已验证基准，也不会把 PR 的 head_sha 冒充实际测试过的合并提交。
 - UpdateCore：仅 `Packages/UpdateCore/` 下源码、测试或包配置变化时运行 `swift test`。
-- 下载协议：仅其实际编译输入 StoreProtocol.swift、StoreDiagnostics.swift、StoreDownloadProtocol.swift、DownloadProtocolChecks.swift 或 check.downloads.sh 变化时运行。
+- 下载协议：仅其实际编译输入 StoreProtocol.swift、StoreDiagnostics.swift、StoreDownloadProtocol.swift、DownloadProtocolChecks.swift、check.downloads.sh 或相关调用层 StoreDownloadService.swift 变化时运行。
 - 本地化：仅 Localizable.xcstrings、StoreDownloadProtocol.swift、LocalizationChecks.py 或 check.downloads.sh 变化时运行。下载检查脚本支持 protocol/localization/all，省略参数仍运行全部，兼容上游原用法。
 - 选择器自身、其测试或工作流变更时才运行选择器的 Python 回归检查。仅改 SwiftUI 页面、原生桥接、普通文案或文档，不重复运行无关的三组库检查；应用编译和打包照常执行。
 - 无成功基准、历史缺失或 Actions API 不可访问时，明确记录原因并回退到全部检查；不能静默跳过未验证代码。检查选择结果写入 Actions 日志和步骤摘要。

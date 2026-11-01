@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Apple rejected the %@ request (HTTP %lld)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple rejected the %@ request (HTTP %lld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 拒绝了 %@ 请求（HTTP %lld）。"
+          }
+        }
+      }
+    },
     "" : {
       "shouldTranslate" : false
     },
@@ -3065,4 +3082,5 @@
   },
   "version" : "1.1"
 }
+
 

@@ -3,6 +3,7 @@ import Foundation
 enum StoreDownloadError: LocalizedError {
     case invalidRedirect
     case response(Int)
+    case serviceResponse(Int, String)
     case emptyResponse(Int)
     case invalidPackage
     case empty
@@ -17,6 +18,8 @@ enum StoreDownloadError: LocalizedError {
             String(localized: "Apple returned an invalid download redirect.")
         case let .response(status), let .emptyResponse(status):
             String(localized: "Apple's download service returned an invalid response (HTTP \(status)).")
+        case let .serviceResponse(status, endpoint):
+            String(localized: "Apple rejected the \(endpoint) request (HTTP \(status)).")
         case .invalidPackage:
             String(localized: "Apple returned incomplete or mismatched package information.")
         case .empty:
@@ -35,6 +38,14 @@ enum StoreDownloadError: LocalizedError {
 
 /// Response classification and request rules without credentials or networking.
 enum StoreDownloadProtocol {
+    /// Follow ipatool: let Apple's generic host route a session without an assigned pod.
+    /// A guessed p25 pod can be unrelated to the account's actual store session.
+    static func storeHost(pod: String?) throws -> String {
+        guard let pod, !pod.isEmpty else { return "buy.itunes.apple.com" }
+        guard pod.allSatisfy({ $0.isASCII && $0.isNumber }) else { throw StoreDownloadError.invalidRedirect }
+        return "p\(pod)-buy.itunes.apple.com"
+    }
+
     static func isMainInfoPlist(_ path: String) -> Bool {
         let components = path.split(separator: "/", omittingEmptySubsequences: false)
         return components.count == 3 && components[0] == "Payload"
@@ -219,4 +230,5 @@ enum StoreDownloadProtocol {
         return item
     }
 }
+
 
