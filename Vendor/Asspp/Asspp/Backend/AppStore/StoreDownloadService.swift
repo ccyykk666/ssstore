@@ -23,71 +23,13 @@ enum StoreDownloadService {
 
     static func versions(account: inout Account, package: AppStore.AppPackage) async throws -> [String] {
         try await product(account: &account, package: package, version: nil, operation: "versions") { item in
-            try StoreHistoryProtocol.identifiers(item)
+            guard let metadata = item["metadata"] as? [String: Any],
+                  let identifiers = metadata["softwareVersionExternalIdentifiers"] as? [Any]
+            else { throw StoreDownloadError.noVersions }
+            let versions = identifiers.map { StoreProtocol.string($0) }.filter { !$0.isEmpty }
+            guard !versions.isEmpty else { throw StoreDownloadError.noVersions }
+            return versions
         }
-    }
-
-    /// Only called after the user selects the free-license action in history.
-    static func acquireFreeLicense(account: inout Account, package: AppStore.AppPackage) async throws {
-        guard StoreHistoryProtocol.canAcquireLicense(price: package.software.price) else {
-            throw StoreDownloadError.paidLicenseRequired
-        }
-        let session = makeSession()
-        defer { session.invalidateAndCancel() }
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = Configuration.purchaseAPIHost(pod: account.pod)
-        components.path = "/WebObjects/MZFinance.woa/wa/buyProduct"
-        let payload: [String: Any] = [
-            "appExtVrsId": "0", "hasAskedToFulfillPreorder": "true",
-            "buyWithoutAuthorization": "true", "hasDoneAgeCheck": "true",
-            "guid": Configuration.deviceIdentifier, "needDiv": "0",
-            "origPage": "Software-\(package.software.id)", "origPageLocation": "Buy",
-            "price": "0", "pricingParameters": "STDQ", "productType": "C",
-            "salableAdamId": package.software.id,
-        ]
-        let body = try PropertyListSerialization.data(fromPropertyList: payload, format: .xml, options: 0)
-        guard var url = components.url else { throw StoreDownloadError.invalidRedirect }
-        for hop in 0 ... 3 {
-            try Task.checkCancellation()
-            url = try StoreHistoryProtocol.validatedPurchaseURL(url)
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"; request.httpBody = body
-            request.setValue("application/x-apple-plist", forHTTPHeaderField: "Content-Type")
-            request.setValue(Configuration.userAgent, forHTTPHeaderField: "User-Agent")
-            request.setValue(account.directoryServicesIdentifier, forHTTPHeaderField: "iCloud-DSID")
-            request.setValue(account.directoryServicesIdentifier, forHTTPHeaderField: "X-Dsid")
-            request.setValue("\(account.store)-1", forHTTPHeaderField: "X-Apple-Store-Front")
-            request.setValue(account.passwordToken, forHTTPHeaderField: "X-Token")
-            for (name, value) in account.cookie.buildCookieHeader(url) { request.setValue(value, forHTTPHeaderField: name) }
-            let (data, response) = try await session.data(for: request)
-            guard let response = response as? HTTPURLResponse else { throw StoreDownloadError.response(0) }
-            mergeCookies(response: response, url: url, account: &account)
-            if [301, 302, 303, 307, 308].contains(response.statusCode) {
-                guard hop < 3, let location = response.value(forHTTPHeaderField: "Location"),
-                      let next = URL(string: location, relativeTo: url)?.absoluteURL
-                else { throw StoreDownloadError.invalidRedirect }
-                url = try StoreHistoryProtocol.validatedPurchaseURL(next)
-                continue
-            }
-            guard let responsePlist = StoreProtocol.plist(data) else {
-                throw StoreDownloadError.response(response.statusCode)
-            }
-            try StoreHistoryProtocol.checkPurchaseResponse(responsePlist, status: response.statusCode)
-            return
-        }
-        throw StoreDownloadError.invalidRedirect
-    }
-
-    private static func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.urlCredentialStorage = nil
-        configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 60
-        return URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
     }
 
     static func versionMetadata(account: inout Account, package: AppStore.AppPackage, versionID: String) async throws -> VersionMetadata {
@@ -107,7 +49,14 @@ enum StoreDownloadService {
         let version = version.flatMap { $0.isEmpty ? nil : $0 }
         let platform = package.entityType ?? .iPhone
         logger.info("Store download [\(trace)]: operation=\(operation) app=\(app.id) platform=\(platform.rawValue) store=\(account.store) version=\(version ?? "latest")")
-        let session = makeSession()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        let session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         do {
             let region = Configuration.countryCode(for: account.store)
@@ -135,9 +84,6 @@ enum StoreDownloadService {
                 logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
             }
             // Preserve the existing UI's explicit free-license acquisition flow.
-            if StoreHistoryProtocol.isExpiredSession(response) {
-                throw StoreDownloadError.sessionExpired
-            }
             if StoreDownloadProtocol.failureCode(response) == "9610" {
                 throw ApplePackageError.licenseRequired
             }
@@ -272,5 +218,4 @@ enum StoreDownloadService {
                                   bundleVersion: build, iTunesMetadata: PropertyListSerialization.data(fromPropertyList: metadata, format: .binary, options: 0))
     }
 }
-
 

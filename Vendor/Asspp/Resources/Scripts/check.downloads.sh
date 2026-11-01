@@ -13,8 +13,6 @@ if [[ "$check_kind" != localization ]]; then
     swiftc Asspp/Backend/AppStore/StoreProtocol.swift \
     Asspp/Backend/AppStore/StoreDiagnostics.swift \
     Asspp/Backend/AppStore/StoreDownloadProtocol.swift \
-    Asspp/Backend/AppStore/StoreHistoryProtocol.swift \
-    Resources/Tests/HistoryProtocolChecks.swift \
     Resources/Tests/DownloadProtocolChecks.swift -o "$download_check_dir/download-checks"
     "$download_check_dir/download-checks"
 fi

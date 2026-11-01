@@ -1,40 +1,6 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "This account's session has expired. Sign in again, then retry." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This account's session has expired. Sign in again, then retry."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此账号的登录状态已过期，请重新登录后再试。"
-          }
-        }
-      }
-    },
-    "Use an account that owns this app, or acquire it in the App Store first." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use an account that owns this app, or acquire it in the App Store first."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "请使用已拥有此应用的账号，或先在 App Store 获取此应用。"
-          }
-        }
-      }
-    },
     "" : {
       "shouldTranslate" : false
     },
@@ -3099,5 +3065,4 @@
   },
   "version" : "1.1"
 }
-
 

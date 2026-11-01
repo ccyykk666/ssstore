@@ -4,32 +4,17 @@
 
 ## 当前状态
 
-- 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前准备发布 **0.5.3（13）**，修复历史版本授权恢复；iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。
+- 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前已交付 **0.5.2（12）**，iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。
 - 0.5.1（11）已推送并构建交付，源码提交 `e2c0027562fc3e2fb9189ea08f3d18dba9507781`，构建 `41329740686`，41 项核心测试及上游下载协议/本地化检查通过；实际工具链 Xcode 27.1、iOS 27.1 SDK。
 - 0.5.2 的九项界面和安装通道调整已推送 `40fe1576df3074a65cab8f9d6bb307cc9dbffac1`，构建 `41331962262` 成功并交付 IPA。新增配对安装仅通过编译，尚未实机验证。
-- CI 按相关代码选择检查的改动已推送 `87ce4fd82d990d1d554384bd3ccdd1e9ba93f8aa`，构建 `41333205147` 成功；核心测试明确跳过，相关下载/本地化及选择器检查通过。
+- 本轮仅调整 CI 的测试选择策略，不改应用版本：用户要求只在相关代码变更时运行对应测试，避免每次构建重复执行无关测试。
 - 依旧按用户要求：构建成功后直接交付 IPA，不额外检查 IPA 内容或哈希。若遇到需要用户决定的问题，先询问。
-
-## 0.5.3 历史版本加载修复
-
-- 用户提供“版本历史 → License required”截图。对照 majd/ipatool 上游提交 `d9c0247daea564d3ec7d04a9b015d0a29af66b04` 的 list_versions、get_version_metadata、purchase 和命令层登录重试：9610 表示缺应用授权，2034/2042 表示登录过期，购买接口的 5002 表示已拥有授权。没有绕过 Apple 授权，也没有把真实无授权伪装成历史为空。
-- 历史页不再因 licenseRequired 设置 shouldDismiss 并退出。缺授权时在页内显示当前账号，已确认价格为 0 的应用提供“获取免费授权并重试”，付费或价格未知时只提示使用已拥有应用的账号/先在 App Store 获取，不发起收费购买，也不在打开页面时自动获取授权。
-- 新增 StoreHistoryProtocol 的纯解析/恢复规则和 StoreDownloadService.acquireFreeLicense：明确用户点击后，通过受限 HTTPS Apple buyProduct 请求获取免费授权，保留 cookie、DSID、StoreFront、X-Token、GUID；仅接受结构化成功或 5002 已授权响应，空 HTTP 500 仍是失败。不记录请求凭据或原始响应。
-- 历史列表/元数据请求遇到 2034/2042 时，在独立 withAccount 操作中刷新并持久化密码令牌，然后对原请求重试一次。9610 不触发账号刷新；真实错误继续展示，不无限重试。原下载按钮的 licenseRequired 交互保留。
-- 历史版本 ID 过滤无效/零值并保序去重。缓存按有效 ID 清理；“全部加载”按实际 ID 覆盖判断，下一批取尚无元数据的 ID，修复手动加载中间项导致的漏载或越界。列表查询失败不再继续调用加载元数据回调；不可见加载遮罩明确禁用命中测试。
-- HistoryProtocolChecks 合并进现有下载协议检查，覆盖缺授权不误刷登录、会话最多一次重试、免费/付费/未知价格限制、已拥有授权码、无效购买响应、ID 去重和授权请求重定向限制。相关历史源码加入 CI 下载检查输入；新增两条错误本地化。本轮不触及 UpdateCore，仍跳过其 41 项测试。
-- 参考上游行为而非整库升级；固定 ApplePackage 2.0.3 与 idevice v0.1.68 保持不变。没有用户凭据或可连接实机，账号端的真实授权成功仍取决于 Apple 返回；以相关回归检查和编译结果报告验证范围。
-
-上游依据：
-- https://github.com/majd/ipatool/blob/d9c0247daea564d3ec7d04a9b015d0a29af66b04/pkg/appstore/appstore_list_versions.go
-- https://github.com/majd/ipatool/blob/d9c0247daea564d3ec7d04a9b015d0a29af66b04/pkg/appstore/appstore_purchase.go
-- https://github.com/majd/ipatool/blob/d9c0247daea564d3ec7d04a9b015d0a29af66b04/cmd/list_versions.go
 
 ## CI 测试选择策略
 
 - `.github/workflows/build-ios.yml` 全量拉取 git 历史，由 `scripts/select-ci-tests.py` 查询本分支最近成功的 push/手动构建（无记录则使用基准分支），比较该成功提交与当前实际 checkout 的代码。重跑已成功的相同提交时可复用对应成功基准。不会把上一次失败的提交作为已验证基准，也不会把 PR 的 head_sha 冒充实际测试过的合并提交。
 - UpdateCore：仅 `Packages/UpdateCore/` 下源码、测试或包配置变化时运行 `swift test`。
-- 下载/历史协议：实际编译输入 StoreProtocol.swift、StoreDiagnostics.swift、StoreDownloadProtocol.swift、StoreHistoryProtocol.swift、DownloadProtocolChecks.swift、HistoryProtocolChecks.swift 或 check.downloads.sh 变化时运行；相关调用层 StoreDownloadService.swift、AppPackageArchive.swift 变化也触发此组。
+- 下载协议：仅其实际编译输入 StoreProtocol.swift、StoreDiagnostics.swift、StoreDownloadProtocol.swift、DownloadProtocolChecks.swift 或 check.downloads.sh 变化时运行。
 - 本地化：仅 Localizable.xcstrings、StoreDownloadProtocol.swift、LocalizationChecks.py 或 check.downloads.sh 变化时运行。下载检查脚本支持 protocol/localization/all，省略参数仍运行全部，兼容上游原用法。
 - 选择器自身、其测试或工作流变更时才运行选择器的 Python 回归检查。仅改 SwiftUI 页面、原生桥接、普通文案或文档，不重复运行无关的三组库检查；应用编译和打包照常执行。
 - 无成功基准、历史缺失或 Actions API 不可访问时，明确记录原因并回退到全部检查；不能静默跳过未验证代码。检查选择结果写入 Actions 日志和步骤摘要。

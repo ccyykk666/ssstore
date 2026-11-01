@@ -11,31 +11,10 @@ import SwiftUI
 struct ProductHistoryView: View {
     @State var vm: AppPackageArchive
     @State private var showErrorAlert = false
+    @Environment(\.dismiss) var dismiss
 
     var body: some View {
         Form {
-            if vm.licenseRequired {
-                Section {
-                    Text("当前账号需要此应用的商店授权。")
-                    if let account = AppStore.this.accounts.first(where: { $0.id == vm.accountIdentifier }) {
-                        Text(account.account.email).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if vm.canAcquireLicense {
-                        Button("获取免费授权并重试") { vm.acquireHistoryLicense() }
-                    } else {
-                        Text("请使用已购买此应用的账号，或先在 App Store 获取此应用。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                        Button("重新查询") { reload() }
-                    }
-                }
-                .disabled(vm.loading)
-            } else if vm.versionIdentifiers.isEmpty && !vm.loading {
-                Section {
-                    Text(vm.error == nil ? "暂无历史版本" : "历史版本未能加载")
-                        .foregroundStyle(.secondary)
-                    Button("重新加载") { reload() }
-                }
-            }
             ForEach(vm.versionIdentifiers, id: \.self) { key in
                 if let aid = vm.accountIdentifier, let pkg = vm.package(for: key) {
                     Menu {
@@ -80,8 +59,6 @@ struct ProductHistoryView: View {
                     .smallControlSizeOnMac()
             }
             .opacity(vm.loading ? 1 : 0)
-            .allowsHitTesting(vm.loading)
-            .accessibilityHidden(!vm.loading)
             .animation(.default, value: vm.loading)
             .ignoresSafeArea(edges: [.vertical])
         }
@@ -123,9 +100,12 @@ struct ProductHistoryView: View {
                 }
             }
         }
-        .alert("提示", isPresented: $showErrorAlert) {
+        .alert("Oops", isPresented: $showErrorAlert) {
             Button("OK") {
                 vm.error = nil
+                if vm.shouldDismiss {
+                    dismiss()
+                }
             }
         } message: {
             Text(vm.error ?? String(localized: "Unknown Error"))
@@ -141,10 +121,6 @@ struct ProductHistoryView: View {
         }
     }
 
-    private func reload() {
-        vm.populateVersionIdentifiers { await MainActor.run { vm.populateNextVersionItems() } }
-    }
-
     private var toolbarPlacement: ToolbarItemPlacement {
         #if os(iOS)
             .topBarTrailing
@@ -153,5 +129,4 @@ struct ProductHistoryView: View {
         #endif
     }
 }
-
 
