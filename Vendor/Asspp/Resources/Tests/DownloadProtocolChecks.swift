@@ -3,6 +3,7 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        try await HistoryProtocolChecks.run()
         let empty: [String: Any] = ["songList": [], "status": 0, "jingleDocType": "purchaseSuccess"]
         let success: [String: Any] = ["songList": [["metadata": ["softwareVersionBundleId": "example.app"]]]]
         var requests: [(StoreDownloadProtocol.Endpoint, String?)] = []
@@ -204,4 +205,5 @@ struct DownloadProtocolChecks {
         print("Download protocol regression checks passed.")
     }
 }
+
 

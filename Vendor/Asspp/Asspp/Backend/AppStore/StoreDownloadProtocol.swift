@@ -9,6 +9,8 @@ enum StoreDownloadError: LocalizedError {
     case catalogUnavailable
     case actionRequired
     case noVersions
+    case sessionExpired
+    case paidLicenseRequired
     case rejected(String, String)
 
     var errorDescription: String? {
@@ -27,6 +29,10 @@ enum StoreDownloadError: LocalizedError {
             String(localized: "Apple requires an account confirmation. Open the App Store with this account, complete any prompts, then try again.")
         case .noVersions:
             String(localized: "Apple returned no version history for this app and platform.")
+        case .sessionExpired:
+            String(localized: "This account's session has expired. Sign in again, then retry.")
+        case .paidLicenseRequired:
+            String(localized: "Use an account that owns this app, or acquire it in the App Store first.")
         case let .rejected(code, message):
             message.isEmpty ? String(localized: "Apple rejected the download (code: \(code)).") : message
         }
@@ -219,4 +225,5 @@ enum StoreDownloadProtocol {
         return item
     }
 }
+
 
