@@ -48,7 +48,7 @@ Export is limited to 32 MiB per file, read in 64 KiB chunks. The source is not m
 
 ## Interface research and exclusions
 
-The in-app **完整依赖接口索引** contains 584 C declarations parsed from the pinned v0.1.68 distributed `idevice.h`, including supporting resource-management and bundled plist functions. It marks the 121 declarations used by the inspector. An indexed declaration is not an executable button and does not imply device authorization.
+The in-app **完整依赖接口索引** contains 661 C declarations parsed from the pinned v0.1.68 distributed `idevice.h`, including supporting resource-management and bundled plist functions. It marks the 125 declarations used by the inspector. An indexed declaration is not an executable button and does not imply device authorization.
 
 The published Rust SpringBoard client implements `get_icon_state`, but the pinned C interface does not export that method. The icon-metrics entry therefore does not claim to expose the full desktop/folder arrangement.
 

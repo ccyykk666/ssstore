@@ -17,8 +17,8 @@ for base in re.findall(r"CONNECT\(\s*([a-z][a-z_]+)\s*,", source):
 for base in re.findall(r"PROBE_SERVICE\(\s*([a-z][a-z_]+)\s*,", source):
     used.add(base + "_connect_rsd")
 entries = []
-for match in re.finditer(r"(?:struct IdeviceFfiError\s*\*|void\s+)([a-z][a-z0-9_]+)\s*\([^;{}]*\)\s*;", header, re.S):
-    name = match.group(1)
+for match in re.finditer(r"^[ \t]*(?!typedef\b)(?:[A-Za-z_]\w*[\s*]+)+(?P<name>[A-Za-z_]\w*)\s*\([^;{}]*\)\s*;", header, re.M):
+    name = match.group("name")
     before = header[:match.start()]
     start = before.rfind("/**")
     comment = before[start:] if start >= 0 and before[start:].rstrip().endswith("*/") else ""
