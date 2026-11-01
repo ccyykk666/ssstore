@@ -2,7 +2,7 @@ name: ssstore
 options:
   bundleIdPrefix: dev.personal
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
 packages:
   UpdateCore:
     path: Packages/UpdateCore
@@ -12,7 +12,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
-    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
@@ -29,7 +29,7 @@ targets:
         UILaunchScreen: {}
         NSLocalNetworkUsageDescription: 通过你启用的本地 VPN 连接本机设备管理服务，读取应用名称与版本。
         UIApplicationSupportsIndirectInputEvents: true
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.personal.ssstore

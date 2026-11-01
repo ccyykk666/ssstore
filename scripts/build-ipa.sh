@@ -24,6 +24,7 @@ mkdir -p dist
 stage=$(mktemp -d "$PWD/build/ipa.XXXXXX")
 mkdir -p "$stage/Payload"
 cp -R "$app" "$stage/Payload/ssstore.app"
-output="$PWD/dist/ssstore-unsigned-$(date +%Y%m%d-%H%M%S).ipa"
+output="$stage/ssstore.ipa"
 (cd "$stage" && /usr/bin/zip -qry "$output" Payload)
-echo "已生成待自签 IPA：$output"
+cp "$output" "$PWD/dist/ssstore.ipa"
+echo "已生成待自签 IPA：$PWD/dist/ssstore.ipa"
