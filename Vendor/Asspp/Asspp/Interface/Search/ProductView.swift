@@ -173,7 +173,7 @@ struct ProductView: View {
         }
     }
 
-    var pricing: some View {
+    @ViewBuilder var pricing: some View {
         if archive.price == 0 {
             Section {
                 AsyncButton {
