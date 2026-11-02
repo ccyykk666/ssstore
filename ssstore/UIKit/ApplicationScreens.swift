@@ -12,6 +12,7 @@ import ZIPFoundation
 final class NativeApps: NativeSearchPage {
     var onlyAttention = false
     var onlyFailed = false
+    private var menuKey = ""
     init(_ model: AppModel) { super.init(model, title: "ssstore") }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
@@ -25,6 +26,9 @@ final class NativeApps: NativeSearchPage {
         let revealed = progress.map { Set($0.revealedMatches.map(\.id)) }
         let statistics = progress?.statistics(visibleIDs: Set(listed.map(\.id))) ?? ApplicationMatchStatistics(matches: listed.map { ApplicationMatch(record: $0, scope: model.country) })
         if statistics.failures == 0 { onlyFailed = false }
+        let key = "\(model.busy)|\(model.isChecking)|\(onlyAttention)|\(includeSystem)"
+        if key != menuKey {
+        menuKey = key
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [
             UIAction(title: "刷新应用", image: UIImage(systemName: "arrow.triangle.2.circlepath"), attributes: model.busy ? .disabled : []) { [weak self] _ in guard let self else { return }; Task { await self.model.refreshApps() } },
             UIAction(title: "停止刷新", attributes: model.isChecking ? [] : .hidden) { [weak self] _ in self?.model.cancelCheck() },
@@ -32,6 +36,7 @@ final class NativeApps: NativeSearchPage {
             UIAction(title: "有更新与待核对", state: onlyAttention ? .on : .off) { [weak self] _ in self?.onlyAttention.toggle(); self?.reload() },
             UIAction(title: "显示系统应用", state: includeSystem ? .on : .off) { [weak self] _ in UserDefaults.standard.set(!includeSystem, forKey: "includeSystemApps"); self?.reload() }
         ]))
+        }
         var summary = [NativeRow(title: "", metrics: [statistics.applications, statistics.updates, statistics.pending])]
         if statistics.failures > 0 { summary.append(link("\(statistics.failures) 失败") { [weak self] in self?.onlyFailed.toggle(); self?.reload() }) }
         for warning in [model.scanWarning, model.queryWarning] where !warning.isEmpty { summary.append(NativeRow(title: warning, color: .systemOrange)) }
@@ -44,7 +49,7 @@ final class NativeApps: NativeSearchPage {
             let status = record.status(country: model.country)
             let update = matched && (status == .different || status == .update)
             let tag = update ? "有更新" : (matched && status == .unknown ? "待核对" : "")
-            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release?.version ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag)
+            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag)
         }
         return [NativeSection(rows: summary), NativeSection(title: "共\(filtered.count)个应用", rows: rows.isEmpty ? [NativeRow(title: "暂无匹配应用")] : rows)]
     }
@@ -79,10 +84,15 @@ final class NativeStoreSearch: NativeSearchPage {
     var generation = UUID()
     var error: String?
     var loading = false
+    private var menuKey = ""
     init(_ model: AppModel) { super.init(model, title: "搜索") }
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
+        let key = region + "|" + entity.rawValue
+        if key != menuKey {
+        menuKey = key
         navigationItem.rightBarButtonItems = [regionButton(menu: UIMenu(children: ApplePackage.Configuration.storeFrontValues.keys.sorted().map { key in UIAction(title: "\(StoreRegionNames.name(key))  \(key)", state: key == region ? .on : .off) { [weak self] _ in self?.region = key; UserDefaults.standard.set(key, forKey: "searchRegion"); self?.reset(); self?.reload() } })), UIBarButtonItem(image: UIImage(systemName: entity.iconName), menu: UIMenu(children: EntityType.allCases.map { type in UIAction(title: type.rawValue, state: type == entity ? .on : .off) { [weak self] _ in self?.entity = type; self?.reset(); self?.reload() } }))]
+        }
         var sections: [NativeSection] = []
         if let error { sections.append(NativeSection(rows: [NativeRow(title: error, color: .systemRed)])) }
         if loading || !results.isEmpty { sections.append(NativeSection(title: loading ? "正在搜索…" : "\(results.count) 个结果", rows: results.map { package in NativeRow(title: package.software.name, detail: package.software.sellerName + " · " + package.software.version, icon: URL(string: package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativeProduct(model, package: package, region: region)) }) })) }
