@@ -265,13 +265,12 @@ class NativeSearchPage: NativePage, UISearchResultsUpdating, UISearchBarDelegate
     }
     func focusSearch() {
         guard isViewLoaded, view.window != nil else { focusOnAppearance = true; return }
-        navigationController?.view.layoutIfNeeded()
-        if search.isActive { focusField() } else { search.isActive = true }
+        if search.isActive { focusField() } else { search.searchBar.becomeFirstResponder() }
     }
     func didPresentSearchController(_ searchController: UISearchController) { focusField() }
     func focusField() {
+        search.searchBar.becomeFirstResponder()
         let field = search.searchBar.searchTextField
-        field.becomeFirstResponder()
         if (field.text ?? "").isEmpty {
             let start = field.beginningOfDocument
             field.selectedTextRange = field.textRange(from: start, to: start)
@@ -317,6 +316,7 @@ final class NativeTabs: UITabBarController, UITabBarControllerDelegate {
                 store.focusOnAppearance = true
                 nav.popToRootViewController(animated: true)
             } else { store.focusSearch() }
+            return false
         }
         return true
     }
