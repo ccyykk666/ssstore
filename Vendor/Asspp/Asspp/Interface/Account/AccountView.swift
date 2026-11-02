@@ -167,9 +167,7 @@ struct AccountView: View {
                 }
             }
             .sheet(isPresented: $addAccount) {
-                NavigationStack {
-                    AddAccountView()
-                }
+                AddAccountView()
             }
         }
     #endif

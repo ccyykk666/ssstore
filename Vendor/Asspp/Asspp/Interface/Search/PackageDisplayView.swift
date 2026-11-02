@@ -11,6 +11,7 @@ import SwiftUI
 
 struct PackageDisplayView: View {
     let archive: AppStore.AppPackage
+    var trailingText: String? = nil
     @State var style: DisplayStyle = .compact
 
     enum DisplayStyle {
@@ -44,7 +45,7 @@ struct PackageDisplayView: View {
 
     var _body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ArchivePreviewView(archive: archive, preferredIconSize: 70, lineLimit: nil)
+            ArchivePreviewView(archive: archive, preferredIconSize: 70, lineLimit: nil, trailingText: trailingText)
             if !archive.software.description.isEmpty {
                 Group {
                     switch style {

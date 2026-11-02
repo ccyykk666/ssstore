@@ -126,7 +126,7 @@ struct ProductView: View {
 
     var packageHeader: some View {
         Section {
-            PackageDisplayView(archive: archive.package)
+            PackageDisplayView(archive: archive.package, trailingText: archive.formattedPrice ?? "—")
             NavigationLink {
                 // Build the archive lazily: constructing it eagerly here runs
                 // two synchronous file reads + a JSON decode on every body
@@ -174,9 +174,8 @@ struct ProductView: View {
     }
 
     var pricing: some View {
-        Section {
-            Text("\(archive.formattedPrice ?? "N/A")")
-            if archive.price == 0 {
+        if archive.price == 0 {
+            Section {
                 AsyncButton {
                     try await acquireLicense()
                 } label: {
@@ -184,15 +183,11 @@ struct ProductView: View {
                 }
                 .disabledWhenLoading()
                 .disabled(account == nil)
-            }
-        } header: {
-            Text("Pricing")
-        } footer: {
-            if let licenseHint {
-                Text(licenseHint.message)
-                    .foregroundStyle(licenseHint.color ?? .primary)
-            } else {
-                Text("Acquiring a license is not available for paid apps. Purchase from the App Store first, then download here. If you've already purchased it, this may fail.")
+            } footer: {
+                if let licenseHint {
+                    Text(licenseHint.message)
+                        .foregroundStyle(licenseHint.color ?? .primary)
+                }
             }
         }
     }
@@ -235,7 +230,7 @@ struct ProductView: View {
                         throw error
                     }
                 } label: {
-                    Text("Request Download")
+                    Text("下载")
                 }
                 .disabledWhenLoading()
                 .disabled(account == nil)

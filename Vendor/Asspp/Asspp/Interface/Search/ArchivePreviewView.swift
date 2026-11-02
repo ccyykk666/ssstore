@@ -13,6 +13,7 @@ struct ArchivePreviewView: View {
     let archive: AppStore.AppPackage
     var preferredIconSize: CGFloat?
     var lineLimit: Int? = 1
+    var trailingText: String? = nil
 
     private var iconSize: CGFloat {
         preferredIconSize ?? 50
@@ -45,7 +46,8 @@ struct ArchivePreviewView: View {
                         .bold()
                         .lineLimit(2)
                     Spacer()
-                    Text(archive.software.version)
+                    Text(trailingText ?? archive.software.version)
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(.secondary)
                 }
                 Text(archive.software.sellerName)

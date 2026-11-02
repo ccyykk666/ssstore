@@ -31,7 +31,9 @@ struct SearchView: View {
     @State private var searchType = EntityType.iPhone
 
     @State private var searching = false
-    let regionKeys = Array(ApplePackage.Configuration.storeFrontValues.keys.sorted())
+    let regionKeys = ApplePackage.Configuration.storeFrontValues.keys.sorted {
+        StoreRegionNames.name($0).localizedStandardCompare(StoreRegionNames.name($1)) == .orderedAscending
+    }
 
     @State private var searchError: String?
     #if DEBUG
@@ -180,7 +182,7 @@ struct SearchView: View {
     func buildPickView(for keys: [String], @ViewBuilder label: () -> some View) -> some View {
         Picker(selection: $searchRegion) {
             ForEach(keys, id: \.self) { key in
-                Text("\(key) - \(ApplePackage.Configuration.storeFrontValues[key] ?? String(localized: "Unknown"))")
+                Text("\(StoreRegionNames.name(key))  \(key)")
                     .tag(key)
             }
         } label: {

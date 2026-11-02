@@ -25,12 +25,14 @@ struct ApplicationPickerView: View {
                             AppIconView(app: record.installed, storeIconURL: record.release?.iconURL)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(record.installed.name).foregroundStyle(.primary)
-                                Text(record.id).font(.caption).foregroundStyle(.secondary)
+                                Text(record.id).font(.caption).foregroundStyle(.primary)
                             }
                             Spacer()
-                            if record.id == selection { Image(systemName: "checkmark") }
+                            if record.id == selection { Image(systemName: "checkmark").foregroundStyle(Color.accentColor) }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.primary)
                 }
             }
             .searchable(text: $search, prompt: "搜索应用或 Bundle ID")
