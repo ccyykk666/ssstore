@@ -26,7 +26,7 @@ final class NativeApps: NativeSearchPage {
         let statistics = progress?.statistics(visibleIDs: Set(listed.map(\.id))) ?? ApplicationMatchStatistics(matches: listed.map { ApplicationMatch(record: $0, scope: model.country) })
         if statistics.failures == 0 { onlyFailed = false }
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [
-            UIAction(title: "刷新应用", image: UIImage(systemName: "arrow.triangle.2.circlepath"), attributes: model.busy ? .disabled : []) { [weak self] _ in guard let self else { return }; Task { await model.refreshApps() } },
+            UIAction(title: "刷新应用", image: UIImage(systemName: "arrow.triangle.2.circlepath"), attributes: model.busy ? .disabled : []) { [weak self] _ in guard let self else { return }; Task { await self.model.refreshApps() } },
             UIAction(title: "停止刷新", attributes: model.isChecking ? [] : .hidden) { [weak self] _ in self?.model.cancelCheck() },
             UIAction(title: "下载", image: UIImage(systemName: "arrow.down.circle")) { [weak self] _ in guard let self else { return }; push(NativeDownloads(model)) },
             UIAction(title: "有更新与待核对", state: onlyAttention ? .on : .off) { [weak self] _ in self?.onlyAttention.toggle(); self?.reload() },

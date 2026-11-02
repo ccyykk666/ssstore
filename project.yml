@@ -77,6 +77,9 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
         NSLocalNetworkUsageDescription: 用于发现配对主机、读取设备信息及在本机安装应用。
         NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing._tcp]
         UIBackgroundModes: [processing, audio]
