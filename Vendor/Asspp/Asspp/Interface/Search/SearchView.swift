@@ -172,14 +172,12 @@ struct SearchView: View {
             }
         }
         .formStyle(.grouped)
-        .animation(.spring, value: searchError)
         .navigationDestination(for: ProductDestination.self) { dest in
             ProductView(archive: dest.archive, region: dest.region, navigationPath: $navigationPath)
         }
         .navigationDestination(for: PackageManifest.self) { manifest in
             PackageView(pkg: manifest)
         }
-        .animation(.spring, value: searchResult)
         .onAppear { consumePendingFocus() }
     }
 
@@ -217,15 +215,21 @@ struct SearchView: View {
     }
 
     private func clearSearch() {
-        searchKeyFocused = false
-        searchKey = ""
-        resetSearchResults()
+        // Native search dismissal already owns focus and navigation-bar
+        // geometry. Clear only our data, without starting a competing spring.
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            searchKey = ""
+            resetSearchResults()
+        }
     }
 
     func search() {
         let term = searchKey
         let region = searchRegion
         guard !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            searchKeyFocused = false
             clearSearch()
             return
         }
@@ -296,39 +300,15 @@ extension SearchView {
         var modernContent: some View {
             content
                 .searchable(text: $searchKey, isPresented: $searchPresented, placement: searchablePlacement, prompt: "Keyword")
+                // Keep the native title/toolbar in the same layout during search.
+                // Hiding then restoring a large title can reorder it below the
+                // drawer while search and keyboard dismissal run together.
+                .searchPresentationToolbarBehavior(.avoidHidingContent)
                 .searchFocused($searchKeyFocused)
                 .onSubmit(of: .search) { search() }
-                .toolbarVisibility(navigationBarVisibility, for: .navigationBar)
                 .navigationTitle("Search")
-                .toolbar {
-                    if navigationBarVisibility != .hidden {
-                        tools
-                    }
-                }
-                .safeAreaBar(edge: .top) {
-                    if navigationBarVisibility == .hidden {
-                        HStack {
-                            Menu {
-                                searchTypePicker
-                            } label: {
-                                Label(searchType.rawValue, systemImage: searchType.iconName)
-                            }
-                            .buttonStyle(.glass)
-
-                            Spacer()
-
-                            searchRegionView()
-                                .buttonStyle(.glass)
-                        }
-                        .padding([.bottom, .horizontal])
-                    }
-                }
-                .animation(.spring, value: searchResult)
-                .animation(.spring, value: searching)
-        }
-
-        var navigationBarVisibility: Visibility {
-            .automatic
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar { tools }
         }
 
         var searchablePlacement: SearchFieldPlacement {
