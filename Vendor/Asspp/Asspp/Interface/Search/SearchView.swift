@@ -32,6 +32,8 @@ struct SearchView: View {
 
     @State private var searching = false
     @State private var searchPresented = false
+    @State private var searchTask: Task<Void, Never>?
+    @State private var searchRequestID = UUID()
     let regionKeys = ApplePackage.Configuration.storeFrontValues.keys.sorted {
         StoreRegionNames.name($0).localizedStandardCompare(StoreRegionNames.name($1)) == .orderedAscending
     }
@@ -55,6 +57,11 @@ struct SearchView: View {
         navigationContent
             .onChange(of: searchFocus.pending) { _, pending in
                 if pending { consumePendingFocus() }
+            }
+            .onChange(of: searchPresented) { _, presented in
+                // The native close button ends the search presentation.
+                // Pushing an app detail must keep the list for navigation back.
+                if !presented && navigationPath.isEmpty { clearSearch() }
             }
     }
 
@@ -83,7 +90,7 @@ struct SearchView: View {
             Label("Type", systemImage: searchType.iconName)
         }
         .onChange(of: searchType) { _, _ in
-            searchResult = []
+            resetSearchResults()
         }
     }
 
@@ -121,7 +128,7 @@ struct SearchView: View {
             .accessibilityLabel("商店地区：\(StoreRegionNames.name(searchRegion))")
         }
         .onChange(of: searchRegion) { _, _ in
-            searchResult = []
+            resetSearchResults()
         }
     }
 
@@ -200,40 +207,66 @@ struct SearchView: View {
         }
     }
 
+    private func resetSearchResults() {
+        searchTask?.cancel()
+        searchTask = nil
+        searchRequestID = UUID()
+        searching = false
+        searchResult = []
+        searchError = nil
+    }
+
+    private func clearSearch() {
+        searchKeyFocused = false
+        searchKey = ""
+        resetSearchResults()
+    }
+
     func search() {
+        let term = searchKey
+        let region = searchRegion
+        guard !term.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            clearSearch()
+            return
+        }
+        searchTask?.cancel()
+        let requestID = UUID()
+        searchRequestID = requestID
         searchKeyFocused = false
         searching = true
         searchError = nil
-        logger.info("search: term=\(searchKey) region=\(searchRegion) type=\(searchType.rawValue)")
         let entityType = searchType
-        Task {
+        logger.info("search: term=\(term) region=\(region) type=\(entityType.rawValue)")
+        searchTask = Task { @MainActor in
             do {
                 var result = try await ApplePackage.Searcher.search(
-                    term: searchKey,
-                    countryCode: searchRegion,
+                    term: term,
+                    countryCode: region,
                     limit: 32,
                     entityType: entityType,
                 )
+                try Task.checkCancellation()
                 if let app = try? await ApplePackage.Lookup.lookup(
-                    bundleID: searchKey,
-                    countryCode: searchRegion,
+                    bundleID: term,
+                    countryCode: region,
                     entityType: entityType,
                 ) {
                     result.insert(app, at: 0)
                 }
-                logger.info("search completed: \(result.count) results for term=\(searchKey)")
-                await MainActor.run {
-                    searching = false
-                    searchResult = result.map { AppStore.AppPackage(software: $0, entityType: entityType) }
-                    searchError = nil
-                }
+                try Task.checkCancellation()
+                guard searchRequestID == requestID else { return }
+                logger.info("search completed: \(result.count) results for term=\(term)")
+                searching = false
+                searchResult = result.map { AppStore.AppPackage(software: $0, entityType: entityType) }
+                searchError = nil
+                searchTask = nil
             } catch {
-                logger.error("search failed: term=\(searchKey) error=\(error.localizedDescription)")
-                await MainActor.run {
-                    searching = false
-                    searchResult = []
-                    searchError = error.localizedDescription
-                }
+                guard !Task.isCancelled, searchRequestID == requestID else { return }
+                logger.error("search failed: term=\(term) error=\(error.localizedDescription)")
+                searching = false
+                searchResult = []
+                searchError = error.localizedDescription
+                searchTask = nil
             }
         }
     }

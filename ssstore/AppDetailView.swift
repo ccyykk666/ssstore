@@ -45,15 +45,19 @@ struct AppDetailView: View {
                                 Label("需要更高版本的 iOS。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                             }
                         }
-                        NavigationLink("查看商店页") {
+                        NavigationLink {
                             StoreProductView(bundleID: record.effectiveBundleID,
                                 region: record.release?.country ?? (model.country == StoreQueryPolicy.chinaThenUS ? "cn" : model.country))
+                        } label: {
+                            Text("查看商店页").foregroundStyle(.blue)
                         }
                     } header: {
                         Text(record.release.map { "商店版本 · " + $0.country.uppercased() } ?? "商店")
                     }
                     Section {
-                        NavigationLink("应用数据") { InspectionView(bundleID: record.id) }
+                        NavigationLink { InspectionView(bundleID: record.id) } label: {
+                            Text("应用数据").foregroundStyle(.blue)
+                        }
                     }
                     if let release = record.release {
                         Section("更新说明") {
