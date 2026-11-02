@@ -317,9 +317,13 @@ final class AppModel: ObservableObject {
     }
 
     func restoreApp(_ id: String) {
-        guard !busy else { return }
+        guard !busy, ignoredApps.names[id] != nil else { return }
+        let record = AppRecord(installed: ignoredApps.application(for: id))
         ignoredApps.restore(id)
         saveIgnoredApps()
+        records = (records + [record]).sorted { $0.installed.name.localizedStandardCompare($1.installed.name) == .orderedAscending }
+        recordMatches([record], scope: country)
+        persist()
     }
 
     private func saveIgnoredApps() {

@@ -10,11 +10,15 @@ import ZIPFoundation
 
 @MainActor
 final class NativeApps: NativeSearchPage {
-    var onlyAttention = false
-    var onlyFailed = false
+    enum Filter { case all, attention, updates, failed }
+    var filter = Filter.all
     private var menuKey = ""
     init(_ model: AppModel) { super.init(model, title: "ssstore") }
     required init?(coder: NSCoder) { fatalError() }
+    func showApplications(_ filter: Filter = .all) {
+        self.filter = filter; query = ""; search.searchBar.text = ""; search.isActive = false
+        reload()
+    }
     override func viewDidLoad() {
         super.viewDidLoad(); search.searchBar.placeholder = "搜索应用或 Bundle ID"
         navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gearshape"), primaryAction: UIAction { [weak self] _ in guard let self else { return }; sheet(NativeSettings(model)) })
@@ -25,30 +29,40 @@ final class NativeApps: NativeSearchPage {
         let progress = model.matchProgress.flatMap { $0.scope == model.country ? $0 : nil }
         let revealed = progress.map { Set($0.revealedMatches.map(\.id)) }
         let statistics = progress?.statistics(visibleIDs: Set(listed.map(\.id))) ?? ApplicationMatchStatistics(matches: listed.map { ApplicationMatch(record: $0, scope: model.country) })
-        if statistics.failures == 0 { onlyFailed = false }
-        let key = "\(model.busy)|\(model.isChecking)|\(onlyAttention)|\(includeSystem)"
+        if (filter == .failed && statistics.failures == 0) || (filter == .updates && statistics.updates == 0) { filter = .all }
+        let key = "\(model.busy)|\(model.isChecking)|\(filter)|\(includeSystem)"
         if key != menuKey {
         menuKey = key
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [
             UIAction(title: "刷新应用", image: UIImage(systemName: "arrow.triangle.2.circlepath"), attributes: model.busy ? .disabled : []) { [weak self] _ in guard let self else { return }; Task { await self.model.refreshApps() } },
-            UIAction(title: "停止刷新", attributes: model.isChecking ? [] : .hidden) { [weak self] _ in self?.model.cancelCheck() },
+            UIAction(title: "停止刷新", image: UIImage(systemName: "stop.circle"), attributes: model.isChecking ? [] : .hidden) { [weak self] _ in self?.model.cancelCheck() },
             UIAction(title: "下载", image: UIImage(systemName: "arrow.down.circle")) { [weak self] _ in guard let self else { return }; push(NativeDownloads(model)) },
-            UIAction(title: "有更新与待核对", state: onlyAttention ? .on : .off) { [weak self] _ in self?.onlyAttention.toggle(); self?.reload() },
-            UIAction(title: "显示系统应用", state: includeSystem ? .on : .off) { [weak self] _ in UserDefaults.standard.set(!includeSystem, forKey: "includeSystemApps"); self?.reload() }
+            UIAction(title: "仅显示差异项", image: UIImage(systemName: "line.3.horizontal.decrease"), state: filter == .attention ? .on : .off) { [weak self] _ in guard let self else { return }; filter = filter == .attention ? .all : .attention; reload() },
+            UIAction(title: "显示系统应用", image: UIImage(systemName: "gearshape"), state: includeSystem ? .on : .off) { [weak self] _ in UserDefaults.standard.set(!includeSystem, forKey: "includeSystemApps"); self?.reload() }
         ]))
         }
-        var summary = [NativeRow(title: "", metrics: [statistics.applications, statistics.updates, statistics.pending])]
-        if statistics.failures > 0 { summary.append(link("\(statistics.failures) 失败") { [weak self] in self?.onlyFailed.toggle(); self?.reload() }) }
+        var summary = [NativeRow(title: "", metrics: [statistics.applications, statistics.updates, statistics.pending, statistics.failures], metricActions: [
+            0: { [weak self] in self?.showApplications() },
+            1: { [weak self] in self?.showApplications(.updates) },
+            3: { [weak self] in self?.showApplications(.failed) }
+        ])]
         for warning in [model.scanWarning, model.queryWarning] where !warning.isEmpty { summary.append(NativeRow(title: warning, color: .systemOrange)) }
         let filtered = listed.filter { record in
             let matched = revealed?.contains(record.id) ?? true
-            return (!onlyAttention || (matched && record.status(country: model.country) != .current)) && (!onlyFailed || (matched && record.error != nil)) && (query.isEmpty || record.installed.name.localizedCaseInsensitiveContains(query) || record.id.localizedCaseInsensitiveContains(query))
+            let included: Bool
+            switch filter {
+            case .all: included = true
+            case .attention: included = matched && record.status(country: model.country) != .current
+            case .updates: included = matched && [.different, .update].contains(record.status(country: model.country))
+            case .failed: included = matched && record.error != nil
+            }
+            return included && (query.isEmpty || record.installed.name.localizedCaseInsensitiveContains(query) || record.id.localizedCaseInsensitiveContains(query))
         }
         let rows = filtered.map { record -> NativeRow in
             let matched = revealed?.contains(record.id) ?? true
             let status = record.status(country: model.country)
             let update = matched && (status == .different || status == .update)
-            let tag = update ? "有更新" : (matched && status == .unknown ? "待核对" : "")
+            let tag = update ? "新版本" : (matched && status == .unknown ? "待核对" : "")
             return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag, iconRevision: model.iconRevision)
         }
         return [NativeSection(rows: summary), NativeSection(title: "共\(filtered.count)个应用", rows: rows.isEmpty ? [NativeRow(title: "暂无匹配应用")] : rows)]

@@ -21,6 +21,7 @@ struct NativeRow {
     var metrics: [Int]? = nil
     var iconRevision = 0
     var accessoryAction: UIAction?
+    var metricActions: [Int: () -> Void] = [:]
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
@@ -42,16 +43,21 @@ final class NativeCell: UITableViewCell {
 }
 @MainActor
 final class NativeMetricCell: UITableViewCell {
-    let numbers = (0..<3).map { _ in UILabel() }
+    private let names = ["应用", "新版本", "待核对", "失败"]
+    let numbers = (0..<4).map { _ in UILabel() }
     let stack = UIStackView()
     var previous: [Int] = []
+    private var actions: [Int: () -> Void] = [:]
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         stack.axis = .horizontal; stack.distribution = .fillEqually; stack.translatesAutoresizingMaskIntoConstraints = false
-        for (index, name) in ["应用", "有更新", "待核对"].enumerated() {
+        for (index, name) in names.enumerated() {
             let column = UIStackView(); column.axis = .vertical; column.spacing = 4
+            column.tag = index; column.isAccessibilityElement = true
+            column.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(selectMetric(_:))))
             numbers[index].font = .monospacedDigitSystemFont(ofSize: 30, weight: .bold)
-            let label = UILabel(); label.text = name; label.font = .preferredFont(forTextStyle: .caption1); label.textColor = .secondaryLabel
+            numbers[index].textColor = index == 3 ? .systemRed : .label
+            let label = UILabel(); label.text = name; label.font = .preferredFont(forTextStyle: .caption1); label.textColor = index == 3 ? .systemRed : .secondaryLabel
             column.addArrangedSubview(numbers[index]); column.addArrangedSubview(label); stack.addArrangedSubview(column)
         }
         contentView.addSubview(stack)
@@ -59,8 +65,17 @@ final class NativeMetricCell: UITableViewCell {
         selectionStyle = .none
     }
     required init?(coder: NSCoder) { fatalError() }
-    func update(_ values: [Int]) {
+    @objc private func selectMetric(_ sender: UITapGestureRecognizer) {
+        if let index = sender.view?.tag { actions[index]?() }
+    }
+    func update(_ values: [Int], actions: [Int: () -> Void]) {
+        self.actions = actions
         for index in values.indices {
+            let column = stack.arrangedSubviews[index]
+            column.isHidden = (index == 1 || index == 3) && values[index] == 0
+            column.isUserInteractionEnabled = actions[index] != nil
+            column.accessibilityTraits = actions[index] == nil ? .staticText : .button
+            column.accessibilityLabel = "\(values[index]) 个\(names[index])"
             if previous.indices.contains(index), previous[index] != values[index], !UIAccessibility.isReduceMotionEnabled {
                 let animation = CATransition(); animation.type = .push; animation.subtype = .fromTop; animation.duration = 0.12
                 animation.timingFunction = CAMediaTimingFunction(name: .linear)
@@ -147,7 +162,7 @@ class NativePage: UITableViewController {
         let row = sections[indexPath.section].rows[indexPath.row]
         if let metrics = row.metrics {
             let cell = (tableView.dequeueReusableCell(withIdentifier: "metrics") as? NativeMetricCell) ?? NativeMetricCell(style: .default, reuseIdentifier: "metrics")
-            cell.update(metrics)
+            cell.update(metrics, actions: row.metricActions)
             return cell
         }
         let cell = (tableView.dequeueReusableCell(withIdentifier: "row") as? NativeCell) ?? NativeCell(style: .subtitle, reuseIdentifier: "row")
@@ -181,7 +196,7 @@ class NativePage: UITableViewController {
             button.isEnabled = !action.attributes.contains(.disabled)
             button.sizeToFit(); cell.accessoryView = button
         } else if let badge = row.badge {
-            let label = (cell.accessoryView as? UILabel) ?? UILabel(); label.text = badge; label.textColor = badge == "有更新" ? .systemGreen : .secondaryLabel
+            let label = (cell.accessoryView as? UILabel) ?? UILabel(); label.text = badge; label.textColor = badge == "新版本" ? .systemGreen : .secondaryLabel
             label.font = .preferredFont(forTextStyle: .caption1); label.sizeToFit(); cell.accessoryView = label
         } else { cell.accessoryView = nil }
         cell.accessoryType = row.action == nil ? .none : .disclosureIndicator
@@ -301,15 +316,16 @@ class NativeSearchPage: NativePage, UISearchResultsUpdating, UISearchBarDelegate
 @MainActor
 final class NativeTabs: UITabBarController, UITabBarControllerDelegate {
     let model: AppModel
+    let apps: NativeApps
     let store: NativeStoreSearch
     init(model: AppModel) {
-        self.model = model; store = NativeStoreSearch(model)
+        self.model = model; apps = NativeApps(model); store = NativeStoreSearch(model)
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad(); delegate = self
-        let pages: [(UIViewController, String, String)] = [(NativeApps(model), "应用", "square.stack.3d.up"), (NativeData(model), "数据", "chart.bar.xaxis"), (NativeAccounts(model), "账户", "person.crop.circle"), (store, "搜索", "magnifyingglass")]
+        let pages: [(UIViewController, String, String)] = [(apps, "应用", "square.stack.3d.up"), (NativeData(model), "数据", "chart.bar.xaxis"), (NativeAccounts(model), "账户", "person.crop.circle"), (store, "搜索", "magnifyingglass")]
         viewControllers = pages.map { page, title, icon in
             let nav = UINavigationController(rootViewController: page)
             nav.navigationBar.prefersLargeTitles = true
@@ -319,6 +335,12 @@ final class NativeTabs: UITabBarController, UITabBarControllerDelegate {
         if #available(iOS 26.0, *) { tabBarMinimizeBehavior = .never }
     }
     func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+        if viewController === viewControllers?.first, presentedViewController == nil,
+           let nav = viewController as? UINavigationController {
+            apps.showApplications()
+            nav.popToRootViewController(animated: selectedViewController === viewController)
+            if selectedViewController === viewController { return false }
+        }
         if selectedViewController === viewController, viewController === viewControllers?.last,
            presentedViewController == nil, let nav = viewController as? UINavigationController {
             if nav.topViewController !== store {

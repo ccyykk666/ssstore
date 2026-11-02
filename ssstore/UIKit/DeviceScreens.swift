@@ -33,9 +33,32 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
 }
 @MainActor
 final class NativeIgnored: NativePage {
+    private var ids: [String] = []
     init(_ model: AppModel) { super.init(model, title: "已忽略应用") }
     required init?(coder: NSCoder) { fatalError() }
-    override func rows() -> [NativeSection] { [NativeSection(rows: model.ignoredApps.names.keys.sorted().map { id in NativeRow(title: model.ignoredApps.names[id] ?? id, detail: id, icon: model.localIconURL(for: model.ignoredApps.application(for: id)) ?? model.ignoredApps.iconURLs?[id], action: { [weak self] in self?.model.restoreApp(id); self?.reload() }) })] }
+    override func rows() -> [NativeSection] {
+        ids = model.ignoredApps.names.keys.sorted()
+        return [NativeSection(rows: ids.map { id in NativeRow(title: model.ignoredApps.names[id] ?? id, detail: id, icon: model.localIconURL(for: model.ignoredApps.application(for: id)) ?? model.ignoredApps.iconURLs?[id]) })]
+    }
+    override func reload() {
+        guard isViewLoaded else { return }
+        let remaining = model.ignoredApps.bundleIDs
+        if ids.count == remaining.count + 1, let removed = ids.firstIndex(where: { !remaining.contains($0) }) {
+            sections = rows()
+            tableView.deleteRows(at: [IndexPath(row: removed, section: 0)], with: .fade)
+        } else { super.reload() }
+    }
+    override func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard !model.busy else { return nil }
+        let id = ids[indexPath.row]
+        let restore = UIContextualAction(style: .normal, title: "恢复") { [weak self] _, _, completion in
+            guard let self else { completion(false); return }
+            model.restoreApp(id)
+            completion(model.ignoredApps.names[id] == nil)
+        }
+        restore.backgroundColor = .systemGreen
+        return UISwipeActionsConfiguration(actions: [restore])
+    }
 }
 @MainActor
 final class NativePairing: NativePage, UIDocumentPickerDelegate {
@@ -47,16 +70,22 @@ final class NativePairing: NativePage, UIDocumentPickerDelegate {
     }
     override func rows() -> [NativeSection] {
         let controller = model.pairingController
-        var rows = [NativeRow(title: "状态", detail: model.hasPairing ? "已配对" : "未配对"), NativeRow(title: controller.status)]
+        var rows = [NativeRow(title: "状态", detail: model.hasPairing ? "已配对" : "未配对")]
+        if controller.isActive || controller.phase == .failed { rows.append(NativeRow(title: controller.status)) }
         if let pin = controller.pin { rows.append(link("配对码：\(pin)") { UIPasteboard.general.string = pin }) }
         if controller.isActive { rows.append(link("停止配对") { controller.cancel() }) }
-        else { rows.append(link("创建配对") { [weak self] in self?.model.createPairingOnDevice() }) }
+        else { rows.append(link(model.hasPairing ? "重新配对" : "创建配对") { [weak self] in self?.model.createPairingOnDevice() }) }
         rows.append(link("导入配对文件") { [weak self] in guard let self else { return }; let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true); picker.delegate = self; present(picker, animated: true) })
         if model.hasPairing {
             rows.append(link("导出配对文件") { [weak self] in guard let self else { return }; do { let file = temporaryDirectory.appendingPathComponent("ssstore-pairing.plist"); try model.pairingDataForExport().write(to: file, options: [.atomic, .completeFileProtection]); let picker = UIDocumentPickerViewController(forExporting: [file], asCopy: true); present(picker, animated: true) } catch { alert(error.localizedDescription) } })
             rows.append(NativeRow(title: "删除配对文件", color: .systemRed, action: { [weak self] in self?.confirm("删除配对文件？") { [weak self] in self?.model.removePairing() } }))
         }
-        return [NativeSection(rows: rows), NativeSection(title: "创建配对", rows: [NativeRow(title: "开始配对后，前往系统设置 → 隐私与安全 → 开发者模式，选择 ssstore，输入配对码后返回。")]), NativeSection(title: "配对日志", rows: controller.diagnostics.map { NativeRow(title: $0) })]
+        var sections = [NativeSection(rows: rows)]
+        if !model.hasPairing || controller.isActive {
+            sections.append(NativeSection(title: model.hasPairing ? "重新配对" : "创建配对", rows: [NativeRow(title: "开始配对后，前往系统设置 → 隐私与安全 → 开发者模式，选择 ssstore，输入配对码后返回。")]))
+        }
+        if !controller.diagnostics.isEmpty { sections.append(NativeSection(title: "配对日志", rows: controller.diagnostics.map { NativeRow(title: $0) })) }
+        return sections
     }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { if let url = urls.first { model.importPairing(from: url); reload() } }
 }

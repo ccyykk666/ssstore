@@ -47,7 +47,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "32"
+    CURRENT_PROJECT_VERSION: "33"
 targets:
   ssstore:
     type: application
