@@ -304,16 +304,12 @@ extension SearchView {
     extension SearchView {
         var modernContent: some View {
             content
-                .searchable(text: $searchKey, isPresented: $searchPresented, placement: searchablePlacement, prompt: "Keyword")
-                .searchFocused($searchKeyFocused)
-                .onSubmit(of: .search) { search() }
                 .navigationTitle("Search")
                 .toolbar { tools }
+                .background(NativeSearchBridge(text: $searchKey, presented: $searchPresented,
+                                               focused: $searchKeyFocused, onSubmit: search))
         }
 
-        var searchablePlacement: SearchFieldPlacement {
-            .navigationBarDrawer(displayMode: .always)
-        }
     }
 #endif
 
