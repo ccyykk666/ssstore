@@ -46,12 +46,13 @@ enum StoreDownloadProtocol {
         let urls = bag["urlBag"] as? [String: Any] ?? [:]
         let value = urls["volumeStoreDownloadProduct"] ?? bag["volumeStoreDownloadProduct"]
             ?? urls["loc-volumeStoreDownloadProduct"] ?? bag["loc-volumeStoreDownloadProduct"]
-        guard let raw = value as? String, let url = URL(string: raw),
-              url.scheme == "https", url.host == "downloaddispatch.itunes.apple.com", url.path == entPath,
-              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
-              url.port == nil || url.port == 443
+        guard let raw = value as? String, let components = URLComponents(string: raw),
+              components.scheme == "https", components.host == "downloaddispatch.itunes.apple.com",
+              components.percentEncodedPath == entPath,
+              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
+              components.port == nil || components.port == 443
         else { return nil }
-        return url
+        return components.url
     }
 
     static func entRequest(endpoint: URL, appID: Int64, guid: String, dsid: String,
