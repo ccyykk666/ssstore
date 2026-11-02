@@ -21,12 +21,14 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     private var deadline: Task<Void, Never>?
     private var identity: (guid: String, dsid: String)?
     private var started = false
+    private var onEvent: ((String) -> Void)?
 
-    static func generate(guid: String, dsid: String, runtimeRoot: URL? = nil) async throws -> String {
+    static func generate(guid: String, dsid: String, runtimeRoot: URL? = nil, onEvent: ((String) -> Void)? = nil) async throws -> String {
         guard guid.count == 12, guid.allSatisfy(\.isHexDigit),
               let numeric = UInt64(dsid), numeric > 0, numeric <= 9_007_199_254_740_991
         else { throw KBSyncPreparationError.invalidIdentity }
         let generator = KBSyncGenerator()
+        generator.onEvent = onEvent
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
@@ -42,6 +44,7 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         guard let root = root ?? Bundle.main.resourceURL?.appendingPathComponent("KBSyncRuntime"),
               FileManager.default.fileExists(atPath: root.appendingPathComponent("index.html").path)
         else { finish(.failure(KBSyncPreparationError.unavailable)); return }
+        onEvent?("Starting bundled WebKit page")
         identity = (guid, dsid)
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -50,37 +53,68 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         let view = WKWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = self
         webView = view
-        deadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(360)) }
-            catch { return }
-            self?.finish(.failure(KBSyncPreparationError.timeout))
-        }
+        armDeadline(seconds: 30)
         view.load(URLRequest(url: URL(string: "ssstore-kbsync://local/index.html")!))
     }
 
+    private func armDeadline(seconds: Int) {
+        deadline?.cancel()
+        deadline = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+            self?.onEvent?("WebKit deadline reached")
+            self?.finish(.failure(KBSyncPreparationError.timeout))
+        }
+    }
+
+    private func runGeneration() {
+        guard !started, let identity else { return }
+        started = true
+        armDeadline(seconds: 360)
+        onEvent?("Starting local interpreter adapter")
+        guard let arguments = try? JSONSerialization.data(withJSONObject: [identity.guid, identity.dsid]),
+              let json = String(data: arguments, encoding: .utf8) else {
+            finish(.failure(KBSyncPreparationError.invalidIdentity)); return
+        }
+        webView?.evaluateJavaScript("window.ssstoreGenerate(...\(json))") { [weak self] _, error in
+            if error != nil {
+                self?.onEvent?("JavaScript adapter could not start")
+                self?.finish(.failure(KBSyncPreparationError.generation))
+            }
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.frameInfo.isMainFrame, message.frameInfo.request.url?.scheme == "ssstore-kbsync",
+        // A custom-scheme frame's request URL is not guaranteed to be populated.
+        // This private WebView only loads our one bundled page and rejects all
+        // other navigations; validate the owning instance and main frame.
+        guard message.webView === webView, message.frameInfo.isMainFrame,
               let body = message.body as? [String: Any], let type = body["type"] as? String
         else { return }
         switch type {
         case "ready":
-            guard !started, let identity else { return }
-            started = true
-            guard let arguments = try? JSONSerialization.data(withJSONObject: [identity.guid, identity.dsid]),
-                  let json = String(data: arguments, encoding: .utf8) else {
-                finish(.failure(KBSyncPreparationError.invalidIdentity)); return
-            }
-            webView?.evaluateJavaScript("window.ssstoreGenerate(...\(json))") { [weak self] _, error in
-                if error != nil { self?.finish(.failure(KBSyncPreparationError.generation)) }
+            onEvent?("Bundled script ready")
+            runGeneration()
+        case "phase":
+            if let phase = body["phase"] as? String, ["resources", "engine"].contains(phase) {
+                onEvent?("Interpreter phase: " + phase)
             }
         case "result":
             guard let blob = body["blob"] as? String, blob.count <= 1_398_104,
                   let data = Data(base64Encoded: blob), !data.isEmpty, data.count <= 1_048_576
             else { finish(.failure(KBSyncPreparationError.generation)); return }
+            onEvent?("Interpreter produced kbsync")
             finish(.success(blob))
         default:
+            onEvent?("Interpreter reported failure")
             finish(.failure(KBSyncPreparationError.generation))
         }
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        onEvent?("Bundled page loaded")
+        // defer scripts have executed by didFinish, so this also handles an
+        // initial ready message delivered before frame metadata is available.
+        runGeneration()
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

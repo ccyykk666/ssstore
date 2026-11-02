@@ -1,16 +1,15 @@
 import AppKit
 import Foundation
 
-/// Real local WebKit generation with invented DSID/GUID; no account or network.
-@main
-struct KBSyncSmoke {
-    @MainActor static func main() {
-        _ = NSApplication.shared
-        NSApp.setActivationPolicy(.prohibited)
+@MainActor
+final class KBSyncSmokeDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        print("Starting local WebKit check"); fflush(stdout)
         let root = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
         Task { @MainActor in
             do {
-                let blob = try await KBSyncGenerator.generate(guid: "001122334455", dsid: "123456789", runtimeRoot: root)
+                let blob = try await KBSyncGenerator.generate(guid: "001122334455", dsid: "123456789",
+                    runtimeRoot: root, onEvent: { print($0); fflush(stdout) })
                 guard let data = Data(base64Encoded: blob), !data.isEmpty else { fatalError("Empty kbsync") }
                 print("Local WebKit kbsync generation succeeded (synthetic identity)")
                 exit(0)
@@ -19,6 +18,16 @@ struct KBSyncSmoke {
                 exit(1)
             }
         }
-        RunLoop.main.run()
+    }
+}
+
+@main
+struct KBSyncSmoke {
+    @MainActor static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        let delegate = KBSyncSmokeDelegate()
+        app.delegate = delegate
+        withExtendedLifetime(delegate) { app.run() }
     }
 }
