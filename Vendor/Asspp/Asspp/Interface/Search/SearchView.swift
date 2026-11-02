@@ -247,7 +247,7 @@ struct ProductDestination: Hashable {
 extension SearchView {
     var legacyContent: some View {
         content
-            .searchable(text: $searchKey, isPresented: $searchPresented, prompt: "Keyword") {}
+            .searchable(text: $searchKey, isPresented: $searchPresented, prompt: "Keyword")
             .bindSearchFocus($searchKeyFocused)
             .onSubmit(of: .search) { search() }
             .navigationTitle("Search")
