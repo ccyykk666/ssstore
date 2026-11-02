@@ -358,13 +358,9 @@ final class AppModel: ObservableObject {
         recordMatches(cached, scope: region)
         queryWarning = ""
         checkTask = Task {
-            var failures = 0
             var warning: String?
             defer {
-                var warnings: [String] = []
-                if failures > 0 { warnings.append("有 \(failures) 个应用未取得商店版本。") }
-                if let warning { warnings.append(warning) }
-                queryWarning = warnings.joined(separator: "\n")
+                queryWarning = warning ?? ""
                 busy = false; isChecking = false; activity = ""; checkTask = nil; persist()
             }
             for bundles in batches {
@@ -388,7 +384,6 @@ final class AppModel: ObservableObject {
                         updated[index].error = release == nil ? (batch.errors[updated[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
                         updated[index].checkedAt = Date()
                         matched.append(updated[index])
-                        if release == nil { failures += 1 }
                     }
                     records = updated
                     recordMatches(matched, scope: region)
@@ -406,7 +401,6 @@ final class AppModel: ObservableObject {
                         updated[index].error = error.localizedDescription
                         updated[index].checkedAt = Date()
                         matched.append(updated[index])
-                        failures += 1
                     }
                     records = updated
                     recordMatches(matched, scope: region)

@@ -22,10 +22,11 @@ struct NativeRow {
     var iconRevision = 0
     var accessoryAction: UIAction?
     var metricActions: [Int: () -> Void] = [:]
+    var compact = false
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
-        badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision &&
+        badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision && compact == other.compact &&
         accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
@@ -34,6 +35,10 @@ struct NativeRow {
 final class NativeCell: UITableViewCell {
     var representedIcon: URL?
     var imageTask: DownloadTask?
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: .subtitle, reuseIdentifier: reuseIdentifier)
+    }
+    required init?(coder: NSCoder) { fatalError() }
     override func prepareForReuse() {
         super.prepareForReuse()
         imageTask?.cancel()
@@ -76,12 +81,12 @@ final class NativeMetricCell: UITableViewCell {
             column.isUserInteractionEnabled = actions[index] != nil
             column.accessibilityTraits = actions[index] == nil ? .staticText : .button
             column.accessibilityLabel = "\(values[index]) 个\(names[index])"
+            let text = String(values[index])
             if previous.indices.contains(index), previous[index] != values[index], !UIAccessibility.isReduceMotionEnabled {
-                let animation = CATransition(); animation.type = .push; animation.subtype = .fromTop; animation.duration = 0.12
-                animation.timingFunction = CAMediaTimingFunction(name: .linear)
-                numbers[index].layer.add(animation, forKey: "number")
-            }
-            numbers[index].text = String(max(0, values[index]))
+                UIView.transition(with: numbers[index], duration: 0.12, options: [.transitionCrossDissolve, .beginFromCurrentState]) {
+                    self.numbers[index].text = text
+                }
+            } else { numbers[index].text = text }
         }
         previous = values
     }
@@ -108,6 +113,8 @@ class NativePage: UITableViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
     override func viewDidLoad() {
         super.viewDidLoad()
+        tableView.register(NativeCell.self, forCellReuseIdentifier: "row")
+        tableView.register(NativeMetricCell.self, forCellReuseIdentifier: "metrics")
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 70
         tableView.keyboardDismissMode = .interactive
@@ -161,25 +168,31 @@ class NativePage: UITableViewController {
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let row = sections[indexPath.section].rows[indexPath.row]
         if let metrics = row.metrics {
-            let cell = (tableView.dequeueReusableCell(withIdentifier: "metrics") as? NativeMetricCell) ?? NativeMetricCell(style: .default, reuseIdentifier: "metrics")
+            let cell = tableView.dequeueReusableCell(withIdentifier: "metrics", for: indexPath) as! NativeMetricCell
             cell.update(metrics, actions: row.metricActions)
             return cell
         }
-        let cell = (tableView.dequeueReusableCell(withIdentifier: "row") as? NativeCell) ?? NativeCell(style: .subtitle, reuseIdentifier: "row")
+        let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! NativeCell
         var config = cell.defaultContentConfiguration()
         config.text = row.title; config.secondaryText = row.detail
         config.textProperties.color = row.color
         config.textProperties.numberOfLines = 0
         config.secondaryTextProperties.numberOfLines = 0
-        config.imageProperties.maximumSize = CGSize(width: 52, height: 52)
-        config.imageProperties.cornerRadius = 11
+        let iconSize: CGFloat = row.compact ? 46 : 52
+        config.imageProperties.maximumSize = CGSize(width: iconSize, height: iconSize)
+        config.imageProperties.cornerRadius = row.compact ? 10 : 11
+        if row.compact {
+            config.textProperties.font = .preferredFont(forTextStyle: .callout)
+            config.secondaryTextProperties.font = .preferredFont(forTextStyle: .footnote)
+            config.directionalLayoutMargins.top = 10; config.directionalLayoutMargins.bottom = 10
+        }
         let previousImage = cell.representedIcon == row.icon ? (cell.contentConfiguration as? UIListContentConfiguration)?.image : nil
         cell.imageTask?.cancel()
         cell.representedIcon = row.icon
         if let url = row.icon {
             config.image = previousImage ?? UIImage(systemName: "app")
             let source: Kingfisher.Source = url.isFileURL ? .provider(LocalFileImageDataProvider(fileURL: url)) : .network(ImageResource(downloadURL: url))
-            cell.imageTask = KingfisherManager.shared.retrieveImage(with: source, options: [.processor(DownsamplingImageProcessor(size: CGSize(width: 52, height: 52))), .scaleFactor(UIScreen.main.scale), .backgroundDecode]) { [weak cell] result in
+            cell.imageTask = KingfisherManager.shared.retrieveImage(with: source, options: [.processor(DownsamplingImageProcessor(size: CGSize(width: iconSize, height: iconSize))), .scaleFactor(UIScreen.main.scale), .backgroundDecode]) { [weak cell] result in
                 DispatchQueue.main.async {
                     guard let cell, cell.representedIcon == url, case let .success(value) = result,
                           var current = cell.contentConfiguration as? UIListContentConfiguration else { return }

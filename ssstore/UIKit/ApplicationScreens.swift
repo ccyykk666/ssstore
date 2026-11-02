@@ -10,7 +10,7 @@ import ZIPFoundation
 
 @MainActor
 final class NativeApps: NativeSearchPage {
-    enum Filter { case all, attention, updates, failed }
+    enum Filter { case all, attention, updates, pending, failed }
     var filter = Filter.all
     private var menuKey = ""
     init(_ model: AppModel) { super.init(model, title: "ssstore") }
@@ -44,6 +44,7 @@ final class NativeApps: NativeSearchPage {
         var summary = [NativeRow(title: "", metrics: [statistics.applications, statistics.updates, statistics.pending, statistics.failures], metricActions: [
             0: { [weak self] in self?.showApplications() },
             1: { [weak self] in self?.showApplications(.updates) },
+            2: { [weak self] in self?.showApplications(.pending) },
             3: { [weak self] in self?.showApplications(.failed) }
         ])]
         for warning in [model.scanWarning, model.queryWarning] where !warning.isEmpty { summary.append(NativeRow(title: warning, color: .systemOrange)) }
@@ -54,6 +55,7 @@ final class NativeApps: NativeSearchPage {
             case .all: included = true
             case .attention: included = matched && record.status(country: model.country) != .current
             case .updates: included = matched && [.different, .update].contains(record.status(country: model.country))
+            case .pending: included = matched && record.error == nil && record.status(country: model.country) == .unknown
             case .failed: included = matched && record.error != nil
             }
             return included && (query.isEmpty || record.installed.name.localizedCaseInsensitiveContains(query) || record.id.localizedCaseInsensitiveContains(query))
@@ -63,7 +65,7 @@ final class NativeApps: NativeSearchPage {
             let status = record.status(country: model.country)
             let update = matched && (status == .different || status == .update)
             let tag = update ? "新版本" : (matched && status == .unknown ? "待核对" : "")
-            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag, iconRevision: model.iconRevision)
+            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag, iconRevision: model.iconRevision, compact: true)
         }
         return [NativeSection(rows: summary), NativeSection(title: "共\(filtered.count)个应用", rows: rows.isEmpty ? [NativeRow(title: "暂无匹配应用")] : rows)]
     }
