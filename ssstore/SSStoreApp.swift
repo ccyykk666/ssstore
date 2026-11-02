@@ -1,5 +1,4 @@
 import UIKit
-import SwiftUI
 
 @main
 final class SSStoreApplication: AppDelegate {
@@ -14,16 +13,4 @@ final class SSStoreApplication: AppDelegate {
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 }
-
-struct SoftTopScrollEdge: ViewModifier {
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.scrollEdgeEffectStyle(.soft, for: .top)
-        } else {
-            content
-        }
-    }
-}
-
 

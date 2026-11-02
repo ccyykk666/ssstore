@@ -3,7 +3,11 @@
 //  Asspp
 //
 
-import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 func copyToClipboard(_ text: String?) {
     guard let text, !text.isEmpty else { return }

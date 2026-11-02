@@ -1,5 +1,5 @@
 import Foundation
-import SwiftUI
+import Combine
 import UIKit
 import UpdateCore
 
@@ -12,7 +12,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshingApps = false
     @Published private(set) var matchProgress: ApplicationMatchProgress?
     @Published var message: String?
-    @Published var filePresentation: FilePresentation?
     @Published var scannedAt: Date?
     @Published var inventoryOrigin = "尚未读取"
     @Published var hasPairing = false
@@ -438,7 +437,7 @@ final class AppModel: ObservableObject {
                 next.revealNext(hidingSystemApps: !UserDefaults.standard.bool(forKey: "includeSystemApps"))
                 // One transaction publishes one prefix: application count, update
                 // count, pending count, failures, and row badges change together.
-                withAnimation(.linear(duration: 0.024)) { matchProgress = next }
+                matchProgress = next
             }
         }
     }

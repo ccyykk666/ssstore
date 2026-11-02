@@ -1,0 +1,118 @@
+import UIKit
+import Combine
+import Observation
+import ApplePackage
+import UpdateCore
+import Kingfisher
+import QuickLook
+import UniformTypeIdentifiers
+import ZIPFoundation
+
+@MainActor
+final class NativeApps: NativeSearchPage {
+    var onlyAttention = false
+    var onlyFailed = false
+    init(_ model: AppModel) { super.init(model, title: "ssstore") }
+    required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad(); search.searchBar.placeholder = "搜索应用或 Bundle ID"
+        navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "gearshape"), primaryAction: UIAction { [weak self] _ in guard let self else { return }; sheet(NativeSettings(model)) })
+    }
+    override func rows() -> [NativeSection] {
+        let includeSystem = UserDefaults.standard.bool(forKey: "includeSystemApps")
+        let listed = model.records.filter { includeSystem || !$0.installed.isSystem }
+        let progress = model.matchProgress.flatMap { $0.scope == model.country ? $0 : nil }
+        let revealed = progress.map { Set($0.revealedMatches.map(\.id)) }
+        let statistics = progress?.statistics(visibleIDs: Set(listed.map(\.id))) ?? ApplicationMatchStatistics(matches: listed.map { ApplicationMatch(record: $0, scope: model.country) })
+        if statistics.failures == 0 { onlyFailed = false }
+        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [
+            UIAction(title: "刷新应用", image: UIImage(systemName: "arrow.triangle.2.circlepath"), attributes: model.busy ? .disabled : []) { [weak self] _ in guard let self else { return }; Task { await model.refreshApps() } },
+            UIAction(title: "停止刷新", attributes: model.isChecking ? [] : .hidden) { [weak self] _ in self?.model.cancelCheck() },
+            UIAction(title: "下载", image: UIImage(systemName: "arrow.down.circle")) { [weak self] _ in guard let self else { return }; push(NativeDownloads(model)) },
+            UIAction(title: "有更新与待核对", state: onlyAttention ? .on : .off) { [weak self] _ in self?.onlyAttention.toggle(); self?.reload() },
+            UIAction(title: "显示系统应用", state: includeSystem ? .on : .off) { [weak self] _ in UserDefaults.standard.set(!includeSystem, forKey: "includeSystemApps"); self?.reload() }
+        ]))
+        var summary = [NativeRow(title: "", metrics: [statistics.applications, statistics.updates, statistics.pending])]
+        if statistics.failures > 0 { summary.append(link("\(statistics.failures) 失败") { [weak self] in self?.onlyFailed.toggle(); self?.reload() }) }
+        for warning in [model.scanWarning, model.queryWarning] where !warning.isEmpty { summary.append(NativeRow(title: warning, color: .systemOrange)) }
+        let filtered = listed.filter { record in
+            let matched = revealed?.contains(record.id) ?? true
+            return (!onlyAttention || (matched && record.status(country: model.country) != .current)) && (!onlyFailed || (matched && record.error != nil)) && (query.isEmpty || record.installed.name.localizedCaseInsensitiveContains(query) || record.id.localizedCaseInsensitiveContains(query))
+        }
+        let rows = filtered.map { record -> NativeRow in
+            let matched = revealed?.contains(record.id) ?? true
+            let status = record.status(country: model.country)
+            let update = matched && (status == .different || status == .update)
+            let tag = update ? "有更新" : (matched && status == .unknown ? "待核对" : "")
+            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release?.version ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag)
+        }
+        return [NativeSection(rows: summary), NativeSection(title: "共\(filtered.count)个应用", rows: rows.isEmpty ? [NativeRow(title: "暂无匹配应用")] : rows)]
+    }
+}
+
+@MainActor
+final class NativeAppDetail: NativePage {
+    let id: String
+    init(_ model: AppModel, id: String) { self.id = id; super.init(model, title: "版本详情"); navigationItem.largeTitleDisplayMode = .never }
+    required init?(coder: NSCoder) { fatalError() }
+    override func rows() -> [NativeSection] {
+        guard let record = model.records.first(where: { $0.id == id }) else { return [] }
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "查询", primaryAction: UIAction { [weak self] _ in guard let self else { return }; model.checkUpdates(only: id) })
+        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed)), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
+        if let original = record.installed.version, original != record.displayedVersion(country: model.country) { fields.append(NativeRow(title: "原始版本", detail: original)) }
+        fields += [NativeRow(title: "构建号", detail: record.installed.build ?? "未提供"), NativeRow(title: "构建 SDK", detail: record.installed.buildSDKDescription ?? "未提供"), NativeRow(title: "Bundle ID", detail: record.id)]
+        var store: [NativeRow] = []
+        if let release = record.release { store += [NativeRow(title: "最新版本", detail: release.version), NativeRow(title: "更新时间", detail: release.releasedAt ?? "未提供"), NativeRow(title: "最低系统版本", detail: release.minimumOS ?? "未提供")] }
+        store.append(link("查看商店页") { [weak self] in guard let self else { return }; let region = record.release?.country ?? (model.country == StoreQueryPolicy.chinaThenUS ? "cn" : model.country); run { let app = try await ApplePackage.Lookup.lookup(bundleID: record.effectiveBundleID, countryCode: region.uppercased()); guard app.bundleID == record.effectiveBundleID else { throw NSError(domain: "Store", code: 1, userInfo: [NSLocalizedDescriptionKey: "应用标识不符"]) }; self.push(NativeProduct(self.model, package: AppStore.AppPackage(software: app, entityType: .iPhone), region: region.uppercased())) } })
+        var result = [NativeSection(rows: fields), NativeSection(title: "商店", rows: store), NativeSection(rows: [link("应用数据") { [weak self] in guard let self else { return }; push(NativeData(model, bundle: id)) }]), NativeSection(title: "更新说明", rows: [NativeRow(title: record.release?.notes ?? "暂无更新说明")])]
+        if let error = record.error { result.append(NativeSection(rows: [NativeRow(title: error, color: .systemOrange)])) }
+        return result
+    }
+}
+
+@MainActor
+final class NativeStoreSearch: NativeSearchPage {
+    var region = UserDefaults.standard.string(forKey: "searchRegion") ?? "US"
+    var entity = EntityType.iPhone
+    var results: [AppStore.AppPackage] = []
+    var request: Task<Void, Never>?
+    var generation = UUID()
+    var error: String?
+    var loading = false
+    init(_ model: AppModel) { super.init(model, title: "搜索") }
+    required init?(coder: NSCoder) { fatalError() }
+    override func rows() -> [NativeSection] {
+        navigationItem.rightBarButtonItems = [regionButton(menu: UIMenu(children: ApplePackage.Configuration.storeFrontValues.keys.sorted().map { key in UIAction(title: "\(StoreRegionNames.name(key))  \(key)", state: key == region ? .on : .off) { [weak self] _ in self?.region = key; UserDefaults.standard.set(key, forKey: "searchRegion"); self?.reset(); self?.reload() } })), UIBarButtonItem(image: UIImage(systemName: entity.iconName), menu: UIMenu(children: EntityType.allCases.map { type in UIAction(title: type.rawValue, state: type == entity ? .on : .off) { [weak self] _ in self?.entity = type; self?.reset(); self?.reload() } }))]
+        var sections: [NativeSection] = []
+        if let error { sections.append(NativeSection(rows: [NativeRow(title: error, color: .systemRed)])) }
+        if loading || !results.isEmpty { sections.append(NativeSection(title: loading ? "正在搜索…" : "\(results.count) 个结果", rows: results.map { package in NativeRow(title: package.software.name, detail: package.software.sellerName + " · " + package.software.version, icon: URL(string: package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativeProduct(model, package: package, region: region)) }) })) }
+        return sections
+    }
+    private func regionButton(menu: UIMenu) -> UIBarButtonItem {
+        let button = UIButton(type: .system)
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = region; configuration.image = UIImage(systemName: "globe"); configuration.imagePadding = 6
+        button.configuration = configuration; button.menu = menu; button.showsMenuAsPrimaryAction = true
+        return UIBarButtonItem(customView: button)
+    }
+    override func queryChanged() { if query.isEmpty { reset(); reload() } }
+    override func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        super.searchBarSearchButtonClicked(searchBar)
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { reset(); reload(); return }
+        reset(); let id = generation; let country = region; let type = entity
+        loading = true; reload()
+        request = Task { [weak self] in
+            do {
+                var apps = try await ApplePackage.Searcher.search(term: term, countryCode: country, limit: 32, entityType: type)
+                try Task.checkCancellation()
+                if let app = try? await ApplePackage.Lookup.lookup(bundleID: term, countryCode: country, entityType: type) { apps.insert(app, at: 0) }
+                try Task.checkCancellation()
+                guard let self, generation == id else { return }
+                results = apps.map { AppStore.AppPackage(software: $0, entityType: type) }; loading = false; reload()
+            } catch { guard let self, !Task.isCancelled, generation == id else { return }; self.error = error.localizedDescription; loading = false; reload() }
+        }
+    }
+    func reset() { request?.cancel(); request = nil; generation = UUID(); results = []; error = nil; loading = false }
+}
+

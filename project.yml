@@ -57,12 +57,11 @@ targets:
     platform: iOS
     sources:
       - path: ssstore
-        excludes: [Info.plist]
+        excludes: [Info.plist, AppDetailView.swift, AppIconView.swift, ApplicationPickerView.swift, ContentView.swift, FileSheets.swift, InspectionView.swift, NativeSearchBridge.swift, OnDevicePairingView.swift, PairingFileDocument.swift, PairingInstallView.swift, RootView.swift, SearchTabInteraction.swift, SettingsView.swift, StoreProductView.swift, StoreRegionPickerView.swift]
       - path: Vendor/Asspp/Asspp
         excludes:
           - App/main.swift
-          - Interface/Welcome
-          - Interface/Installed
+          - Interface
           - Backend/DeviceCTL
           - Interface/Download/DeviceCTLInstallSection.swift
       - path: Vendor/Asspp/Certificates

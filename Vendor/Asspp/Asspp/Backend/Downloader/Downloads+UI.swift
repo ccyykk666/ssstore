@@ -7,7 +7,6 @@
 
 import ApplePackage
 import Foundation
-import SwiftUI
 
 enum DownloadAction: Hashable {
     case suspend
