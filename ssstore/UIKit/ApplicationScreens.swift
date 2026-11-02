@@ -62,8 +62,10 @@ final class NativeAppDetail: NativePage {
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
         guard let record = model.records.first(where: { $0.id == id }) else { return [] }
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "查询", primaryAction: UIAction { [weak self] _ in guard let self else { return }; model.checkUpdates(only: id) })
-        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed), iconRevision: model.iconRevision), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
+        let query = UIAction(title: "查询", attributes: model.busy ? .disabled : []) { [weak self] _ in
+            guard let self else { return }; model.checkUpdates(only: id)
+        }
+        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed), iconRevision: model.iconRevision, accessoryAction: query), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
         if let original = record.installed.version, original != record.displayedVersion(country: model.country) { fields.append(NativeRow(title: "原始版本", detail: original)) }
         fields += [NativeRow(title: "构建号", detail: record.installed.build ?? "未提供"), NativeRow(title: "构建 SDK", detail: record.installed.buildSDKDescription ?? "未提供"), NativeRow(title: "Bundle ID", detail: record.id)]
         var store: [NativeRow] = []

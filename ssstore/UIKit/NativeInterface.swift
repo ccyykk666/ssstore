@@ -20,10 +20,12 @@ struct NativeRow {
     var badge: String? = nil
     var metrics: [Int]? = nil
     var iconRevision = 0
+    var accessoryAction: UIAction?
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
         badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision &&
+        accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
 }
@@ -171,7 +173,14 @@ class NativePage: UITableViewController {
             }
         }
         cell.contentConfiguration = config
-        if let badge = row.badge {
+        if let action = row.accessoryAction {
+            let button = UIButton(type: .system, primaryAction: action)
+            var configuration = UIButton.Configuration.bordered()
+            configuration.title = action.title; configuration.cornerStyle = .capsule
+            button.configuration = configuration
+            button.isEnabled = !action.attributes.contains(.disabled)
+            button.sizeToFit(); cell.accessoryView = button
+        } else if let badge = row.badge {
             let label = (cell.accessoryView as? UILabel) ?? UILabel(); label.text = badge; label.textColor = badge == "有更新" ? .systemGreen : .secondaryLabel
             label.font = .preferredFont(forTextStyle: .caption1); label.sizeToFit(); cell.accessoryView = label
         } else { cell.accessoryView = nil }
