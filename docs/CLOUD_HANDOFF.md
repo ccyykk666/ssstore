@@ -2,6 +2,14 @@
 
 更新日期：2026-11-02（北京时间）。先读取本文、实际源码和工作流；不要重复执行已完成的请求或重复触发构建。
 
+## 0.5.12（25）搜索重复点击键盘修复
+
+- 用户反馈 24 版点击搜索 tab 未弹键盘。24 版通过 background 探测 SwiftUI TabView 并临时覆盖 delegate，可能因控制器尚未挂载/SwiftUI 重置 delegate 而不接收事件；搜索焦点也缺少显式 isPresented 激活。这些为代码中发现的不可靠环节，没有声称已经真机定位。
+- RootView 改用自有原生 UITabBarController，稳定持有选择 delegate，保留四页顺序、系统底栏样式、图标和 iOS 26+ never 最小化策略。各页保持独立 SwiftUI NavigationStack、共享 AppModel 和 soft 顶缘效果，根分享/预览 sheet 保留。
+- 已在搜索页再次点搜索时直接触发请求：返回搜索根页，显式激活 searchable(isPresented:)，重新设置焦点；仅在当前选中控制器内有限等待可见原生 UISearchTextField，成为 first responder 后全选文字。切 tab/打开模态/销毁时停止等待。不再覆盖 SwiftUI 的 delegate。
+- 构建 SDK 按用户追加要求只显示版本号，例如 26.2，移除 Xcode 前缀、构建代号、平台名称；仍使用实际 DTXcode，缺失时仅从真实 DTSDKName 提取版本，没有数据仍显示未提供。保留原始元数据缓存字段，旧清单不需要为显示格式再扫描。
+- SDK 格式回归随核心测试更新；下载协议、本地化、kbsync 未改，不重复其检查。Xcode 构建成功直接交付 IPA；没有真机复测环境，不能把编译成功当作用户手机交互已验证。
+
 ## 0.5.11（24）搜索交互与构建元数据
 
 - 首页与历史页选项符号改为 ellipsis，保留系统工具栏玻璃外观；历史加载更多改为 list.bullet.below.rectangle，加载状态改为“正在加载历史版本...”。

@@ -24,18 +24,20 @@ public struct InstalledApp: Codable, Identifiable, Equatable, Sendable {
     /// DTXcode encodes major * 100 + minor * 10 + patch (e.g. 1640).
     /// Do not infer Xcode from the deployment target, app version or host SDK.
     public var buildSDKDescription: String? {
-        var parts: [String] = []
         if let raw = buildXcode, (3...5).contains(raw.count),
            raw.utf8.allSatisfy({ (48...57).contains($0) }), let value = Int(raw), value >= 100 {
-            let version = "\(value / 100).\((value / 10) % 10)" + (value % 10 == 0 ? "" : ".\(value % 10)")
-            var label = "Xcode " + version
-            if let buildXcodeBuild, !buildXcodeBuild.isEmpty { label += " (" + buildXcodeBuild + ")" }
-            parts.append(label)
-        } else if let buildXcodeBuild, !buildXcodeBuild.isEmpty {
-            parts.append("Xcode 构建 " + buildXcodeBuild)
+            return "\(value / 100).\((value / 10) % 10)" + (value % 10 == 0 ? "" : ".\(value % 10)")
         }
-        if let buildSDKName, !buildSDKName.isEmpty { parts.append(buildSDKName) }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        // If only the SDK name was returned, keep its real version without
+        // displaying platform prefixes or inventing an Xcode build mapping.
+        if let sdk = buildSDKName, sdk.first?.isLetter == true {
+            let version = sdk.drop(while: { $0.isLetter })
+            let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+            if !parts.isEmpty, parts.allSatisfy({ !$0.isEmpty && $0.utf8.allSatisfy { (48...57).contains($0) } }) {
+                return String(version)
+            }
+        }
+        return nil
     }
 
     public init(bundleID: String, name: String, version: String?, build: String? = nil, isSystem: Bool = false,

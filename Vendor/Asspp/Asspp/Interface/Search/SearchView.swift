@@ -31,6 +31,7 @@ struct SearchView: View {
     @State private var searchType = EntityType.iPhone
 
     @State private var searching = false
+    @State private var searchPresented = false
     let regionKeys = ApplePackage.Configuration.storeFrontValues.keys.sorted {
         StoreRegionNames.name($0).localizedStandardCompare(StoreRegionNames.name($1)) == .orderedAscending
     }
@@ -183,6 +184,8 @@ struct SearchView: View {
         // Defer so the search field exists when focus is assigned, whether the
         // view was already visible or is appearing for the first time.
         navigationPath = NavigationPath()
+        searchKeyFocused = false
+        searchPresented = true
         DispatchQueue.main.async { searchKeyFocused = true }
     }
 
@@ -244,7 +247,7 @@ struct ProductDestination: Hashable {
 extension SearchView {
     var legacyContent: some View {
         content
-            .searchable(text: $searchKey, prompt: "Keyword") {}
+            .searchable(text: $searchKey, isPresented: $searchPresented, prompt: "Keyword") {}
             .bindSearchFocus($searchKeyFocused)
             .onSubmit(of: .search) { search() }
             .navigationTitle("Search")
@@ -259,7 +262,7 @@ extension SearchView {
     extension SearchView {
         var modernContent: some View {
             content
-                .searchable(text: $searchKey, placement: searchablePlacement, prompt: "Keyword")
+                .searchable(text: $searchKey, isPresented: $searchPresented, placement: searchablePlacement, prompt: "Keyword")
                 .searchFocused($searchKeyFocused)
                 .onSubmit(of: .search) { search() }
                 .toolbarVisibility(navigationBarVisibility, for: .navigationBar)

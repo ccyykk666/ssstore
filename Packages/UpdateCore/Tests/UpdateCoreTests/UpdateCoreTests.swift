@@ -49,17 +49,17 @@ final class UpdateCoreTests: XCTestCase {
     func testInspectedAppBuildSDKUsesItsOwnMetadata() throws {
         let data = Data(#"[{"CFBundleIdentifier":"test.app","DTXcode":"1640","DTXcodeBuild":"16F6","DTSDKName":"iphoneos18.5","MinimumOSVersion":"13.0","CFBundleVersion":"999"}]"#.utf8)
         let app = try InventoryParser.parse(data)[0]
-        XCTAssertEqual(app.buildSDKDescription, "Xcode 16.4 (16F6) · iphoneos18.5")
+        XCTAssertEqual(app.buildSDKDescription, "16.4")
         let restored = try JSONDecoder().decode(InstalledApp.self, from: JSONEncoder().encode(app))
         XCTAssertEqual(restored.buildSDKDescription, app.buildSDKDescription)
         let patch = try InventoryParser.parse(Data(#"[{"bundleID":"test.app","DTXcode":1531}]"#.utf8))[0]
-        XCTAssertEqual(patch.buildSDKDescription, "Xcode 15.3.1")
+        XCTAssertEqual(patch.buildSDKDescription, "15.3.1")
         let legacy = try JSONDecoder().decode(InstalledApp.self, from: Data(#"{"bundleID":"old.app","name":"Old","version":"1","build":"2700","isSystem":false}"#.utf8))
         XCTAssertNil(legacy.buildSDKDescription)
         let unavailable = try InventoryParser.parse(Data(#"[{"bundleID":"test.app","DTXcode":"unknown","MinimumOSVersion":"13.0"}]"#.utf8))[0]
         XCTAssertNil(unavailable.buildSDKDescription)
         let sdkOnly = try InventoryParser.parse(Data(#"[{"bundleID":"test.app","DTSDKName":"iphoneos18.5"}]"#.utf8))[0]
-        XCTAssertEqual(sdkOnly.buildSDKDescription, "iphoneos18.5")
+        XCTAssertEqual(sdkOnly.buildSDKDescription, "18.5")
     }
 
 }
