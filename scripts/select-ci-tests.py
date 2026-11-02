@@ -17,6 +17,7 @@ CHECK_INPUTS = {
         STORE + "Asspp/Backend/AppStore/StoreDownloadProtocol.swift",
         STORE + "Asspp/Backend/AppStore/StoreDownloadService.swift",
         STORE + "Asspp/Backend/AppStore/StoreHistorySupport.swift",
+        STORE + "Asspp/Backend/AppStore/StoreCatalogHistoryService.swift",
         STORE + "Resources/Tests/HistorySupportChecks.swift",
         STORE + "Resources/Tests/DownloadProtocolChecks.swift",
         STORE + "Resources/Scripts/check.downloads.sh",

@@ -23,7 +23,7 @@ enum StoreDownloadService {
 
     struct VersionIndex: Sendable {
         let identifiers: [String]
-        let metadata: [String: VersionMetadata]
+        let metadata: [String: StoreHistorySupport.Metadata]
     }
 
     static func versions(account: inout Account, package: AppStore.AppPackage) async throws -> [String] {
@@ -33,18 +33,14 @@ enum StoreDownloadService {
     static func versionIndex(account: inout Account, package: AppStore.AppPackage) async throws -> VersionIndex {
         try await product(account: &account, package: package, version: nil, operation: "versions") { item in
             let index = try StoreHistorySupport.index(item)
-            let known = index.metadata.mapValues {
-                VersionMetadata(displayVersion: $0.version, releaseDate: $0.releaseDate)
-            }
-            return VersionIndex(identifiers: index.identifiers, metadata: known)
+            return VersionIndex(identifiers: index.identifiers, metadata: index.metadata)
         }
     }
 
-    static func versionMetadata(account: inout Account, package: AppStore.AppPackage, versionID: String) async throws -> VersionMetadata {
+    static func versionMetadata(account: inout Account, package: AppStore.AppPackage, versionID: String) async throws -> StoreHistorySupport.Metadata {
         try await product(account: &account, package: package, version: versionID, operation: "version-metadata") { item in
             guard let metadata = item["metadata"] as? [String: Any] else { throw StoreDownloadError.invalidPackage }
-            let details = try StoreHistorySupport.details(metadata)
-            return VersionMetadata(displayVersion: details.version, releaseDate: details.releaseDate)
+            return try StoreHistorySupport.details(metadata)
         }
     }
 

@@ -135,7 +135,7 @@ class AppStore {
 
     /// Historical metadata is read concurrently from account snapshots. Commit
     /// only cookie deltas, and never write stale credentials over a rotated login.
-    nonisolated func historyMetadata(accountID: String, package: AppPackage, versionID: String) async throws -> VersionMetadata {
+    nonisolated func historyMetadata(accountID: String, package: AppPackage, versionID: String) async throws -> StoreHistorySupport.Metadata {
         guard let original = await accounts.first(where: { $0.id == accountID }) else {
             throw AuthenticationError.accountNotFound
         }

@@ -16,10 +16,13 @@ struct ProductHistoryView: View {
     var body: some View {
         Form {
             if vm.isLoadingIndex {
-                HStack { ProgressView(); Text("正在加载版本…").foregroundStyle(.secondary) }
+                HStack { ProgressView(); Text(vm.isLoadingEarlierVersions ? "正在加载更早版本…" : "正在加载版本…").foregroundStyle(.secondary) }
             }
             ForEach(vm.versionIdentifiers, id: \.self) { key in
                 historyRow(key)
+            }
+            if vm.canLoadEarlierVersions && !vm.isLoadingIndex {
+                Button("加载更早版本") { vm.loadEarlierVersions() }
             }
         }
         .formStyle(.grouped)
@@ -30,7 +33,7 @@ struct ProductHistoryView: View {
                     Button { vm.populateNextVersionItems() } label: {
                         Label("Load More", systemImage: "arrow.down.circle")
                     }
-                    .disabled(vm.isVersionItemsFullyLoaded || vm.isLoadingIndex)
+                    .disabled((vm.isVersionItemsFullyLoaded && !vm.canLoadEarlierVersions) || vm.isLoadingIndex)
                     Button { vm.loadHistory(force: true) } label: {
                         Label("Refresh", systemImage: "arrow.clockwise.circle")
                     }
@@ -63,8 +66,10 @@ struct ProductHistoryView: View {
                 HStack {
                     Text(package.software.version).foregroundStyle(Color.accentColor)
                     Spacer()
-                    Text(details.releaseDate.formatted(.relative(presentation: .numeric)))
-                        .font(.caption).foregroundStyle(.secondary)
+                    if let date = details.releaseDate {
+                        Text(date, format: .dateTime.year().month().day())
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 .contentShape(Rectangle())
             }

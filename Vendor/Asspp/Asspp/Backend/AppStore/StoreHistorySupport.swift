@@ -42,25 +42,90 @@ actor StoreBagCache {
 }
 
 enum StoreHistorySupport {
-    struct Metadata: Sendable {
-        let version: String
-        let releaseDate: Date
+    struct Metadata: Codable, Equatable, Sendable {
+        let displayVersion: String
+        let releaseDate: Date?
+        private let dateSource: String?
+        var version: String { displayVersion }
+
+        init(version: String, catalogDate: Date? = nil) {
+            displayVersion = version
+            releaseDate = catalogDate
+            dateSource = catalogDate == nil ? nil : "apple-catalog-history-v1"
+        }
+
+        private enum CodingKeys: String, CodingKey { case displayVersion, releaseDate, dateSource }
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            displayVersion = try values.decode(String.self, forKey: .displayVersion)
+            dateSource = try values.decodeIfPresent(String.self, forKey: .dateSource)
+            // Older caches used the download reply's app-level releaseDate.
+            // Preserve version labels, but never display that date as a build date.
+            if dateSource == "apple-catalog-history-v1" {
+                releaseDate = try values.decodeIfPresent(Date.self, forKey: .releaseDate)
+            } else { releaseDate = nil }
+        }
     }
+
     struct Index: Sendable {
         let identifiers: [String]
         let metadata: [String: Metadata]
     }
 
-    static func details(_ metadata: [String: Any]) throws -> Metadata {
-        guard let version = metadata["bundleShortVersionString"] as? String, !version.isEmpty,
-              let dateString = metadata["releaseDate"] as? String
-        else { throw StoreDownloadError.invalidPackage }
+    static func date(_ text: String) -> Date? {
         let formatter = ISO8601DateFormatter()
-        let ordinary = formatter.date(from: dateString)
+        if let value = formatter.date(from: text) { return value }
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let releaseDate = ordinary ?? formatter.date(from: dateString)
+        if let value = formatter.date(from: text) { return value }
+        let day = DateFormatter()
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.timeZone = TimeZone(secondsFromGMT: 0)
+        day.dateFormat = "yyyy-MM-dd"
+        day.isLenient = false
+        guard text.count == 10, let value = day.date(from: text), day.string(from: value) == text else { return nil }
+        return value
+    }
+
+    static func details(_ metadata: [String: Any]) throws -> Metadata {
+        guard let version = metadata["bundleShortVersionString"] as? String, !version.isEmpty
         else { throw StoreDownloadError.invalidPackage }
-        return Metadata(version: version, releaseDate: releaseDate)
+        // This API's releaseDate can refer to the app's first release, even when
+        // externalVersionId is pinned. It is not a historical-version date.
+        return Metadata(version: version)
+    }
+
+    static func catalogIndex(_ data: Data, appID: Int64, bundleID: String, platform: String) throws -> Index {
+        guard ["iphone", "ipad", "appletv"].contains(platform), !bundleID.isEmpty,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = root["data"] as? [[String: Any]], items.count == 1,
+              let item = items.first, StoreProtocol.string(item["id"]) == String(appID),
+              item["type"] as? String == "apps",
+              let attributes = item["attributes"] as? [String: Any],
+              let families = attributes["deviceFamilies"] as? [String], families.contains(platform),
+              let platforms = attributes["platformAttributes"] as? [String: Any],
+              let details = platforms[platform == "appletv" ? "appletvos" : "ios"] as? [String: Any],
+              details["bundleId"] as? String == bundleID,
+              let history = details["versionHistory"] as? [[String: Any]]
+        else { throw StoreDownloadError.invalidPackage }
+        var identifiers: [String] = []
+        var known: [String: Metadata] = [:]
+        for row in history {
+            let id = StoreProtocol.string(row["externalVersionId"])
+            guard !id.isEmpty, id.utf8.allSatisfy({ (48...57).contains($0) }),
+                  id.contains(where: { $0 != "0" }),
+                  let version = row["versionDisplay"] as? String, !version.isEmpty else { continue }
+            let timestamp = (row["releaseTimestamp"] as? String).flatMap(date)
+                ?? (row["releaseDate"] as? String).flatMap(date)
+            let metadata = Metadata(version: version, catalogDate: timestamp)
+            if let previous = known[id] {
+                guard previous == metadata else { throw StoreDownloadError.invalidPackage }
+                continue
+            }
+            identifiers.append(id)
+            known[id] = metadata
+        }
+        guard !identifiers.isEmpty else { throw StoreDownloadError.noVersions }
+        return Index(identifiers: identifiers, metadata: known)
     }
 
     static func index(_ item: [String: Any]) throws -> Index {

@@ -18,14 +18,15 @@ class AppPackageArchive {
     typealias VersionIdentifier = String
 
     @ObservationIgnored private var _versionIdentifiers: Persist<[VersionIdentifier]>
-    @ObservationIgnored private var _versionItems: Persist<OrderedDictionary<VersionIdentifier, VersionMetadata>>
+    @ObservationIgnored private var _versionItems: Persist<OrderedDictionary<VersionIdentifier, StoreHistorySupport.Metadata>>
     @ObservationIgnored private var indexFetchedAt: Persist<TimeInterval>
+    @ObservationIgnored private var catalogFetchedAt: Persist<TimeInterval>
 
     var versionIdentifiers: [VersionIdentifier] {
         get { access(keyPath: \.versionIdentifiers); return _versionIdentifiers.wrappedValue }
         set { withMutation(keyPath: \.versionIdentifiers) { _versionIdentifiers.wrappedValue = newValue } }
     }
-    var versionItems: OrderedDictionary<VersionIdentifier, VersionMetadata> {
+    var versionItems: OrderedDictionary<VersionIdentifier, StoreHistorySupport.Metadata> {
         get { access(keyPath: \.versionItems); return _versionItems.wrappedValue }
         set { withMutation(keyPath: \.versionItems) { _versionItems.wrappedValue = newValue } }
     }
@@ -36,6 +37,8 @@ class AppPackageArchive {
     var error: String?
     var shouldDismiss = false
     var isLoadingIndex = false
+    var isLoadingEarlierVersions = false
+    var canLoadEarlierVersions = true
     var loadingIDs: Set<String> = []
     var metadataErrors: [String: String] = [:]
     var loading: Bool { isLoadingIndex || !loadingIDs.isEmpty }
@@ -56,6 +59,7 @@ class AppPackageArchive {
         _versionItems = Persist(key: "\(key).versions", defaultValue: [:])
         _versionIdentifiers = Persist(key: "\(key).versionNumbers", defaultValue: [])
         indexFetchedAt = Persist(key: "\(key).versionIndexFetchedAt", defaultValue: 0)
+        catalogFetchedAt = Persist(key: "\(key).catalogHistoryFetchedAt", defaultValue: 0)
     }
 
     func package(for externalVersion: String) -> AppStore.AppPackage? {
@@ -66,12 +70,17 @@ class AppPackageArchive {
         return pkg
     }
 
+    private var fullIndexIsFresh: Bool {
+        indexFetchedAt.wrappedValue > 0 &&
+        (0..<900).contains(Date().timeIntervalSince1970 - indexFetchedAt.wrappedValue)
+    }
+
     func loadHistory(force: Bool = false) {
-        guard accountIdentifier != nil, !isLoadingIndex else { return }
+        guard !isLoadingIndex else { return }
         started = true
+        canLoadEarlierVersions = !fullIndexIsFresh
         if !force, !versionIdentifiers.isEmpty,
-           (0..<900).contains(Date().timeIntervalSince1970 - indexFetchedAt.wrappedValue) {
-            populateNextVersionItems()
+           (0..<900).contains(Date().timeIntervalSince1970 - catalogFetchedAt.wrappedValue) {
             return
         }
         cancelHistoryLoading()
@@ -82,48 +91,100 @@ class AppPackageArchive {
         isLoadingIndex = true
         let session = generation
         let requestedPackage = package
-        guard let accountIdentifier else { return }
+        let requestedRegion = region
+        let platform = package.entityType == .appleTV ? "appletv" : (package.entityType == .iPad ? "ipad" : "iphone")
         indexTask = Task {
-            defer {
-                if generation == session {
-                    isLoadingIndex = false
-                    indexTask = nil
-                    startPendingMetadata()
-                }
-            }
+            defer { finishIndex(session: session) }
             do {
-                let index = try await AppStore.this.withAccount(id: accountIdentifier) { account in
-                    try await StoreDownloadService.versionIndex(account: &account.account, package: requestedPackage)
-                }
+                let index = try await StoreCatalogHistoryService.history(appID: requestedPackage.software.id,
+                    bundleID: requestedPackage.software.bundleID, region: requestedRegion, platform: platform) {
+                        logger.info("\($0)")
+                    }
                 try Task.checkCancellation()
                 guard generation == session else { return }
-                let identifiers = StoreHistorySupport.uniqueIdentifiers(Array(index.identifiers.reversed()))
-                let valid = Set(identifiers)
                 var retained = versionItems
-                for key in Array(retained.keys) where !valid.contains(key) { retained.removeValue(forKey: key) }
-                for (key, value) in index.metadata where valid.contains(key) { retained[key] = value }
-                queued.removeAll { !valid.contains($0) }
+                for (key, value) in index.metadata { retained[key] = value; metadataErrors.removeValue(forKey: key) }
                 versionItems = retained
-                versionIdentifiers = identifiers
-                indexFetchedAt.wrappedValue = Date().timeIntervalSince1970
-                metadataErrors = [:]
-                populateNextVersionItems()
-            } catch is CancellationError {
-                // Keep cached rows and all completed metadata.
+                // Apple's public endpoint returns newest-first, with exact
+                // external IDs. Preserve older cached IDs after these rows.
+                versionIdentifiers = StoreHistorySupport.uniqueIdentifiers(index.identifiers + versionIdentifiers)
+                queued.removeAll { retained[$0] != nil }
+                catalogFetchedAt.wrappedValue = Date().timeIntervalSince1970
+                canLoadEarlierVersions = !fullIndexIsFresh
+                // Do not start authenticated requests just to display recent
+                // versions. Older versions are requested only on demand.
             } catch {
                 guard generation == session, !Task.isCancelled else { return }
-                requestsPaused = true
-                queued = []
-                if case ApplePackageError.licenseRequired = error { shouldDismiss = true }
-                self.error = error.localizedDescription
+                logger.info("Store history catalog unavailable; using account history")
+                do { try await fetchFullIndex(session: session) }
+                catch { handleIndexError(error, session: session) }
             }
         }
     }
 
+    func loadEarlierVersions() {
+        guard !isLoadingIndex else { return }
+        if fullIndexIsFresh { canLoadEarlierVersions = false; populateNextVersionItems(); return }
+        cancelHistoryLoading()
+        started = true
+        requestsPaused = false
+        error = nil
+        shouldDismiss = false
+        isLoadingIndex = true
+        isLoadingEarlierVersions = true
+        let session = generation
+        indexTask = Task {
+            defer { finishIndex(session: session) }
+            do { try await fetchFullIndex(session: session) }
+            catch { handleIndexError(error, session: session) }
+        }
+    }
+
+    private func finishIndex(session: UUID) {
+        guard generation == session else { return }
+        isLoadingIndex = false
+        isLoadingEarlierVersions = false
+        indexTask = nil
+        startPendingMetadata()
+    }
+
+    private func handleIndexError(_ error: Error, session: UUID) {
+        guard generation == session, !Task.isCancelled, !(error is CancellationError) else { return }
+        requestsPaused = true
+        queued = []
+        if case ApplePackageError.licenseRequired = error { shouldDismiss = true }
+        self.error = error.localizedDescription
+    }
+
+    private func fetchFullIndex(session: UUID) async throws {
+        guard let accountIdentifier else { throw AuthenticationError.accountNotFound }
+        isLoadingEarlierVersions = true
+        let requestedPackage = package
+        let index = try await AppStore.this.withAccount(id: accountIdentifier) { account in
+            try await StoreDownloadService.versionIndex(account: &account.account, package: requestedPackage)
+        }
+        try Task.checkCancellation()
+        guard generation == session else { return }
+        let complete = StoreHistorySupport.uniqueIdentifiers(Array(index.identifiers.reversed()))
+        let valid = Set(complete)
+        var retained = versionItems
+        for key in Array(retained.keys) where !valid.contains(key) { retained.removeValue(forKey: key) }
+        for (key, value) in index.metadata where valid.contains(key) && retained[key] == nil { retained[key] = value }
+        let recent = versionIdentifiers.filter { valid.contains($0) && retained[$0]?.releaseDate != nil }
+        versionItems = retained
+        versionIdentifiers = StoreHistorySupport.uniqueIdentifiers(recent + complete)
+        queued.removeAll { !valid.contains($0) }
+        indexFetchedAt.wrappedValue = Date().timeIntervalSince1970
+        canLoadEarlierVersions = false
+        metadataErrors = [:]
+        populateNextVersionItems()
+    }
+
     func populateNextVersionItems(count: Int = 8) {
         guard started, !requestsPaused else { return }
-        let missing = StoreHistorySupport.missingIdentifiers(versionIdentifiers, loaded: Set(versionItems.keys))
-            .filter { metadataErrors[$0] == nil && !loadingIDs.contains($0) && !queued.contains($0) }
+        let allMissing = StoreHistorySupport.missingIdentifiers(versionIdentifiers, loaded: Set(versionItems.keys))
+        if allMissing.isEmpty, canLoadEarlierVersions, !isLoadingIndex { loadEarlierVersions(); return }
+        let missing = allMissing.filter { metadataErrors[$0] == nil && !loadingIDs.contains($0) && !queued.contains($0) }
         enqueue(Array(missing.prefix(count)))
     }
 
@@ -131,6 +192,7 @@ class AppPackageArchive {
         guard started, versionIdentifiers.contains(versionID), versionItems[versionID] == nil else { return }
         if retry {
             metadataErrors.removeValue(forKey: versionID)
+            queued.removeAll { $0 == versionID }
             requestsPaused = false
         }
         guard metadataErrors[versionID] == nil, !requestsPaused else { return }
@@ -201,6 +263,7 @@ class AppPackageArchive {
         loadingIDs = []
         queued = []
         isLoadingIndex = false
+        isLoadingEarlierVersions = false
     }
 }
 
