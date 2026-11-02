@@ -25,7 +25,7 @@ final class KBSyncSmokeDelegate: NSObject, NSApplicationDelegate {
 struct KBSyncSmoke {
     @MainActor static func main() {
         let app = NSApplication.shared
-        app.setActivationPolicy(.prohibited)
+        app.setActivationPolicy(.accessory)
         let delegate = KBSyncSmokeDelegate()
         app.delegate = delegate
         withExtendedLifetime(delegate) { app.run() }

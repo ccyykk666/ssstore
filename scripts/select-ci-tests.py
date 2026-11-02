@@ -31,6 +31,7 @@ CHECK_INPUTS = {
         "scripts/prepare-kbsync.py",
         "scripts/kbsync-manifest.json",
         "scripts/kbsync-runtime.ts",
+        "scripts/kbsync-worker.ts",
         "scripts/kbsync-index.html",
         "scripts/check-kbsync.sh",
         "scripts/tests/KBSyncSmoke.swift",

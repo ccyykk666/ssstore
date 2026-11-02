@@ -55,15 +55,17 @@ jobs:
           path: build/DerivedData/SourcePackages
           key: xcode27-store-spm-${{ hashFiles('Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - uses: actions/cache@v4
+        id: kbsync-cache
         with:
           path: build/KBSyncCache
           key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
       - name: Prepare local kbsync runtime
         run: python3 scripts/prepare-kbsync.py
-      - name: Check local WebKit kbsync generation
-        if: steps.checks.outputs.kbsync == 'true'
-        timeout-minutes: 8
-        run: bash scripts/check-kbsync.sh
+      - uses: actions/cache/save@v4
+        if: steps.kbsync-cache.outputs.cache-hit != 'true'
+        with:
+          path: build/KBSyncCache
+          key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
       - name: Test UpdateCore
         if: steps.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore
@@ -73,6 +75,10 @@ jobs:
       - name: Check store localization
         if: steps.checks.outputs.localization == 'true'
         run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh localization
+      - name: Check local WebKit kbsync generation
+        if: steps.checks.outputs.kbsync == 'true'
+        timeout-minutes: 8
+        run: bash scripts/check-kbsync.sh
       - name: Build IPA
         run: bash scripts/build-ipa.sh
       - uses: actions/upload-artifact@v4

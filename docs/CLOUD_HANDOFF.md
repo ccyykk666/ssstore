@@ -6,7 +6,7 @@
 
 - 完整 trace EE9CF00C：volumeStore HTTP 200、songList=0、无业务错误；catalog 成功；带会话 Cookie 的 redownload 返回 HTTP 403、bytes=0。不能诊断为缺少应用授权，之前 Cookie/pod 修复未解决此问题。
 - 用户要求全程手机端并指出 AssppWeb 已可查旧版。固定 ccyykk666/AssppWeb dda77c915e9b61469ca7b4995c7515a6eb0e3115 的 TCI/WASM 解释器，不需要越狱。此前将 ipatool 越狱 CLI 限制当作整个功能的限制是过早判断。
-- 在隔离、无持久存储的本地 WKWebView 中运行 StoreAgent/kbsync。只有 GUID/DSID 进入解释器；密码、令牌、Cookie 和 Apple 下载请求仍由原生代码处理。不增加服务器、电脑步骤或外部网页。
+- 在隔离、无持久存储的本地 WKWebView 的独立 Blob Worker 中运行 StoreAgent/kbsync；WKWebView 以无交互视图置于现有界面后方并保持窗口关联，避免无窗口后台页被 WebKit 挂起。只有 GUID/DSID 进入解释器；密码、令牌、Cookie 和 Apple 下载请求仍由原生代码处理。不增加服务器、电脑步骤或外部网页。
 - 构建时验证固定上游 Git blob、公开 Apple 资源原始与切片 SHA-256；五个数据资源随 IPA 打包，解释器对应源码、补丁和许可随包提供。不将 macOS 私有框架原生链接到 iOS。
 - 补全 bag 的 volumeStoreDownloadProduct → ent/download，按 AssppWeb 使用 kbsync、X-Token、StoreFront 和 serialNumber。新接口不跟随重定向，保留并校验 app ID、Bundle ID、历史版本 ID。缓存 blob 的 HTTP 403 可重新生成一次；新 blob 失败和业务授权/令牌错误不会触发循环或购买。
 - 内存缓存按 DSID/GUID 隔离，解释器串行；原生截止 6 分钟，guest 单次调用最多 5 分钟。未广告新接口的 bag 仍使用旧流程。

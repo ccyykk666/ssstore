@@ -178,9 +178,13 @@ def main():
         "const config: Record<string, unknown> = { locateFile: (name: string) => name };")
     (upstream / "engine.ts").write_text(engine)
     shutil.copy(ROOT / "scripts/kbsync-runtime.ts", upstream / "ssstore.ts")
+    shutil.copy(ROOT / "scripts/kbsync-worker.ts", upstream / "ssstore-worker.ts")
     subprocess.run(["npx", "--yes", "esbuild@0.25.12", str(upstream / "ssstore.ts"), "--bundle",
                     "--format=iife", "--platform=browser", "--target=safari17", "--external:module",
                     "--outfile=" + str(RUNTIME / "runtime.js")], check=True)
+    subprocess.run(["npx", "--yes", "esbuild@0.25.12", str(upstream / "ssstore-worker.ts"), "--bundle",
+                    "--format=iife", "--platform=browser", "--target=safari17", "--external:module",
+                    "--outfile=" + str(RUNTIME / "worker.js")], check=True)
     shutil.copy(ROOT / "scripts/kbsync-index.html", RUNTIME / "index.html")
     shutil.copy(upstream / "vendor/unicorn.wasm", RUNTIME / "unicorn.wasm")
     for spec in MANIFEST["assets"]:

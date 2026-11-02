@@ -1,5 +1,10 @@
 import Foundation
 import WebKit
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 enum KBSyncPreparationError: LocalizedError {
     case unavailable, invalidIdentity, generation, timeout
@@ -20,6 +25,9 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     private var continuation: CheckedContinuation<String, Error>?
     private var deadline: Task<Void, Never>?
     private var identity: (guid: String, dsid: String)?
+    #if canImport(AppKit) && !canImport(UIKit)
+    private var hostWindow: NSWindow?
+    #endif
     private var started = false
     private var onEvent: ((String) -> Void)?
 
@@ -50,11 +58,31 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(BundledKBSyncResources(root: root), forURLScheme: "ssstore-kbsync")
         configuration.userContentController.add(self, name: "kbsync")
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
         view.navigationDelegate = self
         webView = view
+        attachToActiveWindow(view)
         armDeadline(seconds: 30)
         view.load(URLRequest(url: URL(string: "ssstore-kbsync://local/index.html")!))
+    }
+
+    private func attachToActiveWindow(_ view: WKWebView) {
+        #if canImport(UIKit)
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        let window = scene?.windows.first { $0.isKeyWindow }
+        view.alpha = 0.01
+        view.isUserInteractionEnabled = false
+        window?.insertSubview(view, at: 0)
+        #elseif canImport(AppKit)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 64, height: 64),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.alphaValue = 0.01
+        window.contentView = view
+        window.orderFrontRegardless()
+        hostWindow = window
+        #endif
     }
 
     private func armDeadline(seconds: Int) {
@@ -71,7 +99,7 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         started = true
         armDeadline(seconds: 360)
         onEvent?("Starting local interpreter adapter")
-        guard let arguments = try? JSONSerialization.data(withJSONObject: [identity.guid, identity.dsid]),
+        guard let arguments = try? JSONSerialization.data(withJSONObject: [identity.guid, identity.dsid, onEvent != nil] as [Any]),
               let json = String(data: arguments, encoding: .utf8) else {
             finish(.failure(KBSyncPreparationError.invalidIdentity)); return
         }
@@ -106,6 +134,7 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
             finish(.success(blob))
         default:
             onEvent?("Interpreter reported failure")
+            if let detail = body["message"] as? String { onEvent?(detail) }
             finish(.failure(KBSyncPreparationError.generation))
         }
     }
@@ -141,7 +170,13 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
         deadline?.cancel()
         deadline = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: "kbsync")
+        webView?.evaluateJavaScript("window.ssstoreCancel?.()")
         webView?.stopLoading()
+        webView?.removeFromSuperview()
+        #if canImport(AppKit) && !canImport(UIKit)
+        hostWindow?.close()
+        hostWindow = nil
+        #endif
         webView?.navigationDelegate = nil
         webView = nil
         identity = nil
@@ -151,7 +186,7 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
 
 private final class BundledKBSyncResources: NSObject, WKURLSchemeHandler {
     private let root: URL
-    private let names: Set<String> = ["index.html", "runtime.js", "unicorn.wasm", "CommerceKit", "CommerceCore", "CoreFP", "CoreFP.icxs", "storeagent"]
+    private let names: Set<String> = ["index.html", "runtime.js", "worker.js", "unicorn.wasm", "CommerceKit", "CommerceCore", "CoreFP", "CoreFP.icxs", "storeagent"]
 
     init(root: URL) { self.root = root }
 
