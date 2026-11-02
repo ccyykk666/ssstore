@@ -25,6 +25,7 @@ struct AppDetailView: View {
                             field("原始版本", original)
                         }
                         field("构建号", record.installed.build ?? "未提供")
+                        field("构建 SDK", record.installed.buildSDKDescription ?? "未提供")
                         field("Bundle ID", record.id)
                     }
                     Section {
@@ -82,3 +83,4 @@ struct AppDetailView: View {
         }.padding(.vertical, 2)
     }
 }
+

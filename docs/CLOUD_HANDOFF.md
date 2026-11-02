@@ -2,6 +2,15 @@
 
 更新日期：2026-11-02（北京时间）。先读取本文、实际源码和工作流；不要重复执行已完成的请求或重复触发构建。
 
+## 0.5.11（24）搜索交互与构建元数据
+
+- 首页与历史页选项符号改为 ellipsis，保留系统工具栏玻璃外观；历史加载更多改为 list.bullet.below.rectangle，加载状态改为“正在加载历史版本...”。
+- 搜索标题仅“搜索”，地球右侧以显式 HStack 显示国家代码，避免工具栏 Label 自动只保留图标。
+- 新增 SearchTabInteraction：使用公开 UIKit tab delegate 观察再次选中最右搜索 tab，转发 SwiftUI 原 delegate 的选择及其他可选方法。请求返回搜索根页面并聚焦，再于当前 tab 的可见 UISearchBar/UISearchTextField 全选文字；有限等待且切页/弹窗/销毁时停止，不更换原生 TabView。iOS 18+ 绑定 searchFocused，iOS 17 使用同一 UIKit 输入框聚焦。
+- 应用介绍“更多／收起”双向切换，按钮独占尾行，避免覆盖描述；空描述不显示。
+- 应用详情构建号下新增“构建 SDK”。InstallationProxy 初始清单和 Browse 请求/保留 DTXcode、DTXcodeBuild、DTSDKName，经 InventoryParser 写入可选 Codable 字段；DTXcode 1640→Xcode 16.4、1531→15.3.1，显示真实 SDK 名称。系统未返回则“未提供”，不把 ssstore 自身 Xcode/最低系统/应用构建号当作目标应用编译器。已有清单需刷新应用获取新增元数据。
+- 新增核心回归覆盖元数据转换、数字 DTXcode、缺失/无效值、仅 SDK、旧缓存兼容及 Codable 往返。仅相关核心检查加整应用 Xcode 构建；下载协议和 kbsync 未改，不重复其测试。构建成功直接交付 IPA，不额外核验安装包。
+
 ## 0.5.10（23）官方批量历史接口与日期来源修复
 
 - 上一版 0.5.9（22）提交 9ccf55a2256f788cbc46219601566ea7496e7bb2，Actions 41379544865 构建与相关回归通过并交付；用户实测腾讯视频多个版本均显示“14 年前”，加载仍慢。
@@ -211,4 +220,5 @@
 - 文件只读，单文件 32 MiB、64 KiB 分块；CoreDevice 仅列目录，导出通过 AFC。原生 inspector 无安装、卸载、设备写入/删除、恢复、连续日志、抓包或性能流执行入口；商店模块可在用户操作下通过 Asspp OTA 安装。
 - 固定 C FFI 无 `get_icon_state`，不能宣称完整桌面布局。描述文件解析不代表证书信任验证；动态占用不是可清理缓存；能力声明不是隐私授权。
 - 不提交配对文件、PIN、证书私钥等秘密；不假定可访问用户手机或旧环境本地文件。
+
 

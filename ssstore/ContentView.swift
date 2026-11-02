@@ -101,7 +101,7 @@ struct ContentView: View {
                         }
                         .menuActionDismissBehavior(.disabled)
                         .accessibilityAddTraits(includeSystem ? [.isSelected] : [])
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    } label: { Image(systemName: "ellipsis") }
                 }
             }
             .onChange(of: failureCount) { _, count in if count == 0 { onlyFailed = false } }
@@ -151,5 +151,6 @@ private struct AppRow: View {
         return release.version
     }
 }
+
 
 

@@ -33,6 +33,9 @@ public enum InventoryParser {
             unique[id]?.metadataVersion = text(row, ["MetadataVersion"]) ?? text(metadata, ["bundleShortVersionString"])
             unique[id]?.metadataBuild = text(row, ["MetadataBuild"]) ?? text(metadata, ["bundleVersion"])
             unique[id]?.versionReadNote = text(row, ["VersionReadNote"])
+            unique[id]?.buildXcode = text(row, ["buildXcode", "DTXcode"]) ?? identifier(row["DTXcode"])
+            unique[id]?.buildXcodeBuild = text(row, ["buildXcodeBuild", "DTXcodeBuild"])
+            unique[id]?.buildSDKName = text(row, ["buildSDKName", "DTSDKName"])
         }
         guard !unique.isEmpty else { throw InventoryError.empty }
         return unique.values.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -61,3 +64,4 @@ public enum InventoryError: LocalizedError {
         }
     }
 }
+

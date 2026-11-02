@@ -16,7 +16,7 @@ struct ProductHistoryView: View {
     var body: some View {
         Form {
             if vm.isLoadingIndex {
-                HStack { ProgressView(); Text(vm.isLoadingEarlierVersions ? "正在加载更早版本…" : "正在加载版本…").foregroundStyle(.secondary) }
+                HStack { ProgressView(); Text(vm.isLoadingEarlierVersions ? "正在加载历史版本..." : "正在加载版本…").foregroundStyle(.secondary) }
             }
             ForEach(vm.versionIdentifiers, id: \.self) { key in
                 historyRow(key)
@@ -31,14 +31,14 @@ struct ProductHistoryView: View {
             ToolbarItem(placement: toolbarPlacement) {
                 Menu {
                     Button { vm.populateNextVersionItems() } label: {
-                        Label("Load More", systemImage: "arrow.down.circle")
+                        Label("Load More", systemImage: "list.bullet.below.rectangle")
                     }
                     .disabled((vm.isVersionItemsFullyLoaded && !vm.canLoadEarlierVersions) || vm.isLoadingIndex)
                     Button { vm.loadHistory(force: true) } label: {
                         Label("Refresh", systemImage: "arrow.clockwise.circle")
                     }
                     .disabled(vm.isLoadingIndex)
-                } label: { Image(systemName: "ellipsis.circle") }
+                } label: { Image(systemName: "ellipsis") }
             }
         }
         .alert("Oops", isPresented: $showErrorAlert) {
@@ -103,3 +103,4 @@ struct ProductHistoryView: View {
         #endif
     }
 }
+

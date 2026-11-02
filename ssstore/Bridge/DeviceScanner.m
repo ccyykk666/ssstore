@@ -29,6 +29,17 @@ static NSDictionary *ReadPlist(plist_t node) {
     return [value isKindOfClass:NSDictionary.class] ? value : nil;
 }
 
+// These are build metadata of the inspected application, not this app's SDK.
+static void MergeBuildMetadata(NSMutableDictionary *item, NSDictionary *row) {
+    for (NSString *key in @[@"DTXcode", @"DTXcodeBuild", @"DTSDKName"]) {
+        id value = row[key];
+        if ([value isKindOfClass:NSString.class] && [value length]) item[key] = value;
+        else if ([value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()) {
+            item[key] = [value stringValue];
+        }
+    }
+}
+
 static void MergeStoreMetadata(NSMutableDictionary *item, NSDictionary *row) {
     id metadata = row[@"iTunesMetadata"];
     if ([metadata isKindOfClass:NSData.class]) {
@@ -138,6 +149,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
             if (![item[@"CFBundleIdentifier"] length] || [ignored containsObject:item[@"CFBundleIdentifier"]]) continue;
             item[@"LocalIconKey"] = IconKey(item);
             MergeStoreMetadata(item, row);
+            MergeBuildMetadata(item, row);
             [apps addObject:item];
         }
         NSData *result = [NSJSONSerialization dataWithJSONObject:apps options:0 error:error];
@@ -152,7 +164,8 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         plist_dict_set_item(browseOptions, "ApplicationType", plist_new_string("Any"));
         plist_t attributes = plist_new_array();
         for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleShortVersionString", @"CFBundleVersion",
-                                @"iTunesMetadata", @"ExternalVersionIdentifier", @"StoreItemIdentifier"]) {
+                                @"iTunesMetadata", @"ExternalVersionIdentifier", @"StoreItemIdentifier",
+                                @"DTXcode", @"DTXcodeBuild", @"DTSDKName"]) {
             plist_array_append_item(attributes, plist_new_string(key.UTF8String));
         }
         plist_dict_set_item(browseOptions, "ReturnAttributes", attributes);
@@ -165,6 +178,7 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
                 if ([row[@"CFBundleShortVersionString"] isKindOfClass:NSString.class]) item[@"BrowseVersion"] = row[@"CFBundleShortVersionString"];
                 if ([row[@"CFBundleVersion"] isKindOfClass:NSString.class]) item[@"BrowseBuild"] = row[@"CFBundleVersion"];
                 MergeStoreMetadata(item, row);
+                MergeBuildMetadata(item, row);
             }
             [versionNotes addObject:@"已读取 InstallationProxy Lookup / Browse"];
         } else {
@@ -251,4 +265,5 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
     }
 }
 @end
+
 

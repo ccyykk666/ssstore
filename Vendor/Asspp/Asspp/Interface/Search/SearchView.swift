@@ -51,6 +51,13 @@ struct SearchView: View {
     }
 
     var body: some View {
+        navigationContent
+            .onChange(of: searchFocus.pending) { _, pending in
+                if pending { consumePendingFocus() }
+            }
+    }
+
+    private var navigationContent: some View {
         #if os(iOS)
             NavigationStack(path: $navigationPath) {
                 if #available(iOS 26.0, *) {
@@ -106,7 +113,11 @@ struct SearchView: View {
                     .pickerStyle(.inline)
             }
         } label: {
-            Label(searchRegion, systemImage: "globe")
+            HStack(spacing: 6) {
+                Image(systemName: "globe")
+                Text(searchRegion.uppercased()).fixedSize()
+            }
+            .accessibilityLabel("商店地区：\(StoreRegionNames.name(searchRegion))")
         }
         .onChange(of: searchRegion) { _, _ in
             searchResult = []
@@ -162,11 +173,6 @@ struct SearchView: View {
         }
         .animation(.spring, value: searchResult)
         .onAppear { consumePendingFocus() }
-        .onChange(of: searchFocus.pending) { _, isPending in
-            if isPending {
-                consumePendingFocus()
-            }
-        }
     }
 
     /// Focuses the search field if a focus request is pending (e.g. after the
@@ -176,6 +182,7 @@ struct SearchView: View {
         searchFocus.pending = false
         // Defer so the search field exists when focus is assigned, whether the
         // view was already visible or is appearing for the first time.
+        navigationPath = NavigationPath()
         DispatchQueue.main.async { searchKeyFocused = true }
     }
 
@@ -238,11 +245,9 @@ extension SearchView {
     var legacyContent: some View {
         content
             .searchable(text: $searchKey, prompt: "Keyword") {}
-        #if os(macOS)
-            .searchFocused($searchKeyFocused)
-        #endif
+            .bindSearchFocus($searchKeyFocused)
             .onSubmit(of: .search) { search() }
-            .navigationTitle("Search - \(searchRegion.uppercased())")
+            .navigationTitle("Search")
             .toolbar { tools }
     }
 }
@@ -255,9 +260,10 @@ extension SearchView {
         var modernContent: some View {
             content
                 .searchable(text: $searchKey, placement: searchablePlacement, prompt: "Keyword")
+                .searchFocused($searchKeyFocused)
                 .onSubmit(of: .search) { search() }
                 .toolbarVisibility(navigationBarVisibility, for: .navigationBar)
-                .navigationTitle(Text("Search - \(searchRegion.uppercased())"))
+                .navigationTitle("Search")
                 .toolbar {
                     if navigationBarVisibility != .hidden {
                         tools
@@ -331,3 +337,19 @@ extension ApplePackage.EntityType {
 }
 
 
+
+
+private extension View {
+    @ViewBuilder
+    func bindSearchFocus(_ focus: FocusState<Bool>.Binding) -> some View {
+        #if os(iOS)
+        if #available(iOS 18.0, *) {
+            searchFocused(focus)
+        } else {
+            self // The app's UIKit search bridge handles iOS 17 focus.
+        }
+        #else
+        searchFocused(focus)
+        #endif
+    }
+}

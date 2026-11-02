@@ -17,6 +17,26 @@ public struct InstalledApp: Codable, Identifiable, Equatable, Sendable {
     public var metadataVersion: String?
     public var metadataBuild: String?
     public var versionReadNote: String?
+    public var buildXcode: String?
+    public var buildXcodeBuild: String?
+    public var buildSDKName: String?
+
+    /// DTXcode encodes major * 100 + minor * 10 + patch (e.g. 1640).
+    /// Do not infer Xcode from the deployment target, app version or host SDK.
+    public var buildSDKDescription: String? {
+        var parts: [String] = []
+        if let raw = buildXcode, (3...5).contains(raw.count),
+           raw.utf8.allSatisfy({ (48...57).contains($0) }), let value = Int(raw), value >= 100 {
+            let version = "\(value / 100).\((value / 10) % 10)" + (value % 10 == 0 ? "" : ".\(value % 10)")
+            var label = "Xcode " + version
+            if let buildXcodeBuild, !buildXcodeBuild.isEmpty { label += " (" + buildXcodeBuild + ")" }
+            parts.append(label)
+        } else if let buildXcodeBuild, !buildXcodeBuild.isEmpty {
+            parts.append("Xcode 构建 " + buildXcodeBuild)
+        }
+        if let buildSDKName, !buildSDKName.isEmpty { parts.append(buildSDKName) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     public init(bundleID: String, name: String, version: String?, build: String? = nil, isSystem: Bool = false,
                 localIconKey: String? = nil, storeID: String? = nil, externalVersionID: String? = nil) {
@@ -160,3 +180,4 @@ public enum VersionOrder {
         return parts.map { let digits = $0.drop(while: { $0 == "0" }); return digits.isEmpty ? "0" : String(digits) }
     }
 }
+

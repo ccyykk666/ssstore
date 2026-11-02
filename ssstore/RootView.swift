@@ -9,6 +9,7 @@ struct RootView: View {
             AccountView().tabItem { Label("账户", systemImage: "person.crop.circle") }
             SearchView().tabItem { Label("搜索", systemImage: "magnifyingglass") }
         }
+        .background(SearchTabInteraction())
         .neverMinimizeTab()
         .sheet(item: $model.filePresentation) { item in
             switch item.kind {
@@ -18,3 +19,4 @@ struct RootView: View {
         }
     }
 }
+
