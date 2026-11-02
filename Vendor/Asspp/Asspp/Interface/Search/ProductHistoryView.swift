@@ -15,109 +15,78 @@ struct ProductHistoryView: View {
 
     var body: some View {
         Form {
+            if vm.isLoadingIndex {
+                HStack { ProgressView(); Text("正在加载版本…").foregroundStyle(.secondary) }
+            }
             ForEach(vm.versionIdentifiers, id: \.self) { key in
-                if let aid = vm.accountIdentifier, let pkg = vm.package(for: key) {
-                    Menu {
-                        Button("Download \(pkg.software.version)") {
-                            Task {
-                                do {
-                                    try await Downloads.this.startDownload(for: pkg, accountID: aid)
-                                } catch {
-                                    vm.error = error.localizedDescription
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text(pkg.software.version)
-                                .foregroundStyle(Color.accentColor)
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                    }
-                } else {
-                    Button {
-                        vm.populateVersionItem(for: key)
-                    } label: {
-                        HStack {
-                            Text(key).foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
-                    }
-                }
+                historyRow(key)
             }
         }
         .formStyle(.grouped)
-        .overlay {
-            ZStack {
-                Rectangle()
-                    .foregroundStyle(.clear)
-                    .background(.ultraThinMaterial)
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .smallControlSizeOnMac()
-            }
-            .opacity(vm.loading ? 1 : 0)
-            .animation(.default, value: vm.loading)
-            .ignoresSafeArea(edges: [.vertical])
-        }
-        .animation(.default, value: vm.versionIdentifiers)
-        .animation(.default, value: vm.versionItems)
-        .animation(.default, value: vm.loading)
         .navigationTitle("Version History")
         .toolbar {
             ToolbarItem(placement: toolbarPlacement) {
                 Menu {
-                    Button {
-                        vm.populateNextVersionItems()
-                    } label: {
+                    Button { vm.populateNextVersionItems() } label: {
                         Label("Load More", systemImage: "arrow.down.circle")
                     }
-                    .disabled(vm.isVersionItemsFullyLoaded)
-                    Divider()
-                    Button(role: .destructive) {
-                        vm.clearVersionItems()
-                        vm.populateVersionIdentifiers {
-                            await MainActor.run { vm.populateNextVersionItems() }
-                        }
-                    } label: {
+                    .disabled(vm.isVersionItemsFullyLoaded || vm.isLoadingIndex)
+                    Button { vm.loadHistory(force: true) } label: {
                         Label("Refresh", systemImage: "arrow.clockwise.circle")
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .disabled(vm.loading) // just make sure
-                .opacity(vm.loading ? 0 : 1)
-                .overlay { // using overlay to maintain same size while loading
-                    if vm.loading {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                        #if os(macOS)
-                            .controlSize(.small)
-                        #endif
-                    }
-                }
+                    .disabled(vm.isLoadingIndex)
+                } label: { Image(systemName: "ellipsis.circle") }
             }
         }
         .alert("Oops", isPresented: $showErrorAlert) {
             Button("OK") {
                 vm.error = nil
-                if vm.shouldDismiss {
-                    dismiss()
+                if vm.shouldDismiss { dismiss() }
+            }
+        } message: { Text(vm.error ?? String(localized: "Unknown Error")) }
+        .onChange(of: vm.error) { _, value in showErrorAlert = value != nil }
+        .onAppear { vm.loadHistory() }
+        .onDisappear { vm.cancelHistoryLoading() }
+    }
+
+    @ViewBuilder private func historyRow(_ key: String) -> some View {
+        if let accountID = vm.accountIdentifier, let package = vm.package(for: key),
+           let details = vm.versionItems[key] {
+            Menu {
+                Button("Download \(package.software.version)") {
+                    Task {
+                        do { try await Downloads.this.startDownload(for: package, accountID: accountID) }
+                        catch { vm.error = error.localizedDescription }
+                    }
                 }
+            } label: {
+                HStack {
+                    Text(package.software.version).foregroundStyle(Color.accentColor)
+                    Spacer()
+                    Text(details.releaseDate.formatted(.relative(presentation: .numeric)))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-        } message: {
-            Text(vm.error ?? String(localized: "Unknown Error"))
-        }
-        .onChange(of: vm.error) { _, newValue in
-            showErrorAlert = newValue != nil
-        }
-        .onAppear {
-            guard vm.versionItems.isEmpty else { return }
-            vm.populateVersionIdentifiers {
-                await MainActor.run { vm.populateNextVersionItems() }
+        } else {
+            Button { vm.populateVersionItem(for: key, retry: true) } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(key).foregroundStyle(.secondary)
+                        if let error = vm.metadataErrors[key] {
+                            Text(error).font(.caption).foregroundStyle(.orange).lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    if vm.loadingIDs.contains(key) { ProgressView() }
+                    else if vm.metadataErrors[key] != nil {
+                        Image(systemName: "arrow.clockwise").foregroundStyle(Color.accentColor)
+                    }
+                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .onAppear { vm.populateVersionItem(for: key) }
         }
     }
 
@@ -129,4 +98,3 @@ struct ProductHistoryView: View {
         #endif
     }
 }
-

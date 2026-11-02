@@ -25,6 +25,8 @@ class SelectionTests(unittest.TestCase):
             "Packages/UpdateCore/Package.swift": {"core"},
             "Packages/UpdateCore/Tests/UpdateCoreTests/CatalogTests.swift": {"core"},
             selection.STORE + "Asspp/Backend/AppStore/StoreProtocol.swift": {"downloads"},
+            selection.STORE + "Asspp/Backend/AppStore/StoreHistorySupport.swift": {"downloads"},
+            selection.STORE + "Resources/Tests/HistorySupportChecks.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreDownloadProtocol.swift": {"downloads", "localization"},
             selection.STORE + "Asspp/App/Localizable.xcstrings": {"localization"},
             selection.STORE + "Resources/Scripts/check.downloads.sh": {"downloads", "localization"},

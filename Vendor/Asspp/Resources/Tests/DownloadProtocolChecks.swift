@@ -3,6 +3,7 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        try await HistorySupportChecks.run()
         let ent = "https://downloaddispatch.itunes.apple.com" + StoreDownloadProtocol.entPath
         for bag in [["volumeStoreDownloadProduct": ent], ["urlBag": ["volumeStoreDownloadProduct": ent]],
                     ["urlBag": ["loc-volumeStoreDownloadProduct": ent]]] as [[String: Any]] {

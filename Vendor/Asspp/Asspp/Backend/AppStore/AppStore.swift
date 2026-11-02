@@ -132,6 +132,34 @@ class AppStore {
         }
         return result
     }
+
+    /// Historical metadata is read concurrently from account snapshots. Commit
+    /// only cookie deltas, and never write stale credentials over a rotated login.
+    nonisolated func historyMetadata(accountID: String, package: AppPackage, versionID: String) async throws -> VersionMetadata {
+        guard let original = await accounts.first(where: { $0.id == accountID }) else {
+            throw AuthenticationError.accountNotFound
+        }
+        let guid = Configuration.deviceIdentifier
+        var snapshot = original.account
+        let metadata = try await StoreDownloadService.versionMetadata(account: &snapshot, package: package, versionID: versionID)
+        try Task.checkCancellation()
+        let cookies = snapshot.cookie
+        await MainActor.run {
+            guard Configuration.deviceIdentifier == guid,
+                  let index = accounts.firstIndex(where: { $0.id == accountID }),
+                  accounts[index].account.directoryServicesIdentifier == original.account.directoryServicesIdentifier,
+                  accounts[index].account.passwordToken == original.account.passwordToken,
+                  accounts[index].account.store == original.account.store
+            else { return }
+            let merged = StoreHistorySupport.mergingChanges(current: accounts[index].account.cookie,
+                original: original.account.cookie, updated: cookies) {
+                    [$0.name, $0.path, StoreProtocol.storeCookieDomain($0.domain) ?? ""]
+                }
+            if merged != accounts[index].account.cookie { accounts[index].account.cookie = merged }
+        }
+        return metadata
+    }
+
 }
 
 

@@ -21,26 +21,50 @@ enum StoreDownloadService {
         }
     }
 
+    struct VersionIndex: Sendable {
+        let identifiers: [String]
+        let metadata: [String: VersionMetadata]
+    }
+
     static func versions(account: inout Account, package: AppStore.AppPackage) async throws -> [String] {
+        try await versionIndex(account: &account, package: package).identifiers
+    }
+
+    static func versionIndex(account: inout Account, package: AppStore.AppPackage) async throws -> VersionIndex {
         try await product(account: &account, package: package, version: nil, operation: "versions") { item in
-            guard let metadata = item["metadata"] as? [String: Any],
-                  let identifiers = metadata["softwareVersionExternalIdentifiers"] as? [Any]
-            else { throw StoreDownloadError.noVersions }
-            let versions = identifiers.map { StoreProtocol.string($0) }.filter { !$0.isEmpty }
-            guard !versions.isEmpty else { throw StoreDownloadError.noVersions }
-            return versions
+            let index = try StoreHistorySupport.index(item)
+            let known = index.metadata.mapValues {
+                VersionMetadata(displayVersion: $0.version, releaseDate: $0.releaseDate)
+            }
+            return VersionIndex(identifiers: index.identifiers, metadata: known)
         }
     }
 
     static func versionMetadata(account: inout Account, package: AppStore.AppPackage, versionID: String) async throws -> VersionMetadata {
         try await product(account: &account, package: package, version: versionID, operation: "version-metadata") { item in
-            guard let metadata = item["metadata"] as? [String: Any],
-                  let version = metadata["bundleShortVersionString"] as? String,
-                  let dateString = metadata["releaseDate"] as? String,
-                  let releaseDate = ISO8601DateFormatter().date(from: dateString)
-            else { throw StoreDownloadError.invalidPackage }
-            return VersionMetadata(displayVersion: version, releaseDate: releaseDate)
+            guard let metadata = item["metadata"] as? [String: Any] else { throw StoreDownloadError.invalidPackage }
+            let details = try StoreHistorySupport.details(metadata)
+            return VersionMetadata(displayVersion: details.version, releaseDate: details.releaseDate)
         }
+    }
+
+    // Explicit per-request cookies/tokens remain isolated. Sharing the ephemeral
+    // session reuses TLS/HTTP connections without automatic cookies or storage.
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        configuration.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
+    }()
+    private static let bagCache = StoreBagCache()
+
+    private static func elapsed(_ start: UInt64) -> UInt64 {
+        (DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
     }
 
     private static func product<Result>(account: inout Account, package: AppStore.AppPackage, version: String?, operation: String, parse: ([String: Any]) throws -> Result) async throws -> Result {
@@ -49,15 +73,9 @@ enum StoreDownloadService {
         let version = version.flatMap { $0.isEmpty ? nil : $0 }
         let platform = package.entityType ?? .iPhone
         logger.info("Store download [\(trace)]: operation=\(operation) app=\(app.id) platform=\(platform.rawValue) store=\(account.store) version=\(version ?? "latest")")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.urlCredentialStorage = nil
-        configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 60
-        let session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
+        let started = DispatchTime.now().uptimeNanoseconds
+        defer { logger.info("Store download [\(trace)]: operation=\(operation) elapsedMs=\(elapsed(started))") }
+        let session = Self.session
         do {
             let region = Configuration.countryCode(for: account.store)
             var effectiveVersion = version
@@ -90,7 +108,9 @@ enum StoreDownloadService {
                 logger.info("Store download [\(trace)]: preferred=ent/download kbsyncCached=\(cached != nil)")
                 response = try await StoreDownloadProtocol.preferredDownload(cached: cached) {
                     logger.info("Store download [\(trace)]: local kbsync generation started")
+                    let generationStart = DispatchTime.now().uptimeNanoseconds
                     let blob = try await KBSyncStore.shared.generate(guid: guid, dsid: dsid)
+                    logger.info("Store download [\(trace)]: kbsync elapsedMs=\(elapsed(generationStart))")
                     logger.info("Store download [\(trace)]: local kbsync generation ready")
                     return blob
                 } invalidate: { blob in
@@ -117,6 +137,7 @@ enum StoreDownloadService {
                 throw ApplePackageError.licenseRequired
             }
             let item = try StoreDownloadProtocol.packageItem(response, bundleID: app.bundleID, version: effectiveVersion)
+            try Task.checkCancellation()
             let result = try parse(item)
             logger.info("Store download [\(trace)]: product metadata ready")
             return result
@@ -130,6 +151,14 @@ enum StoreDownloadService {
 
 
     private static func preferredEndpoint(session: URLSession, guid: String, trace: String) async throws -> URL? {
+        let started = DispatchTime.now().uptimeNanoseconds
+        defer { logger.info("Store download [\(trace)]: bag lookup elapsedMs=\(elapsed(started))") }
+        return try await bagCache.endpoint(for: guid) {
+            try await fetchPreferredEndpoint(session: session, guid: guid, trace: trace)
+        }
+    }
+
+    private static func fetchPreferredEndpoint(session: URLSession, guid: String, trace: String) async throws -> URL? {
         var url = URLComponents(string: "https://init.itunes.apple.com/bag.xml")!
         url.queryItems = [URLQueryItem(name: "guid", value: guid)]
         var request = URLRequest(url: url.url!)
@@ -153,6 +182,8 @@ enum StoreDownloadService {
         }
         request.setValue(StoreProtocol.cookieHeader(cookies, for: request.url!), forHTTPHeaderField: "Cookie")
         logger.info("Store download [\(trace)]: endpoint=ent/download request ready")
+        let started = DispatchTime.now().uptimeNanoseconds
+        defer { logger.info("Store download [\(trace)]: ent/download elapsedMs=\(elapsed(started))") }
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw StoreDownloadError.response(0) }
         mergeCookies(response: response, url: request.url!, account: &account)
@@ -172,6 +203,8 @@ enum StoreDownloadService {
     }
 
     private static func catalogVersion(session: URLSession, appID: Int64, region: String, platform: EntityType, trace: String) async throws -> StoreDownloadProtocol.CatalogVersion {
+        let started = DispatchTime.now().uptimeNanoseconds
+        defer { logger.info("Store download [\(trace)]: catalog elapsedMs=\(elapsed(started))") }
         var url = URLComponents(string: "https://uclient-api.itunes.apple.com/WebObjects/MZStorePlatform.woa/wa/lookup")!
         url.queryItems = [
             URLQueryItem(name: "version", value: "2"), URLQueryItem(name: "id", value: String(appID)),
