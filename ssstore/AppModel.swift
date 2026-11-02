@@ -10,7 +10,7 @@ final class AppModel: ObservableObject {
     @Published var activity = ""
     @Published var isChecking = false
     @Published private(set) var isRefreshingApps = false
-    @Published private(set) var processedApplicationIDs: Set<String> = []
+    @Published private(set) var matchProgress: ApplicationMatchProgress?
     @Published var message: String?
     @Published var filePresentation: FilePresentation?
     @Published var scannedAt: Date?
@@ -25,6 +25,8 @@ final class AppModel: ObservableObject {
     @Published var host: String { didSet { UserDefaults.standard.set(host, forKey: "host") } }
     @Published var port: String { didSet { UserDefaults.standard.set(port, forKey: "port") } }
     private var checkTask: Task<Void, Never>?
+    private var revealTask: Task<Void, Never>?
+    private var revealTaskID: UUID?
     private var nextLookupAt = Date.distantPast
     private let storage: URL
     let iconsDirectory: URL
@@ -131,11 +133,12 @@ final class AppModel: ObservableObject {
     func refreshApps() async {
         guard !busy, !isRefreshingApps else { return }
         isRefreshingApps = true
-        processedApplicationIDs = []
-        defer { isRefreshingApps = false; processedApplicationIDs = [] }
+        stopRevealingMatches()
+        matchProgress = ApplicationMatchProgress(scope: country)
+        defer { isRefreshingApps = false }
         guard await scan() else { return }
         // System apps are read with the inventory and have no store lookup.
-        processedApplicationIDs = Set(records.filter { $0.installed.isSystem }.map(\.id))
+        recordMatches(records.filter { $0.installed.isSystem }, scope: country)
         checkUpdates(force: true)
         await checkTask?.value
     }
@@ -349,7 +352,7 @@ final class AppModel: ObservableObject {
         }
         busy = true
         isChecking = true
-        processedApplicationIDs.formUnion(cachedIDs)
+        recordMatches(cached, scope: region)
         queryWarning = ""
         checkTask = Task {
             var failures = 0
@@ -370,6 +373,7 @@ final class AppModel: ObservableObject {
                 nextLookupAt = Date().addingTimeInterval(3.2)
                 do {
                     let batch = try await AppleLookup.fetchForScope(bundleIDs: bundles, scope: region, knownStoreIDs: knownStoreIDs)
+                    if Task.isCancelled { break }
                     warning = batch.catalogWarning ?? warning
                     for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
                         let release = batch.releases[records[index].effectiveBundleID]
@@ -377,7 +381,7 @@ final class AppModel: ObservableObject {
                         if let release { records[index].release = release }
                         records[index].error = release == nil ? (batch.errors[records[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
                         records[index].checkedAt = Date()
-                        processedApplicationIDs.insert(records[index].id)
+                        recordMatches([records[index]], scope: region)
                         if release == nil { failures += 1 }
                     }
                     persist()
@@ -391,7 +395,7 @@ final class AppModel: ObservableObject {
                     for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
                         records[index].error = error.localizedDescription
                         records[index].checkedAt = Date()
-                        processedApplicationIDs.insert(records[index].id)
+                        recordMatches([records[index]], scope: region)
                         failures += 1
                     }
                     // A rate-limit response should end the batch instead of hammering the service.
@@ -404,7 +408,46 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func cancelCheck() { checkTask?.cancel() }
+    private func recordMatches(_ records: [AppRecord], scope: String) {
+        guard var progress = matchProgress, progress.scope == scope else { return }
+        for record in records { progress.complete(record) }
+        matchProgress = progress
+        revealMatches()
+    }
+
+    private func stopRevealingMatches() {
+        revealTask?.cancel()
+        revealTask = nil
+        revealTaskID = nil
+    }
+
+    private func revealMatches() {
+        guard revealTask == nil, let progress = matchProgress, progress.hasUnrevealed else { return }
+        let session = progress.id
+        let taskID = UUID()
+        revealTaskID = taskID
+        revealTask = Task {
+            defer {
+                if revealTaskID == taskID { revealTask = nil; revealTaskID = nil }
+            }
+            while !Task.isCancelled {
+                guard let progress = matchProgress, progress.id == session, progress.hasUnrevealed else { return }
+                do { try await Task.sleep(for: .milliseconds(24)) } catch { return }
+                guard !Task.isCancelled, revealTaskID == taskID,
+                      var next = matchProgress, next.id == session else { return }
+                next.revealNext(hidingSystemApps: !UserDefaults.standard.bool(forKey: "includeSystemApps"))
+                // One transaction publishes one prefix: application count, update
+                // count, pending count, failures, and row badges change together.
+                withAnimation(.linear(duration: 0.024)) { matchProgress = next }
+            }
+        }
+    }
+
+    func cancelCheck() {
+        checkTask?.cancel()
+        stopRevealingMatches()
+    }
+
 
     private func persist() {
         do {

@@ -12,16 +12,23 @@ struct ContentView: View {
     private var listedRecords: [AppRecord] {
         model.records.filter { includeSystem || !$0.installed.isSystem }
     }
-    private var failureCount: Int { listedRecords.filter { $0.error != nil }.count }
-    private var updateCount: Int { listedRecords.filter { $0.status(country: model.country) == .different }.count }
-    private var applicationCount: Int {
-        model.isRefreshingApps ? listedRecords.filter { model.processedApplicationIDs.contains($0.id) }.count : listedRecords.count
+    private var progress: ApplicationMatchProgress? {
+        guard let progress = model.matchProgress, progress.scope == model.country else { return nil }
+        return progress
     }
+    private var revealedIDs: Set<String>? { progress.map { Set($0.revealedMatches.map(\.id)) } }
+    private var statistics: ApplicationMatchStatistics {
+        if let progress {
+            return progress.statistics(visibleIDs: Set(listedRecords.map(\.id)))
+        }
+        return ApplicationMatchStatistics(matches: listedRecords.map { ApplicationMatch(record: $0, scope: model.country) })
+    }
+    private var failureCount: Int { statistics.failures }
 
     private var visible: [AppRecord] {
         listedRecords.filter { record in
-            (!onlyFailed || record.error != nil) &&
-            (!onlyAttention || record.status(country: model.country) != .current) &&
+            (!onlyFailed || ((revealedIDs?.contains(record.id) ?? true) && record.error != nil)) &&
+            (!onlyAttention || ((revealedIDs?.contains(record.id) ?? true) && record.status(country: model.country) != .current)) &&
             (search.isEmpty || record.installed.name.localizedCaseInsensitiveContains(search) ||
              record.id.localizedCaseInsensitiveContains(search))
         }
@@ -33,9 +40,9 @@ struct ContentView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top, spacing: 12) {
-                            metric("应用", value: applicationCount)
-                            metric("有更新", value: updateCount)
-                            metric("待核对", value: listedRecords.filter { $0.error == nil && $0.status(country: model.country) == .unknown }.count)
+                            metric("应用", value: statistics.applications)
+                            metric("有更新", value: statistics.updates)
+                            metric("待核对", value: statistics.pending)
                             if failureCount > 0 {
                                 Button { onlyFailed.toggle() } label: { metric("失败", value: failureCount) }
                                     .buttonStyle(.plain)
@@ -46,6 +53,7 @@ struct ContentView: View {
                         }
                     }
                     .padding(.vertical, 8)
+                    .id(progress?.id)
                     if !model.scanWarning.isEmpty { Text(model.scanWarning).font(.caption).foregroundStyle(.orange) }
                     if !model.queryWarning.isEmpty { Text(model.queryWarning).font(.caption).foregroundStyle(.orange) }
                 }
@@ -59,7 +67,7 @@ struct ContentView: View {
                         }.padding(.vertical, 12)
                     }
                     ForEach(visible) { record in
-                        NavigationLink { AppDetailView(id: record.id) } label: { AppRow(record: record, country: model.country) }
+                        NavigationLink { AppDetailView(id: record.id) } label: { AppRow(record: record, country: model.country, showStatus: revealedIDs?.contains(record.id) ?? true) }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button { model.ignoreApp(record.id) } label: { Label("忽略", systemImage: "eye.slash") }
                                     .tint(.orange).disabled(model.busy)
@@ -106,31 +114,18 @@ struct ContentView: View {
 
     private func metric(_ title: String, value: Int) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            AnimatedMetricNumber(value: Double(value))
+            Text(value, format: .number)
                 .font(.title.bold().monospacedDigit())
-                .animation(value == 0 ? nil : .linear(duration: 0.6), value: value)
+                .contentTransition(.numericText(value: Double(value)))
             Text(title).font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// Interpolate the displayed integer itself so batches count through their
-/// intermediate values at a constant speed, rather than jumping to a new total.
-private struct AnimatedMetricNumber: View, Animatable {
-    var value: Double
-    var animatableData: Double {
-        get { value }
-        set { value = newValue }
-    }
-    var body: some View {
-        Text(Int(value.rounded()), format: .number)
-            .contentTransition(.numericText(value: value))
     }
 }
 
 private struct AppRow: View {
     let record: AppRecord
     let country: String
+    let showStatus: Bool
     private var status: UpdateStatus { record.status(country: country) }
 
     var body: some View {
@@ -140,12 +135,12 @@ private struct AppRow: View {
                 Text(record.installed.name).font(.headline).lineLimit(1)
                 Text("本机 \(record.displayedVersion(country: country) ?? "未知")  ·  商店 \(releaseLabel)")
                     .font(.caption).foregroundStyle(.secondary)
-                if record.error != nil { Text("查询失败").font(.caption2).foregroundStyle(.orange) }
+                if showStatus && record.error != nil { Text("查询失败").font(.caption2).foregroundStyle(.orange) }
             }
             Spacer(minLength: 2)
-            if status == .different || status == .update {
+            if showStatus && (status == .different || status == .update) {
                 Text("有更新").font(.caption2.bold()).foregroundStyle(.green)
-            } else if status == .unknown {
+            } else if showStatus && status == .unknown {
                 Text("待核对").font(.caption2.bold()).foregroundStyle(.secondary)
             }
         }.padding(.vertical, 4)

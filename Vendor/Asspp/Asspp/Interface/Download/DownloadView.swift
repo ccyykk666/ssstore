@@ -42,9 +42,6 @@ struct DownloadView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationDestination(for: PackageManifest.self) { manifest in
-            PackageView(pkg: manifest)
-        }
         .toolbar {
             NavigationLink(destination: AddDownloadView()) {
                 Image(systemName: "plus")
@@ -64,7 +61,9 @@ private struct PackageManifestRow: View {
     @State private var vm = Downloads.this
 
     var body: some View {
-        NavigationLink(value: manifest) {
+        NavigationLink {
+            PackageView(pkg: manifest)
+        } label: {
             VStack(spacing: 8) {
                 ArchivePreviewView(archive: manifest.package)
                 SimpleProgress(progress: manifest.state.percent)
@@ -76,6 +75,13 @@ private struct PackageManifestRow: View {
                 }
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(.secondary)
+            }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                vm.performDownloadAction(for: manifest, action: .delete)
+            } label: {
+                Label("Delete", systemImage: "trash")
             }
         }
         .contextMenu {
