@@ -1,17 +1,17 @@
+import UIKit
 import SwiftUI
 
 @main
-struct SSStoreApp: App {
-    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = AppModel()
-
-    init() { StoreRuntime.prepare() }
-
-    var body: some Scene {
-        WindowGroup {
-            RootView().environmentObject(model)
-                .modifier(SoftTopScrollEdge())
-        }
+final class SSStoreApplication: AppDelegate {
+    var window: UIWindow?
+    override func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        StoreRuntime.prepare()
+        let model = AppModel()
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = NativeTabs(model: model)
+        window.makeKeyAndVisible()
+        self.window = window
+        return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 }
 
