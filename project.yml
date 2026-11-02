@@ -29,9 +29,6 @@ packages:
   AnyCodable:
     url: https://github.com/Flight-School/AnyCodable
     exactVersion: "0.6.7"
-  ButtonKit:
-    url: https://github.com/Dean151/ButtonKit
-    exactVersion: "0.7.1"
   KeychainAccess:
     url: https://github.com/kishikawakatsumi/KeychainAccess.git
     exactVersion: "4.2.2"
@@ -50,14 +47,14 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "30"
+    CURRENT_PROJECT_VERSION: "31"
 targets:
   ssstore:
     type: application
     platform: iOS
     sources:
       - path: ssstore
-        excludes: [Info.plist, AppDetailView.swift, AppIconView.swift, ApplicationPickerView.swift, ContentView.swift, FileSheets.swift, InspectionView.swift, NativeSearchBridge.swift, OnDevicePairingView.swift, PairingFileDocument.swift, PairingInstallView.swift, RootView.swift, SearchTabInteraction.swift, SettingsView.swift, StoreProductView.swift, StoreRegionPickerView.swift]
+        excludes: [Info.plist]
       - path: Vendor/Asspp/Asspp
         excludes:
           - App/main.swift
@@ -118,8 +115,6 @@ targets:
         product: Kingfisher
       - package: AnyCodable
         product: AnyCodable
-      - package: ButtonKit
-        product: ButtonKit
       - package: KeychainAccess
         product: KeychainAccess
       - package: SwiftLog

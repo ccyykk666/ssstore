@@ -331,7 +331,7 @@ final class AppModel: ObservableObject {
         guard !busy else { return }
         let targets = records.filter { !$0.installed.isSystem }
         // Explicit selection includes system apps; default excludes apps updated with iOS.
-        let ids = id.map { [$0] } ?? targets.map(\.id)
+        let ids = Set(id.map { [$0] } ?? targets.map(\.id))
         guard !ids.isEmpty else {
             if records.isEmpty { message = "请先读取应用。" }
             return
@@ -370,19 +370,24 @@ final class AppModel: ObservableObject {
                 if wait > 0 { do { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) } catch { break } }
                 if Task.isCancelled { break }
                 nextLookupAt = Date().addingTimeInterval(3.2)
+                let bundleIDs = Set(bundles)
                 do {
                     let batch = try await AppleLookup.fetchForScope(bundleIDs: bundles, scope: region, knownStoreIDs: knownStoreIDs)
                     if Task.isCancelled { break }
                     warning = batch.catalogWarning ?? warning
-                    for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
-                        let release = batch.releases[records[index].effectiveBundleID]
+                    var updated = records
+                    var matched: [AppRecord] = []
+                    for index in updated.indices where ids.contains(updated[index].id) && bundleIDs.contains(updated[index].effectiveBundleID) {
+                        let release = batch.releases[updated[index].effectiveBundleID]
                         // Preserve a previous success on a failed lookup, clearly marked.
-                        if let release { records[index].release = release }
-                        records[index].error = release == nil ? (batch.errors[records[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
-                        records[index].checkedAt = Date()
-                        recordMatches([records[index]], scope: region)
+                        if let release { updated[index].release = release }
+                        updated[index].error = release == nil ? (batch.errors[updated[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
+                        updated[index].checkedAt = Date()
+                        matched.append(updated[index])
                         if release == nil { failures += 1 }
                     }
+                    records = updated
+                    recordMatches(matched, scope: region)
                     persist()
                     if batch.stopAfterBatch {
                         message = "美国商店请求受限，已停止查询并保留中国大陆结果。请稍后重试。"
@@ -391,12 +396,16 @@ final class AppModel: ObservableObject {
                 } catch is CancellationError { break }
                 catch {
                     if Task.isCancelled { break }
-                    for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
-                        records[index].error = error.localizedDescription
-                        records[index].checkedAt = Date()
-                        recordMatches([records[index]], scope: region)
+                    var updated = records
+                    var matched: [AppRecord] = []
+                    for index in updated.indices where ids.contains(updated[index].id) && bundleIDs.contains(updated[index].effectiveBundleID) {
+                        updated[index].error = error.localizedDescription
+                        updated[index].checkedAt = Date()
+                        matched.append(updated[index])
                         failures += 1
                     }
+                    records = updated
+                    recordMatches(matched, scope: region)
                     // A rate-limit response should end the batch instead of hammering the service.
                     if case LookupError.http(429) = error {
                         message = "Apple 请求受限，已停止查询并保留结果。请稍后重试。"
@@ -444,7 +453,6 @@ final class AppModel: ObservableObject {
 
     func cancelCheck() {
         checkTask?.cancel()
-        stopRevealingMatches()
     }
 
 

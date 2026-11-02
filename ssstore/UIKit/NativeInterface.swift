@@ -19,10 +19,24 @@ struct NativeRow {
     var deleteTitle = "删除"
     var badge: String? = nil
     var metrics: [Int]? = nil
+    var iconRevision = 0
+
+    func hasSameContent(as other: NativeRow) -> Bool {
+        title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
+        badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision &&
+        (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
+    }
 }
 @MainActor
 final class NativeCell: UITableViewCell {
     var representedIcon: URL?
+    var imageTask: DownloadTask?
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageTask?.cancel()
+        imageTask = nil
+        representedIcon = nil
+    }
 }
 @MainActor
 final class NativeMetricCell: UITableViewCell {
@@ -81,29 +95,42 @@ class NativePage: UITableViewController {
         tableView.estimatedRowHeight = 70
         tableView.keyboardDismissMode = .interactive
         if #available(iOS 26.0, *) { tableView.topEdgeEffect.style = .soft }
-        changes = model.objectWillChange.sink { [weak self] _ in self?.scheduleReload() }
-        reload()
     }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        changes = model.objectWillChange.sink { [weak self] _ in self?.scheduleReload() }
         reload()
     }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        changes = nil
+    }
     func scheduleReload() {
-        guard !scheduled else { return }
+        guard !scheduled, viewIfLoaded?.window != nil else { return }
         scheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.scheduled = false
-            self.reload()
+            if self.viewIfLoaded?.window != nil { self.reload() }
         }
     }
     func rows() -> [NativeSection] { [] }
     func reload() {
         guard isViewLoaded else { return }
+        let previous = sections
         withObservationTracking { sections = rows() } onChange: { [weak self] in
             Task { @MainActor in self?.scheduleReload() }
         }
-        tableView.reloadData()
+        if previous.count == sections.count && zip(previous, sections).allSatisfy({ $0.title == $1.title && $0.rows.count == $1.rows.count }) {
+            let changed = sections.indices.flatMap { section in
+                sections[section].rows.indices.compactMap { row -> IndexPath? in
+                    previous[section].rows[row].hasSameContent(as: sections[section].rows[row]) ? nil : IndexPath(row: row, section: section)
+                }
+            }
+            if !changed.isEmpty { tableView.reconfigureRows(at: changed) }
+        } else {
+            tableView.reloadData()
+        }
         if let message = model.message, view.window != nil, presentedViewController == nil {
             model.message = nil
             alert(message)
@@ -129,23 +156,23 @@ class NativePage: UITableViewController {
         config.secondaryTextProperties.numberOfLines = 0
         config.imageProperties.maximumSize = CGSize(width: 52, height: 52)
         config.imageProperties.cornerRadius = 11
+        let previousImage = cell.representedIcon == row.icon ? (cell.contentConfiguration as? UIListContentConfiguration)?.image : nil
+        cell.imageTask?.cancel()
         cell.representedIcon = row.icon
         if let url = row.icon {
-            if url.isFileURL { config.image = UIImage(contentsOfFile: url.path) }
-            else {
-                config.image = UIImage(systemName: "app")
-                KingfisherManager.shared.retrieveImage(with: url) { [weak cell] result in
-                    DispatchQueue.main.async {
-                        guard let cell, cell.representedIcon == url, case let .success(value) = result,
-                              var current = cell.contentConfiguration as? UIListContentConfiguration else { return }
-                        current.image = value.image; cell.contentConfiguration = current
-                    }
+            config.image = previousImage ?? UIImage(systemName: "app")
+            let source: Kingfisher.Source = url.isFileURL ? .provider(LocalFileImageDataProvider(fileURL: url)) : .network(ImageResource(downloadURL: url))
+            cell.imageTask = KingfisherManager.shared.retrieveImage(with: source, options: [.processor(DownsamplingImageProcessor(size: CGSize(width: 52, height: 52))), .scaleFactor(UIScreen.main.scale), .backgroundDecode]) { [weak cell] result in
+                DispatchQueue.main.async {
+                    guard let cell, cell.representedIcon == url, case let .success(value) = result,
+                          var current = cell.contentConfiguration as? UIListContentConfiguration else { return }
+                    current.image = value.image; cell.contentConfiguration = current
                 }
             }
         }
         cell.contentConfiguration = config
         if let badge = row.badge {
-            let label = UILabel(); label.text = badge; label.textColor = badge == "有更新" ? .systemGreen : .secondaryLabel
+            let label = (cell.accessoryView as? UILabel) ?? UILabel(); label.text = badge; label.textColor = badge == "有更新" ? .systemGreen : .secondaryLabel
             label.font = .preferredFont(forTextStyle: .caption1); label.sizeToFit(); cell.accessoryView = label
         } else { cell.accessoryView = nil }
         cell.accessoryType = row.action == nil ? .none : .disclosureIndicator
@@ -251,7 +278,9 @@ class NativeSearchPage: NativePage, UISearchResultsUpdating, UISearchBarDelegate
         } else { field.selectAll(nil) }
     }
     func updateSearchResults(for searchController: UISearchController) {
-        query = searchController.searchBar.text ?? ""
+        let text = searchController.searchBar.text ?? ""
+        guard text != query else { return }
+        query = text
         queryChanged()
     }
     func queryChanged() { reload() }

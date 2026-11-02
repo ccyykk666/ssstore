@@ -177,11 +177,17 @@ final class NativeArchiveFiles: NativeSearchPage {
     let file: URL
     let prefix: String
     var entries: [Entry] = []
-    init(_ model: AppModel, file: URL, prefix: String = "") { self.file = file; self.prefix = prefix; super.init(model, title: "安装包内容") }
+    init(_ model: AppModel, file: URL, prefix: String = "", entries: [Entry] = []) { self.file = file; self.prefix = prefix; self.entries = entries; super.init(model, title: "安装包内容") }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
-        run { [self] in let archive = try Archive(url: file, accessMode: .read); entries = Array(archive); reload() }
+        if entries.isEmpty {
+            run { [self] in
+                entries = try await Task.detached(priority: .userInitiated) { [file] in
+                    Array(try Archive(url: file, accessMode: .read))
+                }.value
+            }
+        }
     }
     override func rows() -> [NativeSection] {
         let rows = entries.filter { entry in
@@ -190,9 +196,17 @@ final class NativeArchiveFiles: NativeSearchPage {
             return parent == prefix && (query.isEmpty || entry.path.localizedCaseInsensitiveContains(query))
         }.map { entry in NativeRow(title: (entry.path as NSString).lastPathComponent, action: { [weak self] in
             guard let self else { return }
-            if entry.type == .directory { push(NativeArchiveFiles(model, file: file, prefix: entry.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")))) }
+            if entry.type == .directory { push(NativeArchiveFiles(model, file: file, prefix: entry.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")), entries: entries)) }
             else if entry.type == .file {
-                run { let archive = try Archive(url: self.file, accessMode: .read); let output = temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension((entry.path as NSString).pathExtension); _ = try archive.extract(entry, to: output); self.push(NativeExtractedFile(self.model, file: output)) }
+                run {
+                    let file = self.file
+                    let output = temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension((entry.path as NSString).pathExtension)
+                    try await Task.detached(priority: .userInitiated) {
+                        let archive = try Archive(url: file, accessMode: .read)
+                        _ = try archive.extract(entry, to: output)
+                    }.value
+                    self.push(NativeExtractedFile(self.model, file: output))
+                }
             }
         }) }
         return [NativeSection(rows: rows)]
@@ -201,12 +215,30 @@ final class NativeArchiveFiles: NativeSearchPage {
 @MainActor
 final class NativeExtractedFile: NativePage {
     let file: URL
+    private var size: Int64?
+    private var plist: String?
     init(_ model: AppModel, file: URL) { self.file = file; super.init(model, title: file.lastPathComponent) }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        run { [self] in
+            (size, plist) = await Task.detached(priority: .userInitiated) { [file] in
+                let attributes = try? FileManager.default.attributesOfItem(atPath: file.path)
+                let bytes = (attributes?[.size] as? NSNumber)?.int64Value
+                var text: String?
+                if ["plist", "strings", "entitlements"].contains(file.pathExtension.lowercased()),
+                   let data = try? Data(contentsOf: file),
+                   let value = try? PropertyListSerialization.propertyList(from: data, format: nil) {
+                    text = String(describing: value)
+                }
+                return (bytes, text)
+            }.value
+        }
+    }
     override func rows() -> [NativeSection] {
         var rows = [link("预览") { [weak self] in guard let self else { return }; preview(file) }, link("导出") { [weak self] in guard let self else { return }; share(file) }]
-        if let attributes = try? FileManager.default.attributesOfItem(atPath: file.path), let bytes = attributes[.size] as? NSNumber { rows.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: bytes.int64Value, countStyle: .file))) }
-        if let data = try? Data(contentsOf: file), let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) { rows.append(NativeRow(title: String(describing: plist))) }
+        if let size { rows.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
+        if let plist { rows.append(NativeRow(title: plist)) }
         return [NativeSection(rows: rows)]
     }
 }

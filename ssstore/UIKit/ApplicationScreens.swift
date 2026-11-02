@@ -49,7 +49,7 @@ final class NativeApps: NativeSearchPage {
             let status = record.status(country: model.country)
             let update = matched && (status == .different || status == .update)
             let tag = update ? "有更新" : (matched && status == .unknown ? "待核对" : "")
-            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag)
+            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag, iconRevision: model.iconRevision)
         }
         return [NativeSection(rows: summary), NativeSection(title: "共\(filtered.count)个应用", rows: rows.isEmpty ? [NativeRow(title: "暂无匹配应用")] : rows)]
     }
@@ -63,7 +63,7 @@ final class NativeAppDetail: NativePage {
     override func rows() -> [NativeSection] {
         guard let record = model.records.first(where: { $0.id == id }) else { return [] }
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "查询", primaryAction: UIAction { [weak self] _ in guard let self else { return }; model.checkUpdates(only: id) })
-        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed)), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
+        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed), iconRevision: model.iconRevision), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
         if let original = record.installed.version, original != record.displayedVersion(country: model.country) { fields.append(NativeRow(title: "原始版本", detail: original)) }
         fields += [NativeRow(title: "构建号", detail: record.installed.build ?? "未提供"), NativeRow(title: "构建 SDK", detail: record.installed.buildSDKDescription ?? "未提供"), NativeRow(title: "Bundle ID", detail: record.id)]
         var store: [NativeRow] = []
@@ -105,7 +105,7 @@ final class NativeStoreSearch: NativeSearchPage {
         button.configuration = configuration; button.menu = menu; button.showsMenuAsPrimaryAction = true
         return UIBarButtonItem(customView: button)
     }
-    override func queryChanged() { if query.isEmpty { reset(); reload() } }
+    override func queryChanged() { reset(); scheduleReload() }
     override func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
         super.searchBarSearchButtonClicked(searchBar)
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -113,10 +113,15 @@ final class NativeStoreSearch: NativeSearchPage {
         reset(); let id = generation; let country = region; let type = entity
         loading = true; reload()
         request = Task { [weak self] in
+            defer { if let self, generation == id { request = nil } }
             do {
                 var apps = try await ApplePackage.Searcher.search(term: term, countryCode: country, limit: 32, entityType: type)
                 try Task.checkCancellation()
-                if let app = try? await ApplePackage.Lookup.lookup(bundleID: term, countryCode: country, entityType: type) { apps.insert(app, at: 0) }
+                if term.contains("."), !term.contains(where: \.isWhitespace),
+                   let app = try? await ApplePackage.Lookup.lookup(bundleID: term, countryCode: country, entityType: type) {
+                    apps.removeAll { $0.bundleID == app.bundleID }
+                    apps.insert(app, at: 0)
+                }
                 try Task.checkCancellation()
                 guard let self, generation == id else { return }
                 results = apps.map { AppStore.AppPackage(software: $0, entityType: type) }; loading = false; reload()

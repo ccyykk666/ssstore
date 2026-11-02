@@ -1,6 +1,6 @@
 # ssstore 项目文档
 
-更新日期：2026-11-03。本文按公开仓库当前 `main` 的 0.6.0（30）版本编写，介绍产品边界、代码结构、数据流、构建和交付方式。具体实现以源码及工作流为准；设备服务和 Apple 商店接口可能随系统或服务端变化。
+更新日期：2026-11-03。本文按公开仓库当前 `main` 的 0.6.0（31）版本编写，介绍产品边界、代码结构、数据流、构建和交付方式。具体实现以源码及工作流为准；设备服务和 Apple 商店接口可能随系统或服务端变化。
 
 ## 项目概览
 
@@ -73,7 +73,7 @@ ssstore 是面向 iPhone 和 iPad 的应用清单、版本查询、商店下载�
 
 ### UIKit 页面结构
 
-`NativeTabs` 为每个 tab 持有独立 `UINavigationController`，共同使用一个 `AppModel`。列表页面按需将模型投影为 `NativeSection`/`NativeRow`。`NativeSearchPage` 通过持久 `UISearchController` 管理搜索输入，处理 tab 再次选择、文本焦点、取消和搜索任务过期。原 SwiftUI 页面文件仍在仓库中作历史参考，但已在 `project.yml` 从应用 target 排除；不要将这些旧文件误认为当前运行界面。
+`NativeTabs` 为每个 tab 持有独立 `UINavigationController`，共同使用一个 `AppModel`。列表页面按需将模型投影为 `NativeSection`/`NativeRow`。`NativeSearchPage` 通过持久 `UISearchController` 管理搜索输入，处理 tab 再次选择、文本焦点、取消和搜索任务过期。本项目已移除废弃的 SwiftUI 页面与桥接文件；历史实现可从 Git 历史查看。Vendor 中的上游界面目录及入口仍从应用 target 排除，实际编译界面全部采用 UIKit。
 
 ### 状态与存储
 

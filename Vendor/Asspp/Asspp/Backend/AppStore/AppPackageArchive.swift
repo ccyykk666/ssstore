@@ -81,6 +81,8 @@ class AppPackageArchive {
         canLoadEarlierVersions = !fullIndexIsFresh
         if !force, !versionIdentifiers.isEmpty,
            (0..<900).contains(Date().timeIntervalSince1970 - catalogFetchedAt.wrappedValue) {
+            requestsPaused = false
+            enqueue(Array(versionIdentifiers.filter { versionItems[$0] == nil && metadataErrors[$0] == nil }.prefix(8)))
             return
         }
         cancelHistoryLoading()

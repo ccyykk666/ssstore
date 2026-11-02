@@ -232,7 +232,7 @@ final class NativeInstall: NativePage {
         guard !working else { return }; working = true
         navigationController?.isModalInPresentation = true; navigationItem.rightBarButtonItem?.isEnabled = false
         Task { [self] in
-            do { try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID) { [weak self] stage, value in self?.status = stage; self?.fraction = value; self?.reload() }; status = "安装完成" }
+            do { try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID) { [weak self] stage, value in self?.status = stage; self?.fraction = value; self?.scheduleReload() }; status = "安装完成" }
             catch { status = error.localizedDescription }
             working = false; navigationController?.isModalInPresentation = false; navigationItem.rightBarButtonItem?.isEnabled = true; reload()
         }
