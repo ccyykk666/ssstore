@@ -172,6 +172,11 @@ struct SearchView: View {
             }
         }
         .formStyle(.grouped)
+        // Preserve result animations while searching. Search dismissal owns
+        // its native title/keyboard animation and must not inherit our spring.
+        .animation(searchPresented ? .spring : nil, value: searchError)
+        .animation(searchPresented ? .spring : nil, value: searchResult)
+        .animation(searchPresented ? .spring : nil, value: searching)
         .navigationDestination(for: ProductDestination.self) { dest in
             ProductView(archive: dest.archive, region: dest.region, navigationPath: $navigationPath)
         }
@@ -300,14 +305,9 @@ extension SearchView {
         var modernContent: some View {
             content
                 .searchable(text: $searchKey, isPresented: $searchPresented, placement: searchablePlacement, prompt: "Keyword")
-                // Keep the native title/toolbar in the same layout during search.
-                // Hiding then restoring a large title can reorder it below the
-                // drawer while search and keyboard dismissal run together.
-                .searchPresentationToolbarBehavior(.avoidHidingContent)
                 .searchFocused($searchKeyFocused)
                 .onSubmit(of: .search) { search() }
                 .navigationTitle("Search")
-                .navigationBarTitleDisplayMode(.large)
                 .toolbar { tools }
         }
 
