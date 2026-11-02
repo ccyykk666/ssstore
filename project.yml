@@ -49,8 +49,8 @@ settings:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "0.5.4"
-    CURRENT_PROJECT_VERSION: "17"
+    MARKETING_VERSION: "0.5.5"
+    CURRENT_PROJECT_VERSION: "18"
 targets:
   ssstore:
     type: application
@@ -66,6 +66,9 @@ targets:
           - Backend/DeviceCTL
           - Interface/Download/DeviceCTLInstallSection.swift
       - path: Vendor/Asspp/Certificates
+        type: folder
+        buildPhase: resources
+      - path: build/KBSyncRuntime
         type: folder
         buildPhase: resources
     info:

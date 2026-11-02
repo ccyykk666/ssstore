@@ -8,6 +8,7 @@ on:
       - 'Vendor/**'
       - 'project.yml'
       - 'scripts/build-ipa.sh'
+      - 'scripts/*kbsync*'
       - 'scripts/select-ci-tests.py'
       - 'scripts/tests/**'
       - '.github/workflows/build-ios.yml'
@@ -53,6 +54,16 @@ jobs:
         with:
           path: build/DerivedData/SourcePackages
           key: xcode27-store-spm-${{ hashFiles('Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+      - uses: actions/cache@v4
+        with:
+          path: build/KBSyncCache
+          key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
+      - name: Prepare local kbsync runtime
+        run: python3 scripts/prepare-kbsync.py
+      - name: Check local WebKit kbsync generation
+        if: steps.checks.outputs.kbsync == 'true'
+        timeout-minutes: 8
+        run: bash scripts/check-kbsync.sh
       - name: Test UpdateCore
         if: steps.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore

@@ -2,6 +2,17 @@
 
 更新日期：2026-11-02（北京时间）。先读取本文、实际源码和工作流；不要重复执行已完成的请求或重复触发构建。
 
+## 0.5.5（18）手机端历史版本/下载 403 修复
+
+- 完整 trace EE9CF00C：volumeStore HTTP 200、songList=0、无业务错误；catalog 成功；带会话 Cookie 的 redownload 返回 HTTP 403、bytes=0。不能诊断为缺少应用授权，之前 Cookie/pod 修复未解决此问题。
+- 用户要求全程手机端并指出 AssppWeb 已可查旧版。固定 ccyykk666/AssppWeb dda77c915e9b61469ca7b4995c7515a6eb0e3115 的 TCI/WASM 解释器，不需要越狱。此前将 ipatool 越狱 CLI 限制当作整个功能的限制是过早判断。
+- 在隔离、无持久存储的本地 WKWebView 中运行 StoreAgent/kbsync。只有 GUID/DSID 进入解释器；密码、令牌、Cookie 和 Apple 下载请求仍由原生代码处理。不增加服务器、电脑步骤或外部网页。
+- 构建时验证固定上游 Git blob、公开 Apple 资源原始与切片 SHA-256；五个数据资源随 IPA 打包，解释器对应源码、补丁和许可随包提供。不将 macOS 私有框架原生链接到 iOS。
+- 补全 bag 的 volumeStoreDownloadProduct → ent/download，按 AssppWeb 使用 kbsync、X-Token、StoreFront 和 serialNumber。新接口不跟随重定向，保留并校验 app ID、Bundle ID、历史版本 ID。缓存 blob 的 HTTP 403 可重新生成一次；新 blob 失败和业务授权/令牌错误不会触发循环或购买。
+- 内存缓存按 DSID/GUID 隔离，解释器串行；原生截止 6 分钟，guest 单次调用最多 5 分钟。未广告新接口的 bag 仍使用旧流程。
+- CI 仅相关变更才做 WebKit 本地生成检查（虚构标识，无真实账号）和协议检查，UpdateCore 跳过。构建成功后直接交付 IPA，不额外核验 IPA；本地生成成功不等同于用户实机 Apple 请求已恢复。
+- 源码已经准备，以下旧版本历史保留；实际构建结果以最新 Actions 为准。
+
 ## 当前状态
 
 - 私有仓库 `ccyykk666/ssstore`，目标分支 `main`。当前准备发布 **0.5.4（17）**，合并日志东八区、自动刷新、数据 Tab 图标/名称及移除被 Tab 遮挡的首页底部工具栏；iOS 17 起，继续使用 GitHub `xcode-27`、默认正式版工具链及 iOS 27 SDK。

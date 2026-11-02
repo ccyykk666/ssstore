@@ -29,6 +29,9 @@ class SelectionTests(unittest.TestCase):
             selection.STORE + "Asspp/App/Localizable.xcstrings": {"localization"},
             selection.STORE + "Resources/Scripts/check.downloads.sh": {"downloads", "localization"},
             "scripts/select-ci-tests.py": {"selection"},
+            "ssstore/KBSyncGenerator.swift": {"kbsync"},
+            "scripts/kbsync-runtime.ts": {"kbsync"},
+            selection.STORE + "Asspp/Backend/AppStore/StoreDownloadService.swift": {"downloads", "kbsync"},
         }
         for path, expected in cases.items():
             with self.subTest(path=path):

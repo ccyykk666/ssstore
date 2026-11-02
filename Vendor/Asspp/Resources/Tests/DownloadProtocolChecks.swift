@@ -3,6 +3,64 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        let ent = "https://downloaddispatch.itunes.apple.com" + StoreDownloadProtocol.entPath
+        for bag in [["volumeStoreDownloadProduct": ent], ["urlBag": ["volumeStoreDownloadProduct": ent]],
+                    ["urlBag": ["loc-volumeStoreDownloadProduct": ent]]] as [[String: Any]] {
+            precondition(StoreDownloadProtocol.entEndpoint(in: bag)?.absoluteString == ent)
+        }
+        for bad in [ent + "?q=1", ent + "#fragment", ent.replacingOccurrences(of: "https:", with: "http:"),
+                    ent.replacingOccurrences(of: ".com/", with: ".com.attacker.invalid/"),
+                    ent.replacingOccurrences(of: "//", with: "//user:token@"), ent + "/"] {
+            precondition(StoreDownloadProtocol.entEndpoint(in: ["volumeStoreDownloadProduct": bad]) == nil)
+        }
+        let preferred = try StoreDownloadProtocol.entRequest(endpoint: URL(string: ent)!, appID: 123,
+            guid: "001122334455", dsid: "123456789", store: "143465", token: "synthetic-token",
+            version: "historical-id", blob: "synthetic-blob")
+        precondition(preferred.value(forHTTPHeaderField: "X-Token") == "synthetic-token")
+        precondition(preferred.value(forHTTPHeaderField: "X-Apple-Store-Front") == "143465-1")
+        let payload = StoreProtocol.plist(preferred.httpBody!)!
+        precondition(payload["externalVersionId"] as? String == "historical-id" && payload["appExtVrsId"] == nil)
+        precondition(payload["salableAdamId"] as? String == "123")
+        precondition(payload["kbsync"] as? String == "synthetic-blob")
+        precondition(payload["serialNumber"] as? String == Data([0x54, 0xc8, 0xb0, 0xa9, 0x88, 0x22, 0x33, 0x44, 0x55]).base64EncodedString())
+        var calls: [String] = []
+        var generated = 0
+        _ = try await StoreDownloadProtocol.preferredDownload(cached: "old") {
+            generated += 1; return "fresh"
+        } invalidate: { precondition($0 == "old") } fetch: { blob in
+            calls.append(blob)
+            if blob == "old" { throw StoreDownloadError.serviceResponse(403, "ent/download") }
+            return [:]
+        }
+        precondition(calls == ["old", "fresh"] && generated == 1)
+        for error in [StoreDownloadError.rejected("9610", ""), .rejected("2034", ""), .rejected("2042", ""),
+                      .serviceResponse(429, "ent/download")] {
+            do {
+                _ = try await StoreDownloadProtocol.preferredDownload(cached: "cached") {
+                    fatalError("Regenerated for an explicit verdict")
+                } invalidate: { _ in fatalError("Invalidated unrelated verdict") } fetch: { _ in throw error }
+                fatalError("Lost explicit verdict")
+            } catch {}
+        }
+        var freshAttempts = 0
+        do {
+            _ = try await StoreDownloadProtocol.preferredDownload(cached: nil) { "fresh" }
+                invalidate: { _ in fatalError("Invalidated fresh blob") }
+                fetch: { _ in freshAttempts += 1; throw StoreDownloadError.serviceResponse(403, "ent/download") }
+            fatalError("Lost fresh 403")
+        } catch StoreDownloadError.serviceResponse(403, "ent/download") {}
+        precondition(freshAttempts == 1)
+        let item: [String: Any] = ["URL": "https://example.invalid/package", "metadata": [
+            "itemId": 123, "softwareVersionBundleId": "example.app", "softwareVersionExternalIdentifier": "historical-id",
+        ]]
+        try StoreDownloadProtocol.validateEntResponse(["songList": [item]], appID: 123, bundleID: "example.app", version: "historical-id")
+        for (appID, bundleID, version) in [(Int64(999), "example.app", "historical-id"),
+                                         (123, "other.app", "historical-id"), (123, "example.app", "latest")] {
+            do {
+                try StoreDownloadProtocol.validateEntResponse(["songList": [item]], appID: appID, bundleID: bundleID, version: version)
+                fatalError("Accepted wrong preferred app/version")
+            } catch StoreDownloadError.invalidPackage {}
+        }
         // Domain cookies from login may retain the leading dot. They must reach the wire.
         let storeURL = URL(string: "https://p71-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct")!
         let dispatchURL = URL(string: "https://downloaddispatch.itunes.apple.com/r/redownload")!

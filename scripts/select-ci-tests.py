@@ -25,6 +25,16 @@ CHECK_INPUTS = {
         STORE + "Resources/Tests/LocalizationChecks.py",
         STORE + "Resources/Scripts/check.downloads.sh",
     ),
+    "kbsync": (
+        "ssstore/KBSyncGenerator.swift",
+        STORE + "Asspp/Backend/AppStore/StoreDownloadService.swift",
+        "scripts/prepare-kbsync.py",
+        "scripts/kbsync-manifest.json",
+        "scripts/kbsync-runtime.ts",
+        "scripts/kbsync-index.html",
+        "scripts/check-kbsync.sh",
+        "scripts/tests/KBSyncSmoke.swift",
+    ),
     "selection": (
         "scripts/select-ci-tests.py",
         "scripts/tests/",

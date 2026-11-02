@@ -61,11 +61,7 @@ enum StoreDownloadService {
         do {
             let region = Configuration.countryCode(for: account.store)
             var effectiveVersion = version
-            let response = try await StoreDownloadProtocol.fetchWithFallback(version: version) { endpoint, requestedVersion in
-                effectiveVersion = requestedVersion
-                return try await fetch(session: session, endpoint: endpoint, account: &account,
-                                       appID: app.id, version: requestedVersion, trace: trace)
-            } resolveVersion: {
+            func resolveVersion() async throws -> String {
                 // An unpinned redownload can return a tvOS build for an iOS app.
                 guard let region else { throw StoreDownloadError.catalogUnavailable }
                 let metadata: StoreDownloadProtocol.CatalogVersion
@@ -80,8 +76,41 @@ enum StoreDownloadService {
                 else { throw StoreDownloadError.catalogUnavailable }
                 logger.info("Store download [\(trace)]: catalog version=\(metadata.externalVersionID)")
                 return metadata.externalVersionID
-            } onFallback: { reason in
-                logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
+
+            }
+            let guid = Configuration.deviceIdentifier
+            let response: [String: Any]
+            if let endpoint = try await preferredEndpoint(session: session, guid: guid, trace: trace) {
+                let pinned: String
+                if let version { pinned = version }
+                else { pinned = try await resolveVersion() }
+                effectiveVersion = pinned
+                let dsid = account.directoryServicesIdentifier
+                let cached = await KBSyncStore.shared.cached(guid: guid, dsid: dsid)
+                logger.info("Store download [\(trace)]: preferred=ent/download kbsyncCached=\(cached != nil)")
+                response = try await StoreDownloadProtocol.preferredDownload(cached: cached) {
+                    logger.info("Store download [\(trace)]: local kbsync generation started")
+                    let blob = try await KBSyncStore.shared.generate(guid: guid, dsid: dsid)
+                    logger.info("Store download [\(trace)]: local kbsync generation ready")
+                    return blob
+                } invalidate: { blob in
+                    await KBSyncStore.shared.invalidate(guid: guid, dsid: dsid, expected: blob)
+                } fetch: { blob in
+                    let result = try await fetchPreferred(session: session, endpoint: endpoint, account: &account,
+                        appID: app.id, guid: guid, version: pinned, blob: blob, trace: trace)
+                    if StoreDownloadProtocol.failureCode(result).isEmpty {
+                        try StoreDownloadProtocol.validateEntResponse(result, appID: app.id, bundleID: app.bundleID, version: pinned)
+                    }
+                    return result
+                }
+            } else {
+                response = try await StoreDownloadProtocol.fetchWithFallback(version: version) { endpoint, requestedVersion in
+                    effectiveVersion = requestedVersion
+                    return try await fetch(session: session, endpoint: endpoint, account: &account,
+                        appID: app.id, version: requestedVersion, trace: trace)
+                } resolveVersion: { try await resolveVersion() } onFallback: { reason in
+                    logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
+                }
             }
             // Preserve the existing UI's explicit free-license acquisition flow.
             if StoreDownloadProtocol.failureCode(response) == "9610" {
@@ -97,6 +126,49 @@ enum StoreDownloadService {
             logger.error("Store download [\(trace)]: failed, \(StoreDiagnostics.errorSummary(error))")
             throw error
         }
+    }
+
+
+    private static func preferredEndpoint(session: URLSession, guid: String, trace: String) async throws -> URL? {
+        var url = URLComponents(string: "https://init.itunes.apple.com/bag.xml")!
+        url.queryItems = [URLQueryItem(name: "guid", value: guid)]
+        var request = URLRequest(url: url.url!)
+        request.setValue(Configuration.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/xml", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        logger.info("Store download [\(trace)]: bag HTTP=\(status) bytes=\(data.count)")
+        guard status == 200, let bag = StoreProtocol.plist(data) else { throw StoreDownloadError.response(status) }
+        return StoreDownloadProtocol.entEndpoint(in: bag)
+    }
+
+    private static func fetchPreferred(session: URLSession, endpoint: URL, account: inout Account,
+        appID: Int64, guid: String, version: String, blob: String, trace: String) async throws -> [String: Any] {
+        var request = try StoreDownloadProtocol.entRequest(endpoint: endpoint, appID: appID, guid: guid,
+            dsid: account.directoryServicesIdentifier, store: account.store, token: account.passwordToken,
+            version: version, blob: blob)
+        let cookies = account.cookie.map {
+            StoreProtocol.SessionCookie(name: $0.name, value: $0.value, path: $0.path, domain: $0.domain,
+                expiresAt: $0.expiresAt, secure: $0.secure)
+        }
+        request.setValue(StoreProtocol.cookieHeader(cookies, for: request.url!), forHTTPHeaderField: "Cookie")
+        logger.info("Store download [\(trace)]: endpoint=ent/download request ready")
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw StoreDownloadError.response(0) }
+        mergeCookies(response: response, url: request.url!, account: &account)
+        logger.info("Store download [\(trace)]: endpoint=ent/download HTTP=\(response.statusCode) bytes=\(data.count)")
+        // NoRedirect rejects every 30x: never forward X-Token to a Location.
+        if (300 ..< 400).contains(response.statusCode) { throw StoreDownloadError.invalidRedirect }
+        let plist = StoreProtocol.plist(data)
+        if let plist, !StoreDownloadProtocol.failureCode(plist).isEmpty {
+            logger.info("Store download [\(trace)]: \(StoreDownloadProtocol.summary(plist))")
+            return plist
+        }
+        guard response.statusCode == 200, let plist else {
+            throw StoreDownloadError.serviceResponse(response.statusCode, "ent/download")
+        }
+        logger.info("Store download [\(trace)]: \(StoreDownloadProtocol.summary(plist))")
+        return plist
     }
 
     private static func catalogVersion(session: URLSession, appID: Int64, region: String, platform: EntityType, trace: String) async throws -> StoreDownloadProtocol.CatalogVersion {
