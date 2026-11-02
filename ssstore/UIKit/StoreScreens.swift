@@ -70,16 +70,25 @@ final class NativeProduct: NativePage {
 @MainActor
 final class NativeHistory: NativePage {
     let archive: AppPackageArchive
+    private var displayedVersionIDs: [String] = []
+    private var versionRowOffset = 0
     init(_ model: AppModel, archive: AppPackageArchive) { self.archive = archive; super.init(model, title: "版本历史"); navigationItem.largeTitleDisplayMode = .never }
     required init?(coder: NSCoder) { fatalError() }
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); archive.loadHistory() }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        archive.loadHistory()
+        reload()
+        for index in tableView.indexPathsForVisibleRows ?? [] { loadVersion(at: index) }
+    }
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); archive.cancelHistoryLoading() }
     override func rows() -> [NativeSection] {
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [UIAction(title: "加载更多", image: UIImage(systemName: "list.bullet.below.rectangle")) { [weak self] _ in self?.archive.populateNextVersionItems() }, UIAction(title: "刷新", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.archive.loadHistory(force: true) }]))
         var rows: [NativeRow] = []
         if archive.isLoadingIndex { rows.append(NativeRow(title: "正在加载历史版本...")) }
         if let error = archive.error { rows.append(NativeRow(title: error, color: .systemOrange)) }
-        for key in archive.versionIdentifiers {
+        versionRowOffset = rows.count
+        displayedVersionIDs = archive.versionIdentifiers
+        for key in displayedVersionIDs {
             if let package = archive.package(for: key), let metadata = archive.versionItems[key] {
                 rows.append(link(package.software.version + (metadata.releaseDate.map { " · " + $0.formatted(date: .numeric, time: .omitted) } ?? "")) { [weak self] in
                     guard let self, let account = archive.accountIdentifier else { self?.alert("请先选择账户。"); return }
@@ -93,10 +102,11 @@ final class NativeHistory: NativePage {
         return [NativeSection(rows: rows)]
     }
     override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        // Load only the visible missing metadata, as in the previous history screen.
-        let offset = (archive.isLoadingIndex ? 1 : 0) + (archive.error == nil ? 0 : 1)
-        let index = indexPath.row - offset
-        if archive.versionIdentifiers.indices.contains(index) { archive.populateVersionItem(for: archive.versionIdentifiers[index]) }
+        loadVersion(at: indexPath)
+    }
+    private func loadVersion(at indexPath: IndexPath) {
+        let index = indexPath.row - versionRowOffset
+        if displayedVersionIDs.indices.contains(index) { archive.populateVersionItem(for: displayedVersionIDs[index]) }
     }
 }
 
