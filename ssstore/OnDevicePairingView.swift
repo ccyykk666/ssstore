@@ -56,11 +56,11 @@ struct OnDevicePairingView: View {
                 if controller.phase == .completed && model.hasPairing {
                     Section {
                         Label("配对文件已保存", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
-                        Button("读取应用") { Task { await model.scan() } }
+                        Button("刷新应用") { Task { await model.refreshApps() } }
                             .disabled(model.busy)
                         if model.busy { ProgressView(model.activity) }
                     } footer: {
-                        Text("启用 Loon 回环后读取应用。")
+                        Text("启用 Loon 回环后刷新应用。")
                     }
                 }
             }

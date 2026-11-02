@@ -31,11 +31,6 @@ struct InspectionView: View {
                     }
                 }
             }
-            if bundleID == nil {
-                Section("接口资料") {
-                    NavigationLink("接口索引") { NativeAPIIndexView() }
-                }.font(.footnote)
-            }
         }
         .navigationTitle(bundleID == nil ? "数据" : "应用数据")
         .searchable(text: $search, prompt: "搜索数据或服务")
@@ -284,47 +279,3 @@ struct QuickLookFile: UIViewControllerRepresentable {
         func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { url as NSURL }
     }
 }
-
-private struct NativeAPIEntry: Decodable, Identifiable {
-    let name: String
-    let signature: String
-    let summary: String
-    let used: Bool
-    var id: String { name }
-}
-private struct NativeAPIIndexView: View {
-    @State private var search = ""
-    @State private var onlyUsed = false
-    @State private var entries: [NativeAPIEntry] = []
-    private var visible: [NativeAPIEntry] { entries.filter { (!onlyUsed || $0.used) && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)) } }
-    var body: some View {
-        List {
-            Section {
-                Text("idevice v0.1.68 · \(entries.count) 个 C 接口").font(.headline)
-                Text("索引仅供参考，列出的接口不一定可用。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("仅显示本版使用的接口", isOn: $onlyUsed)
-            }
-            ForEach(visible) { entry in
-                NavigationLink {
-                    List {
-                        Text(entry.used ? "用于本版读取流程" : "仅供参考，无执行入口")
-                        Text(entry.signature).font(.caption.monospaced()).textSelection(.enabled)
-                        Text(entry.summary).font(.footnote).textSelection(.enabled)
-                        Link("接口源代码", destination: URL(string: "https://github.com/jkcoxson/idevice/tree/v0.1.68/ffi/src")!)
-                    }.navigationTitle(entry.name).navigationBarTitleDisplayMode(.inline)
-                } label: { VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.name).font(.caption.monospaced())
-                    Text(entry.used ? "本版使用" : "仅索引").font(.caption2).foregroundStyle(.secondary)
-                } }
-            }
-        }
-        .navigationTitle("接口索引").searchable(text: $search, prompt: "搜索接口")
-        .task {
-            if let url = Bundle.main.url(forResource: "DeviceAPIIndex", withExtension: "json"),
-               let data = try? Data(contentsOf: url), let values = try? JSONDecoder().decode([NativeAPIEntry].self, from: data) { entries = values }
-        }
-    }
-}
-
-

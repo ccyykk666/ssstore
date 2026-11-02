@@ -57,8 +57,6 @@ struct ProductView: View {
 
     var body: some View {
         Form {
-            accountSelector
-            buttons
             packageHeader
             packageDetails
             packageDescription
@@ -76,12 +74,18 @@ struct ProductView: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            selection = eligibleAccounts.first?.id ?? .init()
+            if !eligibleAccounts.contains(where: { $0.id == selection }) {
+                selection = eligibleAccounts.first?.id ?? .init()
+            }
         }
         .navigationDestination(for: PackageManifest.self) { manifest in
             PackageView(pkg: manifest)
         }
-        .navigationTitle("Select Account")
+        .navigationTitle(archive.package.software.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) { accountSelector }
+        }
         .alert("License Required", isPresented: $showLicenseAlert) {
             var confirmRole: ButtonRole?
             #if compiler(>=6.2)
@@ -136,29 +140,25 @@ struct ProductView: View {
                 Text("Version \(archive.package.software.version)")
                     .badge(badgeText)
             }
-        } header: {
-            Text("Package")
+            buttons
+        } footer: {
+            if let hint { Text(hint.message).foregroundStyle(hint.color ?? .primary) }
         }
     }
 
     var packageDetails: some View {
         Section {
             CopyableRow(label: "Bundle ID", value: archive.package.software.bundleID, monospaced: true)
-            Text("Developer")
-                .badge(archive.package.software.sellerName)
+            CopyableRow(label: "Developer", value: archive.package.software.sellerName)
             if !archive.package.software.primaryGenreName.isEmpty {
-                Text("Category")
-                    .badge(archive.package.software.primaryGenreName)
+                CopyableRow(label: "Category", value: archive.package.software.primaryGenreName)
             }
             if let formattedSize {
-                Text("Size")
-                    .badge(formattedSize)
+                CopyableRow(label: "Size", value: formattedSize)
             }
-            Text("Compatibility")
-                .badge("\(archive.package.software.minimumOsVersion)+")
+            CopyableRow(label: "Compatibility", value: "\(archive.package.software.minimumOsVersion)+")
             if archive.package.software.userRatingCount > 0 {
-                Text("Rating")
-                    .badge("\(String(format: "%.1f", archive.package.software.averageUserRating)) (\(archive.package.software.userRatingCount))")
+                CopyableRow(label: "Rating", value: "\(String(format: "%.1f", archive.package.software.averageUserRating)) (\(archive.package.software.userRatingCount))")
             }
         } header: {
             Text("Details")
@@ -198,24 +198,20 @@ struct ProductView: View {
     }
 
     var accountSelector: some View {
-        Section {
+        Menu {
             Picker("Account", selection: $selection) {
                 ForEach(eligibleAccounts) { account in
-                    Text(account.account.email)
-                        .id(account.id)
+                    Text(account.account.email).tag(account.id)
                 }
             }
-            .pickerStyle(.menu)
-
-        } header: {
-            Text("Account")
-        } footer: {
-            Text("You have searched this package with region \(region)")
+        } label: {
+            Label("Account", systemImage: "person.crop.circle")
         }
+        .disabled(eligibleAccounts.isEmpty)
     }
 
     var buttons: some View {
-        Section {
+        Group {
             if let req = dvm.downloadRequest(forArchive: archive.package) {
                 NavigationLink(value: req) {
                     Text("Show Download")
@@ -243,15 +239,6 @@ struct ProductView: View {
                 }
                 .disabledWhenLoading()
                 .disabled(account == nil)
-            }
-        } header: {
-            Text("Download")
-        } footer: {
-            if let hint {
-                Text(hint.message)
-                    .foregroundStyle(hint.color ?? .primary)
-            } else {
-                Text("Package can be installed later in download page.")
             }
         }
     }

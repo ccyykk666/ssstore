@@ -25,25 +25,16 @@ struct AppDetailView: View {
                             field("原始版本", original)
                         }
                         field("构建号", record.installed.build ?? "未提供")
-                        field("本机版本标识", record.installed.externalVersionID ?? "未获取，请重新读取")
                         field("Bundle ID", record.id)
                     }
-                    Section("本机数据") {
-                        NavigationLink { InspectionView(bundleID: record.id) } label: { Label("应用数据", systemImage: "doc.text.magnifyingglass") }
-                    }
                     Section {
-                        NavigationLink("商店详情与下载") {
-                            StoreProductView(bundleID: record.effectiveBundleID,
-                                             region: record.release?.country ?? (model.country == StoreQueryPolicy.chinaThenUS ? "cn" : model.country))
-                        }
-                    }
-                    if let release = record.release {
-                        Section("商店版本 · \(release.country.uppercased())") {
+                        if let release = record.release {
                             field("最新版本", release.version)
                             field("更新时间", release.releasedAt ?? "未提供")
                             field("最低系统版本", release.minimumOS ?? "未提供")
-                            field("商店版本标识", release.externalVersionID ?? "未获取，请重新查询")
-                            if !release.matches(scope: model.country) { Text("结果与当前查询设置不符，请重新查询。").foregroundStyle(.orange) }
+                            if !release.matches(scope: model.country) {
+                                Text("结果与当前查询设置不符，请重新查询。").foregroundStyle(.orange)
+                            }
                             if model.country == StoreQueryPolicy.chinaThenUS && release.country == "us" && release.lookupScope == model.country {
                                 Text("美国商店结果。更新取决于安装渠道和账户地区。")
                                     .font(.footnote).foregroundStyle(.secondary)
@@ -53,6 +44,17 @@ struct AppDetailView: View {
                                 Label("需要更高版本的 iOS。", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                             }
                         }
+                        NavigationLink("查看商店页") {
+                            StoreProductView(bundleID: record.effectiveBundleID,
+                                region: record.release?.country ?? (model.country == StoreQueryPolicy.chinaThenUS ? "cn" : model.country))
+                        }
+                    } header: {
+                        Text(record.release.map { "商店版本 · " + $0.country.uppercased() } ?? "商店")
+                    }
+                    Section {
+                        NavigationLink("应用数据") { InspectionView(bundleID: record.id) }
+                    }
+                    if let release = record.release {
                         Section("更新说明") {
                             Text(release.notes?.isEmpty == false ? release.notes! : "暂无更新说明。")
                                 .textSelection(.enabled)
@@ -80,5 +82,3 @@ struct AppDetailView: View {
         }.padding(.vertical, 2)
     }
 }
-
-

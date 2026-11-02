@@ -9,8 +9,8 @@ final class AppModel: ObservableObject {
     @Published var busy = false
     @Published var activity = ""
     @Published var isChecking = false
-    @Published private(set) var lookupCompleted = 0
-    @Published private(set) var lookupTotal = 0
+    @Published private(set) var isRefreshingApps = false
+    @Published private(set) var processedApplicationIDs: Set<String> = []
     @Published var message: String?
     @Published var filePresentation: FilePresentation?
     @Published var scannedAt: Date?
@@ -78,10 +78,11 @@ final class AppModel: ObservableObject {
         saveIgnoredApps()
     }
 
-    func scan() async {
-        guard !busy else { return }
-        guard hasPairing else { message = "请先创建或导入 Remote Pairing 配对文件。"; return }
-        guard let number = UInt16(port), number > 0 else { message = "端口应在 1 到 65535 之间。"; return }
+    @discardableResult
+    func scan() async -> Bool {
+        guard !busy else { return false }
+        guard hasPairing else { message = "请先创建或导入 Remote Pairing 配对文件。"; return false }
+        guard let number = UInt16(port), number > 0 else { message = "端口应在 1 到 65535 之间。"; return false }
         busy = true
         activity = "正在读取应用…"
         defer { busy = false; activity = "" }
@@ -91,7 +92,7 @@ final class AppModel: ObservableObject {
         let ignoredBundleIDs = Array(ignoredApps.bundleIDs)
         scanWarning = ""
         do {
-            let _: Data = try await withCheckedThrowingContinuation { continuation in
+            let data: Data = try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
                         let data = try DeviceScanner.scan(pairingPath: path, host: address, port: number,
@@ -113,12 +114,30 @@ final class AppModel: ObservableObject {
                                     self.scanWarning += (self.scanWarning.isEmpty ? "" : "\n") + text
                                 }
                             })
-                        continuation.resume(returning: data)
+                        DispatchQueue.main.async { continuation.resume(returning: data) }
                     }
-                    catch { continuation.resume(throwing: error) }
+                    catch { DispatchQueue.main.async { continuation.resume(throwing: error) } }
                 }
             }
-        } catch { message = error.localizedDescription }
+            // The final inventory includes InstallationProxy's version metadata.
+            // Merge it before starting version queries, even if a UI callback is queued.
+            merge(try InventoryParser.parse(data), origin: "本机读取")
+        } catch { message = error.localizedDescription; return false }
+        return true
+    }
+
+    /// One action owns the full read-then-lookup lifecycle. A failed device read
+    /// never starts a query against an old inventory.
+    func refreshApps() async {
+        guard !busy, !isRefreshingApps else { return }
+        isRefreshingApps = true
+        processedApplicationIDs = []
+        defer { isRefreshingApps = false; processedApplicationIDs = [] }
+        guard await scan() else { return }
+        // System apps are read with the inventory and have no store lookup.
+        processedApplicationIDs = Set(records.filter { $0.installed.isSystem }.map(\.id))
+        checkUpdates(force: true)
+        await checkTask?.value
     }
 
     func inspect(_ operation: InspectionOperation, bundleID: String = "", path: String = "/",
@@ -311,7 +330,10 @@ final class AppModel: ObservableObject {
         let targets = records.filter { !$0.installed.isSystem }
         // Explicit selection includes system apps; default excludes apps updated with iOS.
         let ids = id.map { [$0] } ?? targets.map(\.id)
-        guard !ids.isEmpty else { message = "请先读取应用。"; return }
+        guard !ids.isEmpty else {
+            if records.isEmpty { message = "请先读取应用。" }
+            return
+        }
         let region = country
         let refresh = force || id != nil
         let selected = records.filter { ids.contains($0.id) }
@@ -327,11 +349,9 @@ final class AppModel: ObservableObject {
         }
         busy = true
         isChecking = true
-        lookupCompleted = cached.count
-        lookupTotal = ids.count
+        processedApplicationIDs.formUnion(cachedIDs)
         queryWarning = ""
         checkTask = Task {
-            var completed = cached.count
             var failures = 0
             var warning: String?
             defer {
@@ -357,8 +377,7 @@ final class AppModel: ObservableObject {
                         if let release { records[index].release = release }
                         records[index].error = release == nil ? (batch.errors[records[index].effectiveBundleID] ?? StoreQueryPolicy.notFoundMessage(scope: region)) : nil
                         records[index].checkedAt = Date()
-                        completed += 1
-                        lookupCompleted = completed
+                        processedApplicationIDs.insert(records[index].id)
                         if release == nil { failures += 1 }
                     }
                     persist()
@@ -372,8 +391,7 @@ final class AppModel: ObservableObject {
                     for index in records.indices where ids.contains(records[index].id) && bundles.contains(records[index].effectiveBundleID) {
                         records[index].error = error.localizedDescription
                         records[index].checkedAt = Date()
-                        completed += 1
-                        lookupCompleted = completed
+                        processedApplicationIDs.insert(records[index].id)
                         failures += 1
                     }
                     // A rate-limit response should end the batch instead of hammering the service.

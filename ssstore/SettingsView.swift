@@ -52,7 +52,7 @@ struct SettingsView: View {
                                 .font(.footnote).textSelection(.enabled).padding()
                         }.navigationTitle("Asspp · MIT")
                     }
-                    Text("ssstore · 0.5.4")
+                    Text("ssstore · \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")")
                 }
             }
             .modifier(SoftTopScrollEdge())
@@ -65,7 +65,7 @@ struct SettingsView: View {
             } message: { Text(model.message ?? "") }
         }
         .modifier(SoftTopScrollEdge())
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
     }
 }
 
