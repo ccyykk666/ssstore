@@ -157,7 +157,7 @@ class AppPackageArchive {
     }
 
     private func fetchFullIndex(session: UUID) async throws {
-        guard let accountIdentifier else { throw AuthenticationError.accountNotFound }
+        guard let accountIdentifier else { throw AppStore.AuthenticationError.accountNotFound }
         isLoadingEarlierVersions = true
         let requestedPackage = package
         let index = try await AppStore.this.withAccount(id: accountIdentifier) { account in
