@@ -98,6 +98,16 @@ GitHub Actions 使用 `xcode-27` runner，设定 `/Applications/Xcode.app/Conten
 
 工作流文件：`.github/workflows/build-ios.yml`。对应用源码、包、Vendor、构建脚本及工作流的 push 会触发 Release 构建。成功产物以 `ssstore-unsigned` artifact 保存，文件名 `ssstore.ipa`。当前工作流没有 Apple Developer 证书/描述文件，不会生成已签名安装包；IPA 需由用户选择的签名/安装方式处理。
 
+### 在线下载与自动发布
+
+`.github/workflows/publish-download.yml` 在主分支 iOS 构建成功后，使用独立 Linux 任务将 `ssstore-unsigned` 中的 IPA 发布到 GitHub Releases，并部署 `web/download/` 中的下载页。页面和发布脚本变更只触发该流程，不重新编译 iOS 应用。失败构建和 PR 构建不会发布。
+
+- 下载页：<https://ccyykk666.github.io/ssstore/>
+- 最新 IPA：<https://github.com/ccyykk666/ssstore/releases/latest/download/ssstore.ipa>
+- 每个构建保留独立 Release，附带 SHA-256 校验文件、实际 IPA 版本及来源提交。
+- 首次部署需在仓库 Settings → Pages 将 Source 设为 GitHub Actions。Pages 尚未开通时，Release 发布仍可完成；开通后手动运行 `Publish IPA download page` 即可部署，无需重新构建 IPA。
+- 手动运行发布流程会复用最新成功的主分支构建。旧构建附件已过期时会明确失败，需要先完成一次新的 iOS 构建。
+
 ### 本地构建
 
 需要 macOS、Xcode 27、iOS 27 SDK、XcodeGen、Python 3 和 Homebrew。先获取仓库依赖并安装 XcodeGen：

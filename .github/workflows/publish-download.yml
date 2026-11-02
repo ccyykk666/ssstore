@@ -1,0 +1,65 @@
+name: Publish IPA download page
+
+on:
+  workflow_run:
+    workflows: [Build unsigned iOS IPA]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'web/download/**'
+      - 'scripts/publish-download.py'
+      - 'tests/download-publication/**'
+      - '.github/workflows/publish-download.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ipa-download-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify publication logic
+        run: |
+          python3 -m unittest discover -s tests/download-publication -v
+          node --check web/download/app.js
+      - name: Publish newest successful main-branch IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/publish-download.py --repository "$GITHUB_REPOSITORY"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/publication/site
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy download page
+        id: deployment
+        uses: actions/deploy-pages@v4
