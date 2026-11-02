@@ -47,7 +47,7 @@ struct NativeAppTabs: UIViewControllerRepresentable {
         func tabBarController(_ tabs: UITabBarController, didSelect controller: UIViewController) {
             guard reselectedSearch else { return }
             reselectedSearch = false
-            guard presentedViewController == nil else { return }
+            guard !hasBlockingPresentation else { return }
             SearchFieldFocus.shared.requestFocus()
             focusTask = Task { @MainActor [weak self, weak controller] in
                 // SearchView first activates its search presentation and pops
@@ -55,16 +55,23 @@ struct NativeAppTabs: UIViewControllerRepresentable {
                 for _ in 0..<30 {
                     do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
                     guard let self, let controller, selectedViewController === controller,
-                          presentedViewController == nil, controller.viewIfLoaded?.window != nil else { return }
+                          !hasBlockingPresentation, controller.viewIfLoaded?.window != nil else { return }
                     if let field = Self.searchField(in: controller.view), field.becomeFirstResponder() {
                         do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
-                        guard selectedViewController === controller, presentedViewController == nil,
+                        guard selectedViewController === controller, !hasBlockingPresentation,
                               field.isFirstResponder else { continue }
                         field.selectAll(nil)
                         return
                     }
                 }
             }
+        }
+
+        private var hasBlockingPresentation: Bool {
+            // Activating UISearchController is part of focusing search, not
+            // an unrelated modal that should cancel the focus request.
+            guard let presented = presentedViewController else { return false }
+            return !(presented is UISearchController)
         }
 
         func cancelFocus() {
