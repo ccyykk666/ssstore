@@ -53,13 +53,17 @@ final class NativeCell: UITableViewCell {
 }
 @MainActor
 final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
-    private let textView = UITextView()
+    private let textView = UITextView(usingTextLayoutManager: false)
+    private let more = UIButton(type: .system)
     private var source = ""
     private var expanded = false
+    private var canExpand = false
     private var cachedWidth: CGFloat = 0
     private var cachedFont: UIFont?
     private var collapsedText = NSAttributedString(string: "")
     private var expandedText = NSAttributedString(string: "")
+    private var collapsedExclusion: [UIBezierPath] = []
+    private var moreFrame = CGRect.zero
     private var onSizeChange: (() -> Void)?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -71,6 +75,9 @@ final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
         textView.linkTextAttributes = [.foregroundColor: UIColor.systemBlue]
         textView.translatesAutoresizingMaskIntoConstraints = false; contentView.addSubview(textView)
         NSLayoutConstraint.activate([textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), textView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
+        more.setTitle("更多", for: .normal); more.isHidden = true
+        more.addAction(UIAction { [weak self] _ in self?.toggleExpanded() }, for: .touchUpInside)
+        contentView.addSubview(more)
     }
     required init?(coder: NSCoder) { fatalError() }
     func update(_ text: String, onSizeChange: @escaping () -> Void) {
@@ -81,47 +88,66 @@ final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
         prepareText(width: targetSize.width - 40)
         return super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
     }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        more.frame = moreFrame.offsetBy(dx: textView.frame.minX, dy: textView.frame.minY)
+    }
+    private func lineRects() -> [CGRect] {
+        let manager = textView.layoutManager
+        manager.ensureLayout(for: textView.textContainer)
+        var rects: [CGRect] = []
+        manager.enumerateLineFragments(forGlyphRange: manager.glyphRange(for: textView.textContainer)) { rect, _, _, _, _ in rects.append(rect) }
+        return rects
+    }
     private func prepareText(width: CGFloat) {
         let font = UIFont.preferredFont(forTextStyle: .body)
         guard width > 0, cachedWidth != width || cachedFont != font else { return }
-        cachedWidth = width; cachedFont = font
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: width, options: [:])]
-        paragraph.defaultTabInterval = width
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.label, .paragraphStyle: paragraph]
+        cachedWidth = width; cachedFont = font; more.titleLabel?.font = font
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.label]
         let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
-        func linked(_ body: String, _ title: String) -> NSAttributedString {
-            let result = NSMutableAttributedString(string: body + "\t" + title, attributes: attributes)
-            result.addAttribute(.link, value: URL(string: "ssstore://description")!, range: NSRange(location: result.length - (title as NSString).length, length: (title as NSString).length))
-            return result
-        }
-        func height(_ text: NSAttributedString) -> CGFloat {
-            text.boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
-        }
         let full = NSAttributedString(string: text, attributes: attributes)
-        let limit = ceil(font.lineHeight * 6)
-        if height(full) <= limit {
-            collapsedText = full; expandedText = full
-        } else {
-            let characters = Array(text)
-            var lower = 0; var upper = characters.count
-            while lower < upper {
-                let middle = (lower + upper + 1) / 2
-                let candidate = String(characters.prefix(middle)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
-                if height(linked(candidate, "更多")) <= limit { lower = middle } else { upper = middle - 1 }
-            }
-            collapsedText = linked(String(characters.prefix(lower)).trimmingCharacters(in: .whitespacesAndNewlines) + "…", "更多")
-            expandedText = linked(text, "收起")
+        textView.bounds.size.width = width
+        textView.textContainer.size = CGSize(width: width, height: .greatestFiniteMagnitude)
+        textView.textContainer.maximumNumberOfLines = 0
+        textView.textContainer.lineBreakMode = .byWordWrapping
+        textView.textContainer.exclusionPaths = []
+        textView.attributedText = full
+        canExpand = lineRects().count > 6
+        collapsedText = full; expandedText = full; collapsedExclusion = []
+        if canExpand {
+            let summary = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+            collapsedText = NSAttributedString(string: summary, attributes: attributes)
+            textView.attributedText = collapsedText
+            textView.textContainer.maximumNumberOfLines = 6
+            textView.textContainer.lineBreakMode = .byTruncatingTail
+            let last = lineRects().last!
+            let buttonWidth = ceil(("更多" as NSString).size(withAttributes: [.font: font]).width)
+            moreFrame = CGRect(x: width - buttonWidth, y: last.minY, width: buttonWidth, height: last.height)
+            collapsedExclusion = [UIBezierPath(rect: CGRect(x: moreFrame.minX - 6, y: last.minY, width: buttonWidth + 6, height: last.height))]
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.tabStops = [NSTextTab(textAlignment: .right, location: width, options: [:])]
+            let expanded = NSMutableAttributedString(string: text + "\t收起", attributes: attributes)
+            let tail = NSRange(location: expanded.length - 2, length: 2)
+            expanded.addAttribute(.paragraphStyle, value: paragraph, range: (expanded.string as NSString).paragraphRange(for: tail))
+            expanded.addAttribute(.link, value: URL(string: "ssstore://description")!, range: tail)
+            expandedText = expanded
         }
+        applyText()
+    }
+    private func applyText() {
+        let compact = canExpand && !expanded
         textView.attributedText = expanded ? expandedText : collapsedText
+        textView.textContainer.maximumNumberOfLines = compact ? 6 : 0
+        textView.textContainer.lineBreakMode = compact ? .byTruncatingTail : .byWordWrapping
+        textView.textContainer.exclusionPaths = compact ? collapsedExclusion : []
+        more.isHidden = !compact
+        setNeedsLayout()
+    }
+    private func toggleExpanded() {
+        expanded.toggle(); applyText(); onSizeChange?()
     }
     func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
-        UIAction { [weak self] _ in
-            guard let self else { return }
-            expanded.toggle()
-            textView.attributedText = expanded ? expandedText : collapsedText
-            onSizeChange?()
-        }
+        UIAction { [weak self] _ in self?.toggleExpanded() }
     }
 }
 

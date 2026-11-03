@@ -24,10 +24,9 @@ final class NativeProductHeaderCell: UITableViewCell {
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         price.setContentHuggingPriority(.required, for: .horizontal)
         price.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let title = UIStackView(arrangedSubviews: [name, price]); title.alignment = .firstBaseline; title.spacing = 12
-        let text = UIStackView(arrangedSubviews: [title, seller]); text.axis = .vertical; text.spacing = 2
+        let text = UIStackView(arrangedSubviews: [name, seller]); text.axis = .vertical; text.spacing = 2
         icon.contentMode = .scaleAspectFit; icon.layer.cornerRadius = 11; icon.clipsToBounds = true
-        let row = UIStackView(arrangedSubviews: [icon, text]); row.alignment = .center; row.spacing = 16
+        let row = UIStackView(arrangedSubviews: [icon, text, price]); row.alignment = .center; row.spacing = 16
         row.translatesAutoresizingMaskIntoConstraints = false; contentView.addSubview(row)
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 52), icon.heightAnchor.constraint(equalToConstant: 52), row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
     }
