@@ -1,4 +1,5 @@
 import UIKit
+import SwiftUI
 import Combine
 import Observation
 import ApplePackage
@@ -23,11 +24,13 @@ struct NativeRow {
     var accessoryAction: UIAction?
     var metricActions: [Int: () -> Void] = [:]
     var compact = false
+    var inlineAction: (title: String, perform: () -> Void)?
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
         badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision && compact == other.compact &&
         accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
+        inlineAction?.title == other.inlineAction?.title &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
 }
@@ -47,48 +50,87 @@ final class NativeCell: UITableViewCell {
     }
 }
 @MainActor
-final class NativeMetricCell: UITableViewCell {
-    private let names = ["应用", "新版本", "待核对", "失败"]
-    let numbers = (0..<4).map { _ in UILabel() }
-    let stack = UIStackView()
-    var previous: [Int] = []
-    private var actions: [Int: () -> Void] = [:]
+final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
+    private let textView = UITextView()
+    private var action: (() -> Void)?
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
-        stack.axis = .horizontal; stack.distribution = .fillEqually; stack.translatesAutoresizingMaskIntoConstraints = false
-        for (index, name) in names.enumerated() {
-            let column = UIStackView(); column.axis = .vertical; column.spacing = 4
-            column.tag = index; column.isAccessibilityElement = true
-            column.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(selectMetric(_:))))
-            numbers[index].font = .monospacedDigitSystemFont(ofSize: 30, weight: .bold)
-            numbers[index].textColor = index == 3 ? .systemRed : .label
-            let label = UILabel(); label.text = name; label.font = .preferredFont(forTextStyle: .caption1); label.textColor = index == 3 ? .systemRed : .secondaryLabel
-            column.addArrangedSubview(numbers[index]); column.addArrangedSubview(label); stack.addArrangedSubview(column)
-        }
-        contentView.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 18), stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -18)])
         selectionStyle = .none
+        textView.isEditable = false; textView.isScrollEnabled = false; textView.backgroundColor = .clear
+        textView.textContainerInset = .zero; textView.textContainer.lineFragmentPadding = 0
+        textView.adjustsFontForContentSizeCategory = true; textView.delegate = self
+        textView.translatesAutoresizingMaskIntoConstraints = false; contentView.addSubview(textView)
+        let margins = contentView.layoutMarginsGuide
+        NSLayoutConstraint.activate([textView.leadingAnchor.constraint(equalTo: margins.leadingAnchor), textView.trailingAnchor.constraint(equalTo: margins.trailingAnchor), textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), textView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
     }
     required init?(coder: NSCoder) { fatalError() }
-    @objc private func selectMetric(_ sender: UITapGestureRecognizer) {
-        if let index = sender.view?.tag { actions[index]?() }
-    }
-    func update(_ values: [Int], actions: [Int: () -> Void]) {
-        self.actions = actions
-        for index in values.indices {
-            let column = stack.arrangedSubviews[index]
-            column.isHidden = (index == 1 || index == 3) && values[index] == 0
-            column.isUserInteractionEnabled = actions[index] != nil
-            column.accessibilityTraits = actions[index] == nil ? .staticText : .button
-            column.accessibilityLabel = "\(values[index]) 个\(names[index])"
-            let text = String(values[index])
-            if previous.indices.contains(index), previous[index] != values[index], !UIAccessibility.isReduceMotionEnabled {
-                UIView.transition(with: numbers[index], duration: 0.12, options: [.transitionCrossDissolve, .beginFromCurrentState]) {
-                    self.numbers[index].text = text
-                }
-            } else { numbers[index].text = text }
+    func update(_ row: NativeRow) {
+        let text = NSMutableAttributedString(string: row.title, attributes: [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label])
+        if let link = row.inlineAction {
+            text.append(NSAttributedString(string: " " + link.title, attributes: [.font: UIFont.preferredFont(forTextStyle: .body), .link: URL(string: "ssstore://description")!]))
         }
-        previous = values
+        action = row.inlineAction?.perform
+        textView.attributedText = text
+        textView.linkTextAttributes = [.foregroundColor: UIColor.systemBlue]
+    }
+    func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
+        UIAction { [weak self] _ in self?.action?() }
+    }
+}
+
+@MainActor
+private final class NativeMetricState: ObservableObject {
+    @Published var values = [0, 0, 0, 0]
+    var actions: [Int: () -> Void] = [:]
+}
+
+@MainActor
+private struct NativeMetrics: View {
+    @ObservedObject var state: NativeMetricState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let names = ["应用", "新版本", "待核对", "失败"]
+
+    var body: some View {
+        let values = state.values
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(values.indices, id: \.self) { index in
+                if (index != 1 && index != 3) || values[index] > 0 {
+                    Button { state.actions[index]?() } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(String(values[index]))
+                                .font(.system(size: 30, weight: .bold)).monospacedDigit()
+                                .foregroundStyle(index == 3 ? Color.red : Color.primary)
+                                .contentTransition(.numericText(value: Double(values[index])))
+                            Text(names[index]).font(.caption)
+                                .foregroundStyle(index == 3 ? Color.red : Color.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(values[index]) 个\(names[index])")
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: values)
+    }
+}
+
+@MainActor
+final class NativeMetricCell: UITableViewCell {
+    private let state = NativeMetricState()
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .none
+        contentConfiguration = UIHostingConfiguration { [state] in
+            NativeMetrics(state: state)
+        }.margins(.horizontal, 20).margins(.vertical, 18)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    func update(_ values: [Int], actions: [Int: () -> Void]) {
+        state.actions = actions
+        state.values = values
     }
 }
 @MainActor
@@ -115,6 +157,7 @@ class NativePage: UITableViewController {
         super.viewDidLoad()
         tableView.register(NativeCell.self, forCellReuseIdentifier: "row")
         tableView.register(NativeMetricCell.self, forCellReuseIdentifier: "metrics")
+        tableView.register(NativeDescriptionCell.self, forCellReuseIdentifier: "description")
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 70
         tableView.keyboardDismissMode = .interactive
@@ -167,6 +210,11 @@ class NativePage: UITableViewController {
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let row = sections[indexPath.section].rows[indexPath.row]
+        if row.inlineAction != nil {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "description", for: indexPath) as! NativeDescriptionCell
+            cell.update(row)
+            return cell
+        }
         if let metrics = row.metrics {
             let cell = tableView.dequeueReusableCell(withIdentifier: "metrics", for: indexPath) as! NativeMetricCell
             cell.update(metrics, actions: row.metricActions)
@@ -267,7 +315,13 @@ class NativePage: UITableViewController {
         activity.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
         present(activity, animated: true)
     }
-    func preview(_ url: URL) { push(NativePreview(url)) }
+    func preview(_ url: URL) {
+        let page = NativePreview(url)
+        page.modalPresentationStyle = .pageSheet
+        page.sheetPresentationController?.detents = [.medium(), .large()]
+        page.sheetPresentationController?.prefersGrabberVisible = true
+        present(page, animated: true)
+    }
     func link(_ title: String, _ action: @escaping () -> Void) -> NativeRow { NativeRow(title: title, color: .systemBlue, action: action) }
 }
 
@@ -294,7 +348,7 @@ class NativeSearchPage: NativePage, UISearchResultsUpdating, UISearchBarDelegate
         search.searchBar.placeholder = "关键词"
         search.searchBar.sizeToFit()
         navigationItem.searchController = search
-        navigationItem.hidesSearchBarWhenScrolling = false
+        navigationItem.hidesSearchBarWhenScrolling = true
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)

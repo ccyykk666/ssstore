@@ -7,6 +7,6 @@
 - 搜索使用持久的 UISearchController；拦截搜索 tab 的默认重复选择行为，由 UISearchBar.becomeFirstResponder() 触发原生搜索转场及键盘，didPresentSearchController 完成文本选择。空文本直接设置起始光标；有内容时全选。不再使用 SwiftUI searchable、FocusState、HostingController、轮询控件或延迟隐藏标题。
 - 本项目旧 SwiftUI 页面和桥接代码已移除；历史实现可从 Git 历史查看。Vendor 中的上游 SwiftUI 界面仍作为集成来源保留，整个 Interface 目录及上游入口均不参与 iOS 编译。UIKit 文件按通用控件、应用、商店、设备分组。
 - 账号 Keychain、配对文件、忽略名单、地区偏好、清单和下载记录继续沿用原存储路径。
-- 统计和列表状态继续由同一个匹配前缀推进，UIKit 仅显示计数，避免独立计算导致负数和提前显示更新。
+- 统计和列表状态继续由同一个匹配前缀推进，避免独立计算导致负数和提前显示更新。首页统计通过 UIHostingConfiguration 嵌入 SwiftUI，使用 numericText 原生数字过渡；导航和列表继续使用 UIKit。
 
 验证范围：Xcode 构建与相关现有检查；未在真机确认首次搜索动画、系统配对、账号登录或所有数据服务。构建成功不能替代这些交互验证。

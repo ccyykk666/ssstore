@@ -26,9 +26,11 @@ final class NativeProduct: NativePage {
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "person.crop.circle"), menu: UIMenu(children: accounts.map { account in UIAction(title: account.account.email, state: accountID == account.id ? .on : .off) { [weak self] _ in self?.accountID = account.id; self?.reload() } }))
         let app = package.software
-        let description = expanded ? app.description : String(app.description.prefix(180))
-        var header = [NativeRow(title: app.name + " · " + (app.formattedPrice ?? "—"), detail: app.sellerName, icon: URL(string: app.artworkUrl)), NativeRow(title: description)]
-        if app.description.count > 180 { header.append(link(expanded ? "收起" : "更多") { [weak self] in self?.expanded.toggle(); self?.reload() }) }
+        let canExpand = app.description.count > 180
+        let description = (expanded ? app.description : String(app.description.prefix(180))).trimmingCharacters(in: .whitespacesAndNewlines) + (canExpand && !expanded ? "…" : "")
+        var descriptionRow = NativeRow(title: description)
+        if canExpand { descriptionRow.inlineAction = (expanded ? "收起" : "更多", { [weak self] in self?.expanded.toggle(); self?.reload() }) }
+        var header = [NativeRow(title: app.name, detail: app.sellerName, icon: URL(string: app.artworkUrl), badge: app.formattedPrice ?? "—"), descriptionRow]
         header.append(link("版本 \(app.version)") { [weak self] in guard let self else { return }; push(NativeHistory(model, archive: AppPackageArchive(accountID: accountID, region: region, package: package))) })
         header.append(link(working ? "正在请求…" : "下载") { [weak self] in self?.download() })
         var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+"), NativeRow(title: "评分", detail: "\(app.averageUserRating) (\(app.userRatingCount))")]
@@ -69,6 +71,13 @@ final class NativeProduct: NativePage {
 
 @MainActor
 final class NativeHistory: NativePage {
+    private static let dateFormatters: [DateFormatter] = ["MM/dd", "yyyy/MM/dd"].map { format in
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = format
+        return formatter
+    }
     let archive: AppPackageArchive
     private var displayedVersionIDs: [String] = []
     private var versionRowOffset = 0
@@ -90,10 +99,14 @@ final class NativeHistory: NativePage {
         displayedVersionIDs = archive.versionIdentifiers
         for key in displayedVersionIDs {
             if let package = archive.package(for: key), let metadata = archive.versionItems[key] {
-                rows.append(link(package.software.version + (metadata.releaseDate.map { " · " + $0.formatted(date: .numeric, time: .omitted) } ?? "")) { [weak self] in
+                let date = metadata.releaseDate.map { date in
+                    let thisYear = Calendar(identifier: .gregorian).isDate(date, equalTo: Date(), toGranularity: .year)
+                    return Self.dateFormatters[thisYear ? 0 : 1].string(from: date)
+                }
+                rows.append(NativeRow(title: package.software.version, color: .systemBlue, action: { [weak self] in
                     guard let self, let account = archive.accountIdentifier else { self?.alert("请先选择账户。"); return }
                     confirm("下载 \(package.software.version)？") { [weak self] in self?.run { try await Downloads.this.startDownload(for: package, accountID: account) } }
-                })
+                }, badge: date))
             } else {
                 rows.append(NativeRow(title: key, detail: archive.metadataErrors[key] ?? (archive.loadingIDs.contains(key) ? "加载中…" : "点按加载"), action: { [weak self] in self?.archive.populateVersionItem(for: key, retry: true) }))
             }
