@@ -24,13 +24,15 @@ struct NativeRow {
     var accessoryAction: UIAction?
     var metricActions: [Int: () -> Void] = [:]
     var compact = false
-    var inlineAction: (title: String, perform: () -> Void)?
+    var singleLine = false
+    var isDescription = false
+    var productHeader = false
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
         badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision && compact == other.compact &&
         accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
-        inlineAction?.title == other.inlineAction?.title &&
+        singleLine == other.singleLine && isDescription == other.isDescription && productHeader == other.productHeader &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
 }
@@ -52,29 +54,74 @@ final class NativeCell: UITableViewCell {
 @MainActor
 final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
     private let textView = UITextView()
-    private var action: (() -> Void)?
+    private var source = ""
+    private var expanded = false
+    private var cachedWidth: CGFloat = 0
+    private var cachedFont: UIFont?
+    private var collapsedText = NSAttributedString(string: "")
+    private var expandedText = NSAttributedString(string: "")
+    private var onSizeChange: (() -> Void)?
+
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
         textView.isEditable = false; textView.isScrollEnabled = false; textView.backgroundColor = .clear
         textView.textContainerInset = .zero; textView.textContainer.lineFragmentPadding = 0
         textView.adjustsFontForContentSizeCategory = true; textView.delegate = self
+        textView.linkTextAttributes = [.foregroundColor: UIColor.systemBlue]
         textView.translatesAutoresizingMaskIntoConstraints = false; contentView.addSubview(textView)
-        let margins = contentView.layoutMarginsGuide
-        NSLayoutConstraint.activate([textView.leadingAnchor.constraint(equalTo: margins.leadingAnchor), textView.trailingAnchor.constraint(equalTo: margins.trailingAnchor), textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), textView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
+        NSLayoutConstraint.activate([textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), textView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
     }
     required init?(coder: NSCoder) { fatalError() }
-    func update(_ row: NativeRow) {
-        let text = NSMutableAttributedString(string: row.title, attributes: [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label])
-        if let link = row.inlineAction {
-            text.append(NSAttributedString(string: " " + link.title, attributes: [.font: UIFont.preferredFont(forTextStyle: .body), .link: URL(string: "ssstore://description")!]))
+    func update(_ text: String, onSizeChange: @escaping () -> Void) {
+        self.onSizeChange = onSizeChange
+        if source != text { source = text; expanded = false; cachedWidth = 0 }
+    }
+    override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
+        prepareText(width: targetSize.width - 40)
+        return super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
+    }
+    private func prepareText(width: CGFloat) {
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        guard width > 0, cachedWidth != width || cachedFont != font else { return }
+        cachedWidth = width; cachedFont = font
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: width, options: [:])]
+        paragraph.defaultTabInterval = width
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.label, .paragraphStyle: paragraph]
+        let text = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        func linked(_ body: String, _ title: String) -> NSAttributedString {
+            let result = NSMutableAttributedString(string: body + "\t" + title, attributes: attributes)
+            result.addAttribute(.link, value: URL(string: "ssstore://description")!, range: NSRange(location: result.length - (title as NSString).length, length: (title as NSString).length))
+            return result
         }
-        action = row.inlineAction?.perform
-        textView.attributedText = text
-        textView.linkTextAttributes = [.foregroundColor: UIColor.systemBlue]
+        func height(_ text: NSAttributedString) -> CGFloat {
+            text.boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil).height
+        }
+        let full = NSAttributedString(string: text, attributes: attributes)
+        let limit = ceil(font.lineHeight * 6)
+        if height(full) <= limit {
+            collapsedText = full; expandedText = full
+        } else {
+            let characters = Array(text)
+            var lower = 0; var upper = characters.count
+            while lower < upper {
+                let middle = (lower + upper + 1) / 2
+                let candidate = String(characters.prefix(middle)).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+                if height(linked(candidate, "更多")) <= limit { lower = middle } else { upper = middle - 1 }
+            }
+            collapsedText = linked(String(characters.prefix(lower)).trimmingCharacters(in: .whitespacesAndNewlines) + "…", "更多")
+            expandedText = linked(text, "收起")
+        }
+        textView.attributedText = expanded ? expandedText : collapsedText
     }
     func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
-        UIAction { [weak self] _ in self?.action?() }
+        UIAction { [weak self] _ in
+            guard let self else { return }
+            expanded.toggle()
+            textView.attributedText = expanded ? expandedText : collapsedText
+            onSizeChange?()
+        }
     }
 }
 
@@ -158,6 +205,7 @@ class NativePage: UITableViewController {
         tableView.register(NativeCell.self, forCellReuseIdentifier: "row")
         tableView.register(NativeMetricCell.self, forCellReuseIdentifier: "metrics")
         tableView.register(NativeDescriptionCell.self, forCellReuseIdentifier: "description")
+        tableView.register(NativeProductHeaderCell.self, forCellReuseIdentifier: "product-header")
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 70
         tableView.keyboardDismissMode = .interactive
@@ -210,9 +258,14 @@ class NativePage: UITableViewController {
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let row = sections[indexPath.section].rows[indexPath.row]
-        if row.inlineAction != nil {
-            let cell = tableView.dequeueReusableCell(withIdentifier: "description", for: indexPath) as! NativeDescriptionCell
+        if row.productHeader {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "product-header", for: indexPath) as! NativeProductHeaderCell
             cell.update(row)
+            return cell
+        }
+        if row.isDescription {
+            let cell = tableView.dequeueReusableCell(withIdentifier: "description", for: indexPath) as! NativeDescriptionCell
+            cell.update(row.title) { [weak tableView] in tableView?.performBatchUpdates(nil) }
             return cell
         }
         if let metrics = row.metrics {
@@ -224,12 +277,13 @@ class NativePage: UITableViewController {
         var config = cell.defaultContentConfiguration()
         config.text = row.title; config.secondaryText = row.detail
         config.textProperties.color = row.color
-        config.textProperties.numberOfLines = 0
-        config.secondaryTextProperties.numberOfLines = 0
+        config.textProperties.numberOfLines = row.singleLine ? 1 : 0
+        config.secondaryTextProperties.numberOfLines = row.singleLine ? 1 : 0
         let iconSize: CGFloat = row.compact ? 46 : 52
         config.imageProperties.maximumSize = CGSize(width: iconSize, height: iconSize)
         config.imageProperties.cornerRadius = row.compact ? 10 : 11
         if row.compact {
+            config.imageProperties.reservedLayoutSize = CGSize(width: iconSize, height: iconSize)
             config.textProperties.font = .preferredFont(forTextStyle: .callout)
             config.secondaryTextProperties.font = .preferredFont(forTextStyle: .footnote)
             config.directionalLayoutMargins.top = 10; config.directionalLayoutMargins.bottom = 10

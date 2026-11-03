@@ -123,7 +123,7 @@ final class NativeStoreSearch: NativeSearchPage {
         }
         var sections: [NativeSection] = []
         if let error { sections.append(NativeSection(rows: [NativeRow(title: error, color: .systemRed)])) }
-        if loading || !results.isEmpty { sections.append(NativeSection(title: loading ? "正在搜索…" : "\(results.count) 个结果", rows: results.map { package in NativeRow(title: package.software.name, detail: package.software.sellerName + " · " + package.software.version, icon: URL(string: package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativeProduct(model, package: package, region: region)) }, compact: true) })) }
+        if loading || !results.isEmpty { sections.append(NativeSection(title: loading ? "正在搜索…" : "\(results.count) 个结果", rows: results.map { package in NativeRow(title: package.software.name, detail: package.software.sellerName, icon: URL(string: package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativeProduct(model, package: package, region: region)) }, compact: true, singleLine: true) })) }
         return sections
     }
     private func regionButton(menu: UIMenu) -> UIBarButtonItem {

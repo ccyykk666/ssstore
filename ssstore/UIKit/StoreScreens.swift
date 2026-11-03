@@ -9,11 +9,41 @@ import UniformTypeIdentifiers
 import ZIPFoundation
 
 @MainActor
+final class NativeProductHeaderCell: UITableViewCell {
+    private let icon = UIImageView()
+    private let name = UILabel()
+    private let price = UILabel()
+    private let seller = UILabel()
+    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
+        super.init(style: style, reuseIdentifier: reuseIdentifier)
+        selectionStyle = .none
+        name.font = .preferredFont(forTextStyle: .body)
+        price.font = .preferredFont(forTextStyle: .subheadline); price.textColor = .secondaryLabel
+        seller.font = .preferredFont(forTextStyle: .subheadline); seller.textColor = .secondaryLabel; seller.numberOfLines = 2
+        for label in [name, price, seller] { label.adjustsFontForContentSizeCategory = true }
+        name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        price.setContentHuggingPriority(.required, for: .horizontal)
+        price.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let title = UIStackView(arrangedSubviews: [name, price]); title.alignment = .firstBaseline; title.spacing = 12
+        let text = UIStackView(arrangedSubviews: [title, seller]); text.axis = .vertical; text.spacing = 2
+        icon.contentMode = .scaleAspectFit; icon.layer.cornerRadius = 11; icon.clipsToBounds = true
+        let row = UIStackView(arrangedSubviews: [icon, text]); row.alignment = .center; row.spacing = 16
+        row.translatesAutoresizingMaskIntoConstraints = false; contentView.addSubview(row)
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 52), icon.heightAnchor.constraint(equalToConstant: 52), row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func prepareForReuse() { super.prepareForReuse(); icon.kf.cancelDownloadTask() }
+    func update(_ row: NativeRow) {
+        name.text = row.title; price.text = row.badge; seller.text = row.detail
+        icon.kf.setImage(with: row.icon, placeholder: UIImage(systemName: "app"), options: [.processor(DownsamplingImageProcessor(size: CGSize(width: 52, height: 52))), .scaleFactor(UIScreen.main.scale), .backgroundDecode])
+    }
+}
+
+@MainActor
 final class NativeProduct: NativePage {
     let package: AppStore.AppPackage
     let region: String
     var accountID: String?
-    var expanded = false
     init(_ model: AppModel, package: AppStore.AppPackage, region: String) {
         self.package = package; self.region = region
         accountID = AppStore.this.eligibleAccounts(for: region).first?.id
@@ -26,14 +56,11 @@ final class NativeProduct: NativePage {
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "person.crop.circle"), menu: UIMenu(children: accounts.map { account in UIAction(title: account.account.email, state: accountID == account.id ? .on : .off) { [weak self] _ in self?.accountID = account.id; self?.reload() } }))
         let app = package.software
-        let canExpand = app.description.count > 180
-        let description = (expanded ? app.description : String(app.description.prefix(180))).trimmingCharacters(in: .whitespacesAndNewlines) + (canExpand && !expanded ? "…" : "")
-        var descriptionRow = NativeRow(title: description)
-        if canExpand { descriptionRow.inlineAction = (expanded ? "收起" : "更多", { [weak self] in self?.expanded.toggle(); self?.reload() }) }
-        var header = [NativeRow(title: app.name, detail: app.sellerName, icon: URL(string: app.artworkUrl), badge: app.formattedPrice ?? "—"), descriptionRow]
+        let descriptionRow = NativeRow(title: app.description, isDescription: true)
+        var header = [NativeRow(title: app.name, detail: app.sellerName, icon: URL(string: app.artworkUrl), badge: app.formattedPrice ?? "—", productHeader: true), descriptionRow]
         header.append(link("版本 \(app.version)") { [weak self] in guard let self else { return }; push(NativeHistory(model, archive: AppPackageArchive(accountID: accountID, region: region, package: package))) })
         header.append(link(working ? "正在请求…" : "下载") { [weak self] in self?.download() })
-        var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+"), NativeRow(title: "评分", detail: "\(app.averageUserRating) (\(app.userRatingCount))")]
+        var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+")]
         if let size = app.fileSizeBytes.flatMap(Int64.init) { details.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
         var sections = [NativeSection(rows: header), NativeSection(title: "详情", rows: details), NativeSection(title: "新功能", rows: [NativeRow(title: app.releaseNotes ?? "")])]
         if app.price == 0 { sections.append(NativeSection(rows: [link("获取许可证") { [weak self] in self?.license() }])) }
