@@ -106,10 +106,20 @@ final class NativeStoreSearch: NativeSearchPage {
     init(_ model: AppModel) { super.init(model, title: "搜索") }
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
-        let key = region + "|" + entity.rawValue
+        let regions = AppStore.this.possibleRegions.sorted()
+        if let first = regions.first, !regions.contains(region) {
+            region = first
+            UserDefaults.standard.set(first, forKey: "searchRegion")
+            reset()
+        }
+        let key = ([region, entity.rawValue] + regions).joined(separator: "|")
         if key != menuKey {
         menuKey = key
-        navigationItem.rightBarButtonItems = [regionButton(menu: UIMenu(children: ApplePackage.Configuration.storeFrontValues.keys.sorted().map { key in UIAction(title: "\(StoreRegionNames.name(key))  \(key)", state: key == region ? .on : .off) { [weak self] _ in self?.region = key; UserDefaults.standard.set(key, forKey: "searchRegion"); self?.reset(); self?.reload() } })), UIBarButtonItem(image: UIImage(systemName: entity.iconName), menu: UIMenu(children: EntityType.allCases.map { type in UIAction(title: type.rawValue, state: type == entity ? .on : .off) { [weak self] _ in self?.entity = type; self?.reset(); self?.reload() } }))]
+        var buttons = [UIBarButtonItem(image: UIImage(systemName: entity.iconName), menu: UIMenu(children: EntityType.allCases.map { type in UIAction(title: type.rawValue, state: type == entity ? .on : .off) { [weak self] _ in self?.entity = type; self?.reset(); self?.reload() } }))]
+        if !regions.isEmpty {
+            buttons.insert(regionButton(menu: UIMenu(children: regions.map { key in UIAction(title: "\(StoreRegionNames.name(key))  \(key)", state: key == region ? .on : .off) { [weak self] _ in self?.region = key; UserDefaults.standard.set(key, forKey: "searchRegion"); self?.reset(); self?.reload() } })), at: 0)
+        }
+        navigationItem.rightBarButtonItems = buttons
         }
         var sections: [NativeSection] = []
         if let error { sections.append(NativeSection(rows: [NativeRow(title: error, color: .systemRed)])) }
