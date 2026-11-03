@@ -171,8 +171,11 @@ private struct NativeMetrics: View {
         let values = state.values
         let indices = values.indices.filter { ($0 != 1 && $0 != 3) || values[$0] > 0 }
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                ForEach(indices, id: \.self) { metric($0) }
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(indices, id: \.self) { index in
+                    metric(index)
+                    if index != indices.last { Spacer(minLength: 16) }
+                }
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
                 ForEach(Array(stride(from: 0, to: indices.count, by: 2)), id: \.self) { start in
@@ -185,6 +188,7 @@ private struct NativeMetrics: View {
                 ForEach(indices, id: \.self) { metric($0) }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: values)
     }
 
@@ -199,7 +203,6 @@ private struct NativeMetrics: View {
                     .foregroundStyle(index == 3 ? Color.red : Color.secondary)
             }
             .fixedSize()
-            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
