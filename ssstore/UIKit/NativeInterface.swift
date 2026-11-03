@@ -24,7 +24,6 @@ struct NativeRow {
     var accessoryAction: UIAction?
     var metricActions: [Int: () -> Void] = [:]
     var compact = false
-    var singleLine = false
     var isDescription = false
     var productHeader = false
 
@@ -32,7 +31,7 @@ struct NativeRow {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
         badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision && compact == other.compact &&
         accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
-        singleLine == other.singleLine && isDescription == other.isDescription && productHeader == other.productHeader &&
+        isDescription == other.isDescription && productHeader == other.productHeader &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
 }
@@ -44,6 +43,10 @@ final class NativeCell: UITableViewCell {
         super.init(style: .subtitle, reuseIdentifier: reuseIdentifier)
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func layoutSubviews() {
+        accessoryView?.sizeToFit()
+        super.layoutSubviews()
+    }
     override func prepareForReuse() {
         super.prepareForReuse()
         imageTask?.cancel()
@@ -161,32 +164,47 @@ private final class NativeMetricState: ObservableObject {
 private struct NativeMetrics: View {
     @ObservedObject var state: NativeMetricState
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .title) private var numberSize: CGFloat = 30
     private let names = ["应用", "新版本", "待核对", "失败"]
 
     var body: some View {
         let values = state.values
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(values.indices, id: \.self) { index in
-                if (index != 1 && index != 3) || values[index] > 0 {
-                    Button { state.actions[index]?() } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(String(values[index]))
-                                .font(.system(size: 30, weight: .bold)).monospacedDigit()
-                                .foregroundStyle(index == 3 ? Color.red : Color.primary)
-                                .contentTransition(.numericText(value: Double(values[index])))
-                            Text(names[index]).font(.caption)
-                                .foregroundStyle(index == 3 ? Color.red : Color.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
+        let indices = values.indices.filter { ($0 != 1 && $0 != 3) || values[$0] > 0 }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                ForEach(indices, id: \.self) { metric($0) }
+            }
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+                ForEach(Array(stride(from: 0, to: indices.count, by: 2)), id: \.self) { start in
+                    GridRow(alignment: .top) {
+                        ForEach(Array(indices[start..<min(start + 2, indices.count)]), id: \.self) { metric($0) }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(values[index]) 个\(names[index])")
                 }
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(indices, id: \.self) { metric($0) }
             }
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: values)
+    }
+
+    private func metric(_ index: Int) -> some View {
+        Button { state.actions[index]?() } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(String(state.values[index]))
+                    .font(.system(size: numberSize, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(index == 3 ? Color.red : Color.primary)
+                    .contentTransition(.numericText(value: Double(state.values[index])))
+                Text(names[index]).font(.caption)
+                    .foregroundStyle(index == 3 ? Color.red : Color.secondary)
+            }
+            .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(state.values[index]) 个\(names[index])")
     }
 }
 
@@ -301,15 +319,18 @@ class NativePage: UITableViewController {
         }
         let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! NativeCell
         var config = cell.defaultContentConfiguration()
-        config.text = row.title; config.secondaryText = row.detail
+        config.text = row.title; config.secondaryText = row.detail.isEmpty ? nil : row.detail
         config.textProperties.color = row.color
-        config.textProperties.numberOfLines = row.singleLine ? 1 : 0
-        config.secondaryTextProperties.numberOfLines = row.singleLine ? 1 : 0
+        config.textProperties.numberOfLines = 0
+        config.secondaryTextProperties.numberOfLines = 0
+        config.textProperties.adjustsFontForContentSizeCategory = true
+        config.secondaryTextProperties.adjustsFontForContentSizeCategory = true
         let iconSize: CGFloat = row.compact ? 46 : 52
         config.imageProperties.maximumSize = CGSize(width: iconSize, height: iconSize)
         config.imageProperties.cornerRadius = row.compact ? 10 : 11
         if row.compact {
             config.imageProperties.reservedLayoutSize = CGSize(width: iconSize, height: iconSize)
+            config.image = UIImage(systemName: "app")
             config.textProperties.font = .preferredFont(forTextStyle: .callout)
             config.secondaryTextProperties.font = .preferredFont(forTextStyle: .footnote)
             config.directionalLayoutMargins.top = 10; config.directionalLayoutMargins.bottom = 10
@@ -338,7 +359,8 @@ class NativePage: UITableViewController {
             button.sizeToFit(); cell.accessoryView = button
         } else if let badge = row.badge {
             let label = (cell.accessoryView as? UILabel) ?? UILabel(); label.text = badge; label.textColor = badge == "新版本" ? .systemGreen : .secondaryLabel
-            label.font = .preferredFont(forTextStyle: .caption1); label.sizeToFit(); cell.accessoryView = label
+            label.font = .preferredFont(forTextStyle: .caption1); label.adjustsFontForContentSizeCategory = true
+            label.sizeToFit(); cell.accessoryView = label
         } else { cell.accessoryView = nil }
         cell.accessoryType = row.action == nil ? .none : .disclosureIndicator
         cell.selectionStyle = row.action == nil ? .none : .default

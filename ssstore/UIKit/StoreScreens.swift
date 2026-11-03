@@ -17,11 +17,12 @@ final class NativeProductHeaderCell: UITableViewCell {
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
-        name.font = .preferredFont(forTextStyle: .body)
+        name.font = .preferredFont(forTextStyle: .body); name.numberOfLines = 0
         price.font = .preferredFont(forTextStyle: .subheadline); price.textColor = .secondaryLabel
-        seller.font = .preferredFont(forTextStyle: .subheadline); seller.textColor = .secondaryLabel; seller.numberOfLines = 2
+        seller.font = .preferredFont(forTextStyle: .subheadline); seller.textColor = .secondaryLabel; seller.numberOfLines = 0
         for label in [name, price, seller] { label.adjustsFontForContentSizeCategory = true }
         name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        seller.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         price.setContentHuggingPriority(.required, for: .horizontal)
         price.setContentCompressionResistancePriority(.required, for: .horizontal)
         let text = UIStackView(arrangedSubviews: [name, seller]); text.axis = .vertical; text.spacing = 2
@@ -34,6 +35,7 @@ final class NativeProductHeaderCell: UITableViewCell {
     override func prepareForReuse() { super.prepareForReuse(); icon.kf.cancelDownloadTask() }
     func update(_ row: NativeRow) {
         name.text = row.title; price.text = row.badge; seller.text = row.detail
+        price.isHidden = row.badge?.isEmpty != false; seller.isHidden = row.detail.isEmpty
         icon.kf.setImage(with: row.icon, placeholder: UIImage(systemName: "app"), options: [.processor(DownsamplingImageProcessor(size: CGSize(width: 52, height: 52))), .scaleFactor(UIScreen.main.scale), .backgroundDecode])
     }
 }
@@ -135,7 +137,18 @@ final class NativeAccounts: NativePage {
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
-        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .add, primaryAction: UIAction { [weak self] _ in guard let self else { return }; let add = NativeAddAccount(model); let nav = UINavigationController(rootViewController: add); nav.sheetPresentationController?.detents = [.custom(identifier: .init("account")) { context in min(390, context.maximumDetentValue) }]; present(nav, animated: true) })
+        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .add, primaryAction: UIAction { [weak self] _ in
+            guard let self else { return }
+            let add = NativeAddAccount(model)
+            let nav = UINavigationController(rootViewController: add)
+            nav.sheetPresentationController?.detents = [.custom(identifier: .init("account")) { [weak add] context in
+                guard let add else { return nil }
+                let height = add.preferredContentSize.height
+                return height > 0 ? min(height, context.maximumDetentValue) : context.maximumDetentValue
+            }, .large()]
+            nav.sheetPresentationController?.prefersGrabberVisible = true
+            present(nav, animated: true)
+        })
     }
     override func rows() -> [NativeSection] {
         [NativeSection(title: "Apple ID", rows: AppStore.this.accounts.map { account in NativeRow(title: account.account.email, detail: ApplePackage.Configuration.countryCode(for: account.account.store) ?? account.account.store, action: { [weak self] in guard let self else { return }; push(NativeAccountDetail(model, id: account.id)) }) })]
@@ -170,6 +183,7 @@ final class NativeAddAccount: NativePage {
         password.placeholder = "密码"; password.isSecureTextEntry = true; password.textContentType = .password
         code.placeholder = "验证码"; code.keyboardType = .numberPad; code.textContentType = .oneTimeCode
         for field in [email, password, code] {
+            field.font = .preferredFont(forTextStyle: .body); field.adjustsFontForContentSizeCategory = true
             field.autocapitalizationType = .none; field.autocorrectionType = .no
             field.addAction(UIAction { [weak self] _ in self?.navigationItem.rightBarButtonItem?.isEnabled = !(self?.working ?? true) }, for: .editingChanged)
         }
@@ -182,10 +196,19 @@ final class NativeAddAccount: NativePage {
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "取消", primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "确认", primaryAction: UIAction { [weak self] _ in self?.authenticate() })
     }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let height = tableView.contentSize.height + (navigationController?.navigationBar.bounds.height ?? 0)
+        if preferredContentSize.height != height {
+            preferredContentSize = CGSize(width: view.bounds.width, height: height)
+            navigationController?.sheetPresentationController?.invalidateDetents()
+        }
+    }
     override func rows() -> [NativeSection] { [NativeSection(rows: Array(repeating: NativeRow(title: ""), count: needsCode ? 3 : 2)), NativeSection(rows: [link(password.isSecureTextEntry ? "显示密码" : "隐藏密码") { [weak self] in self?.password.isSecureTextEntry.toggle(); self?.reload() }])] }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         guard indexPath.section == 0 else { return super.tableView(tableView, cellForRowAt: indexPath) }
-        let cell = UITableViewCell(); let field = [email, password, code][indexPath.row]
+        let cell = UITableViewCell(); cell.selectionStyle = .none
+        let field = [email, password, code][indexPath.row]
         field.removeFromSuperview(); field.translatesAutoresizingMaskIntoConstraints = false; cell.contentView.addSubview(field)
         NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 18), field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -18), field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 16), field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -16)])
         return cell
@@ -229,7 +252,7 @@ final class NativeDownloads: NativePage {
         })
     }
     override func rows() -> [NativeSection] {
-        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in NativeRow(title: package.package.software.name + " · " + package.package.software.version, detail: (package.state.error ?? package.state.status.rawValue) + " · \(Int(package.state.percent * 100))% " + package.state.speed, icon: URL(string: package.package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativePackage(model, package: package)) }, delete: { Downloads.this.delete(request: package) }) })]
+        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in NativeRow(title: package.package.software.name + " · " + package.package.software.version, detail: (package.state.error ?? package.state.status.rawValue) + " · \(Int(package.state.percent * 100))% " + package.state.speed, icon: URL(string: package.package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativePackage(model, package: package)) }, delete: { Downloads.this.delete(request: package) }, compact: true) })]
     }
 }
 

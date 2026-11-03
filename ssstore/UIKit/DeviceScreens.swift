@@ -17,7 +17,7 @@ final class NativeChoices: NativeSearchPage {
     init(_ model: AppModel, title: String, items: [(String, String)], select: @escaping (String) -> Void) { self.items = items; self.select = select; super.init(model, title: title) }
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
-        [NativeSection(rows: items.filter { query.isEmpty || $0.1.localizedCaseInsensitiveContains(query) || $0.0.localizedCaseInsensitiveContains(query) }.map { key, title in NativeRow(title: title, icon: icons[key], action: { [weak self] in guard let self else { return }; select(key); navigationController?.popViewController(animated: true) }, compact: compact, singleLine: compact) })]
+        [NativeSection(rows: items.filter { query.isEmpty || $0.1.localizedCaseInsensitiveContains(query) || $0.0.localizedCaseInsensitiveContains(query) }.map { key, title in NativeRow(title: title, icon: icons[key], action: { [weak self] in guard let self else { return }; select(key); navigationController?.popViewController(animated: true) }, compact: compact) })]
     }
 }
 
@@ -39,7 +39,7 @@ final class NativeIgnored: NativePage {
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
         ids = model.ignoredApps.names.keys.sorted()
-        return [NativeSection(rows: ids.map { id in NativeRow(title: model.ignoredApps.names[id] ?? id, detail: id, icon: model.localIconURL(for: model.ignoredApps.application(for: id)) ?? model.ignoredApps.iconURLs?[id]) })]
+        return [NativeSection(rows: ids.map { id in NativeRow(title: model.ignoredApps.names[id] ?? id, detail: id, icon: model.localIconURL(for: model.ignoredApps.application(for: id)) ?? model.ignoredApps.iconURLs?[id], compact: true) })]
     }
     override func reload() {
         guard isViewLoaded else { return }
