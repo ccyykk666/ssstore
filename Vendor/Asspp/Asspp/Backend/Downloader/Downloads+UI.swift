@@ -59,6 +59,18 @@ extension Downloads {
 
 extension Downloads {
     func startDownload(for package: AppStore.AppPackage, accountID: String) async throws {
+        do {
+            try await prepareDownload(for: package, accountID: accountID)
+        } catch ApplePackageError.licenseRequired where package.software.price == 0 {
+            try await AppStore.this.withAccount(id: accountID) { account in
+                try await ApplePackage.Authenticator.rotatePasswordToken(for: &account.account)
+                try await ApplePackage.Purchase.purchase(account: &account.account, app: package.software)
+            }
+            try await prepareDownload(for: package, accountID: accountID)
+        }
+    }
+
+    private func prepareDownload(for package: AppStore.AppPackage, accountID: String) async throws {
         try await AppStore.this.withAccount(id: accountID) { account in
             let downloadOutput = try await StoreDownloadService.download(account: &account.account, package: package)
             let request = try Downloads.this.add(request: .init(

@@ -63,7 +63,6 @@ final class NativeProduct: NativePage {
         var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+")]
         if let size = app.fileSizeBytes.flatMap(Int64.init) { details.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
         var sections = [NativeSection(rows: header), NativeSection(title: "详情", rows: details), NativeSection(title: "新功能", rows: [NativeRow(title: app.releaseNotes ?? "")])]
-        if app.price == 0 { sections.append(NativeSection(rows: [link("获取许可证") { [weak self] in self?.license() }])) }
         if accountID == nil { sections.append(NativeSection(rows: [NativeRow(title: "请添加此地区的账户。", color: .systemOrange)])) }
         return sections
     }
@@ -71,27 +70,8 @@ final class NativeProduct: NativePage {
         guard let accountID else { alert("请先添加此地区账户。"); return }
         if let existing = Downloads.this.downloadRequest(forArchive: package) { push(NativePackage(model, package: existing)); return }
         run { [self] in
-            do { try await Downloads.this.startDownload(for: package, accountID: accountID) }
-            catch {
-                if case ApplePackageError.licenseRequired = error, package.software.price == 0 {
-                    let alert = UIAlertController(title: "需要许可证", message: nil, preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-                    alert.addAction(UIAlertAction(title: "获取许可证", style: .default) { [weak self] _ in self?.license() })
-                    present(alert, animated: true); return
-                }
-                throw error
-            }
+            try await Downloads.this.startDownload(for: package, accountID: accountID)
             if let request = Downloads.this.downloadRequest(forArchive: package) { push(NativePackage(model, package: request)) }
-        }
-    }
-    func license() {
-        guard let accountID else { return }
-        run { [self] in
-            try await AppStore.this.withAccount(id: accountID) { account in
-                try await ApplePackage.Authenticator.rotatePasswordToken(for: &account.account)
-                try await ApplePackage.Purchase.purchase(account: &account.account, app: self.package.software)
-            }
-            alert("请求成功")
         }
     }
 }

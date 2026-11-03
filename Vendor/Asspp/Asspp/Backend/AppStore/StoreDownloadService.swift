@@ -128,7 +128,7 @@ enum StoreDownloadService {
                     logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
                 }
             }
-            // Preserve the existing UI's explicit free-license acquisition flow.
+            // Let the download caller handle missing licenses.
             if StoreDownloadProtocol.failureCode(response) == "9610" {
                 throw ApplePackageError.licenseRequired
             }
