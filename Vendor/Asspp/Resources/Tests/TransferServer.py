@@ -16,7 +16,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         requests[self.path].append("HEAD")
-        if self.path == "/parallel":
+        if self.path.startswith("/parallel"):
             self.send_response(200)
             self.send_header("Content-Length", str(len(PAYLOAD) * 4))
             self.send_header("Accept-Ranges", "bytes")
@@ -41,14 +41,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        payload = PAYLOAD * 4 if self.path == "/parallel" else PAYLOAD
+        payload = PAYLOAD * 4 if self.path.startswith("/parallel") else PAYLOAD
+        if self.path == "/parallel-ignored":
+            request_range = ""
         start = int(request_range.removeprefix("bytes=").split("-")[0]) if request_range else 0
         end_text = request_range.split("-")[-1] if request_range else ""
         end = int(end_text) if end_text else len(payload)-1
         self.send_response(206 if request_range else 200)
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("ETag", '"parallel-fixture"' if self.path == "/parallel" else '"transfer-fixture"')
+        self.send_header("ETag", '"parallel-fixture"' if self.path.startswith("/parallel") else '"transfer-fixture"')
         self.send_header("Last-Modified", "Mon, 02 Nov 2026 00:00:00 GMT")
         if request_range:
             self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")

@@ -5,7 +5,7 @@ import Foundation
 struct TransferChecks {
     @MainActor static func main() async throws {
         let timeout = Task {
-            do { try await Task.sleep(nanoseconds: 30_000_000_000) } catch { return }
+            do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { return }
             fatalError("Native transfer checks timed out")
         }
         defer { timeout.cancel() }
@@ -99,6 +99,26 @@ struct TransferChecks {
         let (parallelStats, _) = try await URLSession.shared.data(from: base.appendingPathComponent("stats"))
         let ranges = try JSONDecoder().decode([String: [String]].self, from: parallelStats)["/parallel"] ?? []
         precondition(ranges.filter { $0.hasPrefix("bytes=") }.count == 4, "One IPA must use four distinct ranges")
+        let parallelResumeID = UUID()
+        var parallelPaused = false
+        let parallelResumed: URL = try await withCheckedThrowingContinuation { continuation in
+            let url = base.appendingPathComponent("parallel-resume")
+            parallel.resume(id: parallelResumeID, url: url) { _, _ in
+                guard !parallelPaused else { return }
+                parallelPaused = true
+                parallel.pause(id: parallelResumeID)
+                parallel.resume(id: parallelResumeID, url: url) { _, _ in }
+                    completion: { continuation.resume(with: $0) }
+            } completion: { continuation.resume(with: $0) }
+        }
+        let resumedParallelData = try Data(contentsOf: parallelResumed)
+        precondition(parallelPaused && SHA256.hash(data: resumedParallelData) == SHA256.hash(data: parallelExpected))
+        let ignoredRange: URL = try await withCheckedThrowingContinuation { continuation in
+            parallel.resume(id: UUID(), url: base.appendingPathComponent("parallel-ignored")) { _, _ in }
+                completion: { continuation.resume(with: $0) }
+        }
+        let ignoredRangeData = try Data(contentsOf: ignoredRange)
+        precondition(SHA256.hash(data: ignoredRangeData) == SHA256.hash(data: parallelExpected), "Ignored ranges must fall back without corrupting the file")
         print("Native transfer checks passed: integrity, coalescing, progress throttling, persisted and rapid resume, HTTP errors")
     }
 }
