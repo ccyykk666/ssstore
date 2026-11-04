@@ -79,12 +79,19 @@ final class PackageTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Se
                 task.cancel()
             }
             try? FileManager.default.removeItem(at: self.resumeFile(id))
+            try? FileManager.default.removeItem(at: self.downloadedFile(id))
         }
     }
 
     private func resumeFile(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".resume") }
+    private func downloadedFile(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".download") }
 
     private func launch(_ transfer: Transfer) {
+        let ready = downloadedFile(transfer.id)
+        if FileManager.default.fileExists(atPath: ready.path) {
+            finish(transfer, result: .success(ready))
+            return
+        }
         do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
         catch { finish(transfer, result: .failure(error)); return }
         let task: URLSessionDownloadTask
@@ -133,7 +140,7 @@ final class PackageTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Se
             guard let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
                 throw URLError(.badServerResponse)
             }
-            let target = directory.appendingPathComponent(transfer.id.uuidString + ".download")
+            let target = downloadedFile(transfer.id)
             try FileManager.default.moveItem(at: location, to: target)
             try? FileManager.default.removeItem(at: resumeFile(transfer.id))
             finish(transfer, result: .success(target))

@@ -4,6 +4,11 @@ import Foundation
 @main
 struct TransferChecks {
     @MainActor static func main() async throws {
+        let timeout = Task {
+            do { try await Task.sleep(nanoseconds: 30_000_000_000) } catch { return }
+            fatalError("Native transfer checks timed out")
+        }
+        defer { timeout.cancel() }
         let base = URL(string: CommandLine.arguments[1])!
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -25,6 +30,12 @@ struct TransferChecks {
         let firstBytes = try Data(contentsOf: first)
         precondition(SHA256.hash(data: firstBytes) == expected)
         precondition(progressCount > 0 && progressCount < 16, "Progress must be throttled before reaching MainActor")
+        let recovered: URL = try await withCheckedThrowingContinuation { continuation in
+            let nextSession = PackageTransfer(directory: directory)
+            nextSession.resume(id: firstID, url: base.appendingPathComponent("single")) { _, _ in }
+                completion: { continuation.resume(with: $0) }
+        }
+        precondition(recovered == first, "A completed transfer must survive interruption before IPA finalization")
 
         let resumeID = UUID()
         var paused = false
