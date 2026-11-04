@@ -67,6 +67,7 @@ final class PackageTransfer {
                 var state = (try? JSONDecoder().decode(Checkpoint.self, from: Data(contentsOf: stateFile)))
                 if state?.size != total || state?.validator != validator || (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value != total {
                     state = Checkpoint(size: total, validator: validator, completed: [])
+                    try? FileManager.default.removeItem(at: stateFile)
                     FileManager.default.createFile(atPath: destination.path, contents: nil)
                     let handle = try FileHandle(forWritingTo: destination)
                     try handle.truncate(atOffset: UInt64(total)); try handle.close()
