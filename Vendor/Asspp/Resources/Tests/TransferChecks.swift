@@ -61,6 +61,20 @@ struct TransferChecks {
         let resumedBytes = try Data(contentsOf: resumed)
         precondition(SHA256.hash(data: resumedBytes) == expected, "Resume must preserve every byte")
 
+        let raceID = UUID()
+        var toggled = false
+        let rapidResume: URL = try await withCheckedThrowingContinuation { continuation in
+            transfer.resume(id: raceID, url: base.appendingPathComponent("rapid-resume")) { _, _ in
+                guard !toggled else { return }
+                toggled = true
+                transfer.pause(id: raceID)
+                transfer.resume(id: raceID, url: base.appendingPathComponent("rapid-resume")) { _, _ in }
+                    completion: { _ in fatalError("Rapid resume must keep the original completion") }
+            } completion: { continuation.resume(with: $0) }
+        }
+        let rapidBytes = try Data(contentsOf: rapidResume)
+        precondition(SHA256.hash(data: rapidBytes) == expected, "An old cancellation cannot terminate a resumed task")
+
         do {
             let _: URL = try await withCheckedThrowingContinuation { continuation in
                 transfer.resume(id: UUID(), url: base.appendingPathComponent("denied")) { _, _ in }
@@ -73,6 +87,6 @@ struct TransferChecks {
         precondition(stats["/single"] == ["GET"], "No duplicate requests or HEAD preflight")
         precondition(stats["/resume"]?.contains(where: { $0.hasPrefix("bytes=") }) == true, "Resume must request the remaining range")
         precondition(!stats.values.flatMap { $0 }.contains("HEAD"))
-        print("Native transfer checks passed: integrity, coalescing, progress throttling, persisted resume, HTTP errors")
+        print("Native transfer checks passed: integrity, coalescing, progress throttling, persisted and rapid resume, HTTP errors")
     }
 }

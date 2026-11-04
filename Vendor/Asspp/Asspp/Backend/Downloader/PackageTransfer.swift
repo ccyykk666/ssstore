@@ -64,6 +64,7 @@ final class PackageTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Se
             task.cancel { data in
                 self.queue.async {
                     guard self.transfers[id] === transfer else { return }
+                    self.taskIDs.removeValue(forKey: task.taskIdentifier)
                     if let data { try? data.write(to: self.resumeFile(id), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
                     transfer.task = nil
                     if transfer.wantsResume { self.launch(transfer) }
