@@ -29,7 +29,10 @@ final class PackageTransfer {
     private func file(_ id: UUID, _ suffix: String) -> URL { directory.appendingPathComponent(id.uuidString + suffix) }
 
     func resume(id: UUID, url: URL, progress: @escaping ProgressHandler, completion: @escaping CompletionHandler) {
-        if native.contains(id) { fallback.resume(id: id, url: url, progress: progress, completion: completion); return }
+        if native.contains(id) || FileManager.default.fileExists(atPath: file(id, ".resume").path) {
+            native.insert(id)
+            fallback.resume(id: id, url: url, progress: progress, completion: completion); return
+        }
         if jobs[id] != nil {
             if stopping.contains(id) { restart[id] = { self.resume(id: id, url: url, progress: progress, completion: completion) } }
             return
