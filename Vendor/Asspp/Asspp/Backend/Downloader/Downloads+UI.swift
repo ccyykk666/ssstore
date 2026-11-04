@@ -63,7 +63,6 @@ extension Downloads {
             try await prepareDownload(for: package, accountID: accountID)
         } catch ApplePackageError.licenseRequired where package.software.price == 0 {
             try await AppStore.this.withAccount(id: accountID) { account in
-                try await ApplePackage.Authenticator.rotatePasswordToken(for: &account.account)
                 try await ApplePackage.Purchase.purchase(account: &account.account, app: package.software)
             }
             try await prepareDownload(for: package, accountID: accountID)
