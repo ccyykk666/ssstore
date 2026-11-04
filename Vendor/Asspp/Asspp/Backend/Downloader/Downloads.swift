@@ -21,6 +21,9 @@ class Downloads {
     private let transfer = PackageTransfer(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ssstore-transfers", isDirectory: true))
 
+    @ObservationIgnored
+    var preparingDownloads: [String: Task<Void, Error>] = [:]
+
     private static let speedFormatter: ByteCountFormatter = {
         let fmt = ByteCountFormatter()
         fmt.allowedUnits = .useAll

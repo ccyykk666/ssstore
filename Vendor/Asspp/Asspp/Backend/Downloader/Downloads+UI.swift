@@ -59,6 +59,16 @@ extension Downloads {
 
 extension Downloads {
     func startDownload(for package: AppStore.AppPackage, accountID: String) async throws {
+        if downloadRequest(forArchive: package) != nil { return }
+        let key = [accountID, package.id, package.externalVersionID ?? "", (package.entityType ?? .iPhone).rawValue].joined(separator: "\u{0}")
+        if let pending = preparingDownloads[key] { return try await pending.value }
+        let pending = Task { try await requestDownload(for: package, accountID: accountID) }
+        preparingDownloads[key] = pending
+        defer { preparingDownloads.removeValue(forKey: key) }
+        try await pending.value
+    }
+
+    private func requestDownload(for package: AppStore.AppPackage, accountID: String) async throws {
         do {
             try await prepareDownload(for: package, accountID: accountID)
         } catch ApplePackageError.licenseRequired where package.software.price == 0 {
