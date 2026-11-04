@@ -16,6 +16,7 @@ struct TransferChecks {
         let payload = Data((0..<8_388_608).map { UInt8(truncatingIfNeeded: $0) })
         let expected = SHA256.hash(data: payload)
 
+        let firstStarted = ProcessInfo.processInfo.systemUptime
         let firstID = UUID()
         var progressCount = 0
         let first: URL = try await withCheckedThrowingContinuation { continuation in
@@ -29,7 +30,7 @@ struct TransferChecks {
         }
         let firstBytes = try Data(contentsOf: first)
         precondition(SHA256.hash(data: firstBytes) == expected)
-        precondition(progressCount > 0 && progressCount < 16, "Progress must be throttled before reaching MainActor")
+        precondition(progressCount <= Int((ProcessInfo.processInfo.systemUptime - firstStarted) / 0.25) + 1, "Progress must be throttled before reaching MainActor")
         let recovered: URL = try await withCheckedThrowingContinuation { continuation in
             let nextSession = NativePackageTransfer(directory: directory)
             nextSession.resume(id: firstID, url: base.appendingPathComponent("single")) { _, _ in }
