@@ -48,7 +48,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(206 if request_range else 200)
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("ETag", '"transfer-fixture"')
+        self.send_header("ETag", '"parallel-fixture"' if self.path == "/parallel" else '"transfer-fixture"')
         self.send_header("Last-Modified", "Mon, 02 Nov 2026 00:00:00 GMT")
         if request_range:
             self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")

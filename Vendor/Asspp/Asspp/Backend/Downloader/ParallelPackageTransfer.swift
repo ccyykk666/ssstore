@@ -56,11 +56,12 @@ final class PackageTransfer {
                     return
                 }
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let validatorHeader = response.value(forHTTPHeaderField: "ETag")?.hasPrefix("W/") == false ? "ETag" : "Last-Modified"
                 let total = response.expectedContentLength
                 let stateFile = file(id, ".ranges")
                 let destination = file(id, ".partial")
                 var state = (try? JSONDecoder().decode(Checkpoint.self, from: Data(contentsOf: stateFile)))
-                if state?.size != total || state?.validator != validator || !FileManager.default.fileExists(atPath: destination.path) {
+                if state?.size != total || state?.validator != validator || (try? FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? NSNumber)?.int64Value != total {
                     state = Checkpoint(size: total, validator: validator, completed: [])
                     FileManager.default.createFile(atPath: destination.path, contents: nil)
                     let handle = try FileHandle(forWritingTo: destination)
@@ -96,6 +97,7 @@ final class PackageTransfer {
                             let (temporary, reply) = try await session.download(for: request, delegate: delegate)
                             defer { try? FileManager.default.removeItem(at: temporary) }
                             guard let reply = reply as? HTTPURLResponse, reply.statusCode == 206,
+                                  reply.value(forHTTPHeaderField: validatorHeader) == validator,
                                   reply.value(forHTTPHeaderField: "Content-Range") == "bytes \(start)-\(end)/\(total)",
                                   (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == end - start + 1 else { throw URLError(.badServerResponse) }
                             try Task.checkCancellation()
