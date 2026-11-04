@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 final class PackageTransfer {
+    private enum TransferError: Error { case unsupportedRange }
     typealias ProgressHandler = NativePackageTransfer.ProgressHandler
     typealias CompletionHandler = NativePackageTransfer.CompletionHandler
     private struct Checkpoint: Codable {
@@ -94,8 +95,15 @@ final class PackageTransfer {
                             request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
                             request.setValue(validator, forHTTPHeaderField: "If-Range")
                             let delegate = ChunkProgress { value in Task { @MainActor in notify(index, value) } }
-                            let (temporary, reply) = try await session.download(for: request, delegate: delegate)
+                            let temporary: URL
+                            let reply: URLResponse
+                            do { (temporary, reply) = try await session.download(for: request, delegate: delegate) }
+                            catch {
+                                if delegate.needsFallback { throw TransferError.unsupportedRange }
+                                throw error
+                            }
                             defer { try? FileManager.default.removeItem(at: temporary) }
+                            if (reply as? HTTPURLResponse)?.statusCode == 200 { throw TransferError.unsupportedRange }
                             guard let reply = reply as? HTTPURLResponse, reply.statusCode == 206,
                                   reply.value(forHTTPHeaderField: validatorHeader) == validator,
                                   reply.value(forHTTPHeaderField: "Content-Range") == "bytes \(start)-\(end)/\(total)",
@@ -126,7 +134,12 @@ final class PackageTransfer {
                 try? FileManager.default.removeItem(at: stateFile)
                 completion(.success(file(id, ".download")))
             } catch {
-                if !stopping.contains(id) { completion(.failure(error)) }
+                if !stopping.contains(id) {
+                    if case TransferError.unsupportedRange = error {
+                        clean(id); native.insert(id)
+                        fallback.resume(id: id, url: url, progress: progress, completion: completion)
+                    } else { completion(.failure(error)) }
+                }
             }
         }
     }
@@ -150,10 +163,15 @@ private final class ChunkProgress: NSObject, URLSessionDownloadDelegate, @unchec
     private let update: @Sendable (Int64) -> Void
     private let lock = NSLock()
     private var last: TimeInterval = 0
+    private var rejected = false
+    var needsFallback: Bool { lock.lock(); defer { lock.unlock() }; return rejected }
     init(_ update: @escaping @Sendable (Int64) -> Void) { self.update = update }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         lock.lock(); defer { lock.unlock() }
+        if (downloadTask.response as? HTTPURLResponse)?.statusCode == 200 {
+            rejected = true; downloadTask.cancel(); return
+        }
         let now = ProcessInfo.processInfo.systemUptime
         if now - last >= 0.25 { last = now; update(totalBytesWritten) }
     }
