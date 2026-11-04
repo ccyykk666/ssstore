@@ -8,6 +8,23 @@ enum HistorySupportChecks {
     }
 
     static func run() async throws {
+        let prepared = StorePreparedDownloadCache<String>(lifetime: 10)
+        typealias Key = StorePreparedDownloadCache<String>.Key
+        let identity = Key(account: "first", token: "token", guid: "device", store: "store", app: "app", platform: "iPhone", version: "old")
+        let otherAccount = Key(account: "second", token: "token", guid: "device", store: "store", app: "app", platform: "iPhone", version: "old")
+        let rotatedToken = Key(account: "first", token: "new", guid: "device", store: "store", app: "app", platform: "iPhone", version: "old")
+        let preparedAt = Date(timeIntervalSince1970: 1000)
+        await prepared.insert("signed reply", for: identity, now: preparedAt)
+        let wrongAccount = await prepared.take(for: otherAccount, now: preparedAt)
+        let wrongSession = await prepared.take(for: rotatedToken, now: preparedAt)
+        precondition(wrongAccount == nil && wrongSession == nil, "History replies cannot cross accounts or rotated sessions")
+        let ready = await prepared.take(for: identity, now: preparedAt.addingTimeInterval(9))
+        let consumed = await prepared.take(for: identity, now: preparedAt.addingTimeInterval(9))
+        precondition(ready == "signed reply" && consumed == nil, "A history reply may start one download without another store request")
+        await prepared.insert("expired reply", for: identity, now: preparedAt)
+        let expired = await prepared.take(for: identity, now: preparedAt.addingTimeInterval(10))
+        precondition(expired == nil, "Expired asset URLs must be fetched again")
+
         let url = URL(string: "https://downloaddispatch.itunes.apple.com" + StoreDownloadProtocol.entPath)!
         let count = Counter()
         let cache = StoreBagCache(lifetime: 10)

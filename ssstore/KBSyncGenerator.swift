@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import WebKit
 #if canImport(UIKit)
 import UIKit
@@ -212,17 +213,48 @@ private final class BundledKBSyncResources: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
 }
 
-/// Serialize the large interpreter and bind its memory-only cache to DSID/GUID.
+/// Serialize the interpreter; reuse proofs across launches for the same identity.
 actor KBSyncStore {
     static let shared = KBSyncStore()
     private var cache: [String: String] = [:]
     private var active: (id: UUID, key: String, task: Task<String, Error>)?
 
-    func cached(guid: String, dsid: String) -> String? { cache[dsid + ":" + guid.lowercased()] }
+    private func query(_ key: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: "dev.personal.ssstore.kbsync",
+         kSecAttrAccount as String: key]
+    }
+
+    func cached(guid: String, dsid: String) -> String? {
+        let key = dsid + ":" + guid.lowercased()
+        if let blob = cache[key] { return blob }
+        var request = query(key)
+        request[kSecReturnData as String] = true
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(request as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data, let blob = String(data: data, encoding: .utf8) else { return nil }
+        cache[key] = blob
+        return blob
+    }
+
+    private func store(_ blob: String, key: String) {
+        guard cache[key] != blob else { return }
+        cache[key] = blob
+        let values = [kSecValueData as String: Data(blob.utf8)]
+        if SecItemUpdate(query(key) as CFDictionary, values as CFDictionary) == errSecItemNotFound {
+            var request = query(key)
+            request[kSecValueData as String] = Data(blob.utf8)
+            request[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            SecItemAdd(request as CFDictionary, nil)
+        }
+    }
 
     func invalidate(guid: String, dsid: String, expected: String) {
         let key = dsid + ":" + guid.lowercased()
-        if cache[key] == expected { cache.removeValue(forKey: key) }
+        if cache[key] == expected {
+            cache.removeValue(forKey: key)
+            SecItemDelete(query(key) as CFDictionary)
+        }
     }
 
     func generate(guid: String, dsid: String) async throws -> String {
@@ -230,19 +262,19 @@ actor KBSyncStore {
         while let pending = active {
             let result = await pending.task.result
             if active?.id == pending.id {
-                if case let .success(blob) = result { cache[pending.key] = blob }
+                if case let .success(blob) = result { store(blob, key: pending.key) }
                 active = nil
             }
             try Task.checkCancellation()
             if pending.key == key { return try result.get() }
         }
-        if let blob = cache[key] { return blob }
+        if let blob = cached(guid: guid, dsid: dsid) { return blob }
         let id = UUID()
         let job = Task { try await KBSyncGenerator.generate(guid: guid, dsid: dsid) }
         active = (id, key, job)
         let result = await job.result
         if active?.id == id { active = nil }
-        if case let .success(blob) = result { cache[key] = blob }
+        if case let .success(blob) = result { store(blob, key: key) }
         try Task.checkCancellation()
         return try result.get()
     }

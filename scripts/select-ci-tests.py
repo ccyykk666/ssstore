@@ -12,6 +12,11 @@ STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
     "core": ("Packages/UpdateCore/",),
     "downloads": (
+        STORE + "Asspp/Backend/Downloader/Downloads.swift",
+        STORE + "Asspp/Backend/Downloader/PackageTransfer.swift",
+        STORE + "Asspp/Backend/Downloader/PackageState.swift",
+        STORE + "Resources/Tests/TransferChecks.swift",
+        STORE + "Resources/Tests/TransferServer.py",
         STORE + "Asspp/Backend/Downloader/Downloads+UI.swift",
         STORE + "Asspp/Backend/AppStore/AppPackageArchive.swift",
         STORE + "Asspp/Backend/AppStore/StoreProtocol.swift",

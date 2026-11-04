@@ -38,7 +38,7 @@ extension Downloads {
             [.resume, .delete]
         case .failed:
             [.restart, .delete]
-        case .completed:
+        case .completed, .processing:
             [.delete]
         }
     }

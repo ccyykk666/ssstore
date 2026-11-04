@@ -1,5 +1,31 @@
 import Foundation
 
+/// Briefly reuse authenticated history replies without persisting signed URLs.
+actor StorePreparedDownloadCache<Value> {
+    struct Key: Hashable, Sendable {
+        let account: String
+        let token: String
+        let guid: String
+        let store: String
+        let app: String
+        let platform: String
+        let version: String
+    }
+    private var entries: [Key: (value: Value, expires: Date)] = [:]
+    private let lifetime: TimeInterval
+    init(lifetime: TimeInterval = 60) { self.lifetime = lifetime }
+
+    func insert(_ value: Value, for key: Key, now: Date = Date()) {
+        entries = entries.filter { $0.value.expires > now }
+        entries[key] = (value, now.addingTimeInterval(lifetime))
+    }
+
+    func take(for key: Key, now: Date = Date()) -> Value? {
+        guard let entry = entries.removeValue(forKey: key), entry.expires > now else { return nil }
+        return entry.value
+    }
+}
+
 /// Public endpoint configuration only; never retains account headers or replies.
 actor StoreBagCache {
     private struct Entry {

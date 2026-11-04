@@ -4,6 +4,12 @@ import Foundation
 /// Download metadata transport. Keep Apple's raw bodies, cookies and signed
 /// asset URLs out of both the Xcode console and the in-app log viewer.
 enum StoreDownloadService {
+    private static let prepared = StorePreparedDownloadCache<DownloadOutput>()
+    private static func cacheKey(account: Account, package: AppStore.AppPackage, version: String) -> StorePreparedDownloadCache<DownloadOutput>.Key {
+        .init(account: account.directoryServicesIdentifier, token: account.passwordToken,
+              guid: Configuration.deviceIdentifier.lowercased(), store: account.store,
+              app: package.software.bundleID, platform: (package.entityType ?? .iPhone).rawValue, version: version)
+    }
     private final class NoRedirect: NSObject, URLSessionTaskDelegate {
         func urlSession(_: URLSession, task _: URLSessionTask,
                         willPerformHTTPRedirection _: HTTPURLResponse,
@@ -15,6 +21,12 @@ enum StoreDownloadService {
     }
 
     static func download(account: inout Account, package: AppStore.AppPackage) async throws -> DownloadOutput {
+        if let version = package.externalVersionID,
+           let output = await prepared.take(for: cacheKey(account: account, package: package, version: version)) {
+            try Task.checkCancellation()
+            logger.info("Store download: reusing recent historical download reply")
+            return output
+        }
         let email = account.email
         return try await product(account: &account, package: package, version: package.externalVersionID, operation: "download") { item in
             try output(item: item, email: email)
@@ -38,10 +50,17 @@ enum StoreDownloadService {
     }
 
     static func versionMetadata(account: inout Account, package: AppStore.AppPackage, versionID: String) async throws -> StoreHistorySupport.Metadata {
-        try await product(account: &account, package: package, version: versionID, operation: "version-metadata") { item in
+        let email = account.email
+        var download: DownloadOutput?
+        let result = try await product(account: &account, package: package, version: versionID, operation: "version-metadata") { item in
             guard let metadata = item["metadata"] as? [String: Any] else { throw StoreDownloadError.invalidPackage }
+            download = try? output(item: item, email: email)
             return try StoreHistorySupport.details(metadata)
         }
+        if let download {
+            await prepared.insert(download, for: cacheKey(account: account, package: package, version: versionID))
+        }
+        return result
     }
 
     // Explicit per-request cookies/tokens remain isolated. Sharing the ephemeral
@@ -95,20 +114,28 @@ enum StoreDownloadService {
             let guid = Configuration.deviceIdentifier
             let response: [String: Any]
             if let endpoint = try await preferredEndpoint(session: session, guid: guid, trace: trace) {
-                let pinned: String
-                if let version { pinned = version }
-                else { pinned = try await resolveVersion() }
-                effectiveVersion = pinned
+                func requestedVersion() async throws -> String {
+                    if let version { return version }
+                    return try await resolveVersion()
+                }
+                async let pinnedVersion = requestedVersion()
                 let dsid = account.directoryServicesIdentifier
                 let cached = await KBSyncStore.shared.cached(guid: guid, dsid: dsid)
                 logger.info("Store download [\(trace)]: preferred=ent/download kbsyncCached=\(cached != nil)")
-                response = try await StoreDownloadProtocol.preferredDownload(cached: cached) {
+                func generateBlob() async throws -> String {
                     logger.info("Store download [\(trace)]: local kbsync generation started")
                     let generationStart = DispatchTime.now().uptimeNanoseconds
                     let blob = try await KBSyncStore.shared.generate(guid: guid, dsid: dsid)
                     logger.info("Store download [\(trace)]: kbsync elapsedMs=\(elapsed(generationStart))")
                     logger.info("Store download [\(trace)]: local kbsync generation ready")
                     return blob
+                }
+                let generated = cached == nil ? try await generateBlob() : nil
+                let pinned = try await pinnedVersion
+                effectiveVersion = pinned
+                response = try await StoreDownloadProtocol.preferredDownload(cached: cached) {
+                    if let generated { return generated }
+                    return try await generateBlob()
                 } invalidate: { blob in
                     await KBSyncStore.shared.invalidate(guid: guid, dsid: dsid, expected: blob)
                 } fetch: { blob in

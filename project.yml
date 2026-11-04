@@ -11,9 +11,6 @@ packages:
   ApplePackage:
     url: https://github.com/Lakr233/ApplePackage
     exactVersion: "2.0.3"
-  Digger:
-    url: https://github.com/Lakr233/Digger
-    exactVersion: "0.0.5"
   Vapor:
     url: https://github.com/vapor/vapor
     exactVersion: "4.121.2"
@@ -47,7 +44,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "38"
+    CURRENT_PROJECT_VERSION: "39"
 targets:
   ssstore:
     type: application
@@ -99,8 +96,6 @@ targets:
         product: IDevice
       - package: ApplePackage
         product: ApplePackage
-      - package: Digger
-        product: Digger
       - package: Vapor
         product: Vapor
       - package: SwiftNIO

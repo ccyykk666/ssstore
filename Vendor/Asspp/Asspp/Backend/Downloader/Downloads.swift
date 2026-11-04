@@ -6,7 +6,6 @@
 //
 
 import ApplePackage
-@preconcurrency import Digger
 import Foundation
 import Logging
 
@@ -19,13 +18,8 @@ class Downloads {
     private var _manifests = Persist<[PackageManifest]>(key: "DownloadRequests", defaultValue: [])
 
     @ObservationIgnored
-    private var lastProgressUpdates: [UUID: CFAbsoluteTime] = [:]
-
-    /// Manifest IDs whose Digger callbacks are already attached, so a
-    /// pause/resume cycle does not register a second completion handler (which
-    /// would run finalize() twice and destroy the downloaded bytes).
-    @ObservationIgnored
-    private var registeredCallbacks: Set<UUID> = []
+    private let transfer = PackageTransfer(directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ssstore-transfers", isDirectory: true))
 
     private static let speedFormatter: ByteCountFormatter = {
         let fmt = ByteCountFormatter()
@@ -53,7 +47,7 @@ class Downloads {
     private(set) var runningTaskCount: Int = 0
 
     private func refreshRunningTaskCount() {
-        runningTaskCount = manifests.count(where: { $0.state.status == .downloading })
+        runningTaskCount = manifests.count(where: { [.downloading, .processing].contains($0.state.status) })
     }
 
     private init() {
@@ -79,131 +73,91 @@ class Downloads {
     }
 
     func suspend(request: PackageManifest) {
-        logger.info("suspending download request id: \(request.id)")
-        DiggerManager.shared.stopTask(for: request.url)
+        transfer.pause(id: request.id)
         request.state.resetIfNotCompleted()
+        request.state.speed = ""
         refreshRunningTaskCount()
         saveManifests()
     }
 
     func resume(request: PackageManifest) {
-        logger.info("resuming download request id: \(request.id)")
         request.state.start()
-        let seed = DiggerManager.shared.download(with: request.url)
-
-        // Only attach callbacks once per manifest; a pause/resume cycle reuses
-        // the existing Digger seed and must not stack a second completion.
-        guard registeredCallbacks.insert(request.id).inserted else {
-            DiggerManager.shared.startTask(for: request.url)
-            saveManifests()
-            return
+        transfer.resume(id: request.id, url: request.url) { [weak self] fraction, speed in
+            guard let self, [.pending, .downloading].contains(request.state.status) else { return }
+            let wasDownloading = request.state.status == .downloading
+            var state = request.state
+            state.status = .downloading; state.percent = fraction
+            state.speed = Self.speedFormatter.string(fromByteCount: speed) + "/s"
+            request.state = state
+            if !wasDownloading { self.refreshRunningTaskCount() }
+        } completion: { [weak self] result in
+            guard let self else { return }
+            guard self.manifests.contains(where: { $0.id == request.id }) else {
+                if case let .success(file) = result { try? FileManager.default.removeItem(at: file) }
+                return
+            }
+            switch result {
+            case let .success(file):
+                request.state.status = .processing; request.state.percent = 1; request.state.speed = ""
+                self.refreshRunningTaskCount()
+                let package = request.package
+                let target = request.targetLocation
+                let signatures = request.signatures
+                let metadata = request.iTunesMetadata
+                // ZIP validation and signature injection must not run on MainActor.
+                Task {
+                    do {
+                        try await Task.detached(priority: .utility) {
+                            try await Self.finalize(package: package, target: target, signatures: signatures, metadata: metadata, downloadedFile: file)
+                        }.value
+                        guard self.manifests.contains(where: { $0.id == request.id }) else {
+                            request.delete(); return
+                        }
+                        request.state.complete()
+                    } catch { request.state.error = error.localizedDescription }
+                    self.refreshRunningTaskCount(); self.saveManifests()
+                }
+            case let .failure(error):
+                request.state.error = error.localizedDescription
+                self.refreshRunningTaskCount(); self.saveManifests()
+            }
         }
-
-        seed
-            .speed { speedBytes in
-                Task { @MainActor in
-                    guard request.state.status == .downloading || request.state.status == .pending else { return }
-                    let wasDownloading = request.state.status == .downloading
-                    var newState = request.state
-                    newState.status = .downloading
-                    newState.speed = Self.speedFormatter.string(fromByteCount: Int64(speedBytes))
-                    request.state = newState
-                    if !wasDownloading {
-                        self.refreshRunningTaskCount()
-                    }
-                }
-            }
-            .progress { progress in
-                Task { @MainActor in
-                    guard request.state.status == .downloading || request.state.status == .pending else { return }
-                    let now = CFAbsoluteTimeGetCurrent()
-                    let fraction = progress.fractionCompleted
-                    let last = self.lastProgressUpdates[request.id] ?? 0
-                    guard fraction >= 1.0 || (now - last) >= 0.2 else { return }
-                    self.lastProgressUpdates[request.id] = now
-
-                    let wasDownloading = request.state.status == .downloading
-                    var newState = request.state
-                    newState.status = .downloading
-                    newState.percent = fraction
-                    request.state = newState
-                    if !wasDownloading {
-                        self.refreshRunningTaskCount()
-                    }
-                }
-            }
-            .completion { completion in
-                Task { @MainActor in
-                    self.registeredCallbacks.remove(request.id)
-                    switch completion {
-                    case let .success(url):
-                        Task.detached {
-                            do {
-                                try await self.finalize(manifest: request, preparedContentAt: url)
-                                await MainActor.run {
-                                    request.state.complete()
-                                    self.refreshRunningTaskCount()
-                                    self.saveManifests()
-                                }
-                            } catch {
-                                await MainActor.run {
-                                    request.state.error = error.localizedDescription
-                                    self.refreshRunningTaskCount()
-                                    self.saveManifests()
-                                }
-                            }
-                        }
-                    case let .failure(error):
-                        let nsError = error as NSError
-                        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
-                            // User-initiated cancellation via cancelTask(), not an error
-                        } else if error is CancellationError {
-                            // Swift structured concurrency cancellation
-                        } else {
-                            request.state.error = error.localizedDescription
-                            self.saveManifests()
-                        }
-                        self.refreshRunningTaskCount()
-                    }
-                }
-            }
-        DiggerManager.shared.startTask(for: request.url)
         saveManifests()
     }
 
-    private func finalize(manifest: PackageManifest, preparedContentAt downloadedFile: URL) async throws {
+    private nonisolated static func finalize(package: AppStore.AppPackage, target: URL, signatures: [Sinf], metadata: Data, downloadedFile: URL) async throws {
+        defer { try? FileManager.default.removeItem(at: downloadedFile) }
         // Verify the main bundle identity and platform before signature injection.
-        try StorePackageValidator.validate(at: downloadedFile, package: manifest.package)
+        try StorePackageValidator.validate(at: downloadedFile, package: package)
         try? FileManager.default.createDirectory(
-            at: manifest.targetLocation.deletingLastPathComponent(),
+            at: target.deletingLastPathComponent(),
             withIntermediateDirectories: true,
         )
-        try? FileManager.default.removeItem(at: manifest.targetLocation)
+        try? FileManager.default.removeItem(at: target)
 
-        let tempFile = manifest.targetLocation
+        let tempFile = target
             .deletingLastPathComponent()
-            .appendingPathComponent(".\(manifest.targetLocation.lastPathComponent).unsigned")
+            .appendingPathComponent(".\(target.lastPathComponent).unsigned")
         try? FileManager.default.removeItem(at: tempFile)
 
-        logger.info("preparing signature: \(manifest.id)")
+        logger.info("preparing signature: \(package.software.bundleID)")
         try FileManager.default.moveItem(at: downloadedFile, to: tempFile)
         defer { try? FileManager.default.removeItem(at: tempFile) }
 
-        logger.info("injecting signatures: \(manifest.id)")
+        logger.info("injecting signatures: \(package.software.bundleID)")
         try await SignatureInjector.inject(
-            sinfs: manifest.signatures,
-            iTunesMetadata: manifest.iTunesMetadata,
+            sinfs: signatures,
+            iTunesMetadata: metadata,
             into: tempFile.path,
         )
 
-        logger.info("moving finalized file: \(manifest.id)")
-        try FileManager.default.moveItem(at: tempFile, to: manifest.targetLocation)
+        logger.info("moving finalized file: \(package.software.bundleID)")
+        try FileManager.default.moveItem(at: tempFile, to: target)
     }
 
     func delete(request: PackageManifest) {
         logger.info("deleting download request id: \(request.id)")
-        DiggerManager.shared.cancelTask(for: request.url)
-        registeredCallbacks.remove(request.id)
+        transfer.cancel(id: request.id)
         request.delete()
         manifests.removeAll(where: { $0.id == request.id })
         refreshRunningTaskCount()
@@ -211,17 +165,15 @@ class Downloads {
 
     func restart(request: PackageManifest) {
         logger.info("restarting download request id: \(request.id)")
-        DiggerManager.shared.cancelTask(for: request.url)
-        registeredCallbacks.remove(request.id)
+        transfer.cancel(id: request.id)
         request.delete()
         request.state = .init()
         resume(request: request)
     }
 
     func removeAll() {
-        manifests.forEach { $0.delete() }
+        manifests.forEach { transfer.cancel(id: $0.id); $0.delete() }
         manifests.removeAll()
-        registeredCallbacks.removeAll()
         refreshRunningTaskCount()
     }
 }

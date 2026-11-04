@@ -1,5 +1,4 @@
 import ApplePackage
-import Digger
 import Foundation
 import Logging
 
@@ -26,8 +25,6 @@ enum StoreRuntime {
         LoggingSystem.bootstrap { LogManagerHandler(label: $0) }
         APLogger.verbose = false
         APLogger.logger = Logger(label: "dev.personal.ssstore.applepackage")
-        DiggerManager.shared.maxConcurrentTasksCount = 3
-        DiggerManager.shared.startDownloadImmediately = true
         _ = documentsDirectory
         _ = temporaryDirectory
         _ = AppStore.this

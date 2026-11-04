@@ -11,9 +11,21 @@ struct PackageState: Codable, Hashable, Equatable {
     enum Status: String, Codable, Equatable, Hashable {
         case pending
         case downloading
+        case processing
         case paused
         case completed
         case failed
+
+        var title: String {
+            switch self {
+            case .pending: "等待开始"
+            case .downloading: "正在下载"
+            case .processing: "正在整理安装包"
+            case .paused: "已暂停"
+            case .completed: "下载完成"
+            case .failed: "下载失败"
+            }
+        }
     }
 
     var status: Status = .pending
@@ -39,7 +51,7 @@ extension PackageState {
     }
 
     mutating func resetIfNotCompleted() {
-        guard [.pending, .downloading].contains(status) else { return }
+        guard [.pending, .downloading, .processing].contains(status) else { return }
         status = .paused
     }
 

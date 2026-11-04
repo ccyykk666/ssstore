@@ -101,6 +101,7 @@ final class NativeHistory: NativePage {
     override func rows() -> [NativeSection] {
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [UIAction(title: "加载更多", image: UIImage(systemName: "list.bullet.below.rectangle")) { [weak self] _ in self?.archive.populateNextVersionItems() }, UIAction(title: "刷新", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.archive.loadHistory(force: true) }]))
         var rows: [NativeRow] = []
+        if working { rows.append(NativeRow(title: "正在请求下载…")) }
         if archive.isLoadingIndex { rows.append(NativeRow(title: "正在加载历史版本...")) }
         if let error = archive.error { rows.append(NativeRow(title: error, color: .systemOrange)) }
         versionRowOffset = rows.count
@@ -113,7 +114,14 @@ final class NativeHistory: NativePage {
                 }
                 rows.append(NativeRow(title: package.software.version, color: .systemBlue, action: { [weak self] in
                     guard let self, let account = archive.accountIdentifier else { self?.alert("请先选择账户。"); return }
-                    confirm("下载 \(package.software.version)？") { [weak self] in self?.run { try await Downloads.this.startDownload(for: package, accountID: account) } }
+                    confirm("下载 \(package.software.version)？") { [weak self] in self?.run {
+                        guard let self else { return }
+                        archive.cancelHistoryLoading()
+                        if Downloads.this.downloadRequest(forArchive: package) == nil {
+                            try await Downloads.this.startDownload(for: package, accountID: account)
+                        }
+                        if let request = Downloads.this.downloadRequest(forArchive: package) { push(NativePackage(model, package: request)) }
+                    } }
                 }, badge: date))
             } else {
                 rows.append(NativeRow(title: key, detail: archive.metadataErrors[key] ?? (archive.loadingIDs.contains(key) ? "加载中…" : "点按加载"), action: { [weak self] in self?.archive.populateVersionItem(for: key, retry: true) }))
@@ -252,7 +260,7 @@ final class NativeDownloads: NativePage {
         })
     }
     override func rows() -> [NativeSection] {
-        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in NativeRow(title: package.package.software.name + " · " + package.package.software.version, detail: (package.state.error ?? package.state.status.rawValue) + " · \(Int(package.state.percent * 100))% " + package.state.speed, icon: URL(string: package.package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativePackage(model, package: package)) }, delete: { Downloads.this.delete(request: package) }, compact: true) })]
+        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in NativeRow(title: package.package.software.name + " · " + package.package.software.version, detail: (package.state.error ?? package.state.status.title) + " · \(Int(package.state.percent * 100))% " + package.state.speed, icon: URL(string: package.package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativePackage(model, package: package)) }, delete: { Downloads.this.delete(request: package) }, compact: true) })]
     }
 }
 
@@ -269,7 +277,7 @@ final class NativePackage: NativePage {
         } else {
             controls = Downloads.this.getAvailableActions(for: package).filter { $0 != .delete }.map { action in link(Downloads.this.getActionLabel(for: action).title) { [weak self] in guard let self else { return }; Downloads.this.performDownloadAction(for: package, action: action); reload() } }
         }
-        return [NativeSection(rows: [NativeRow(title: app.name, detail: app.version, icon: URL(string: app.artworkUrl)), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: package.state.error ?? package.state.status.rawValue, detail: "\(Int(package.state.percent * 100))%")]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
+        return [NativeSection(rows: [NativeRow(title: app.name, detail: app.version, icon: URL(string: app.artworkUrl)), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: package.state.error ?? package.state.status.title, detail: "\(Int(package.state.percent * 100))%")]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
     }
 }
 

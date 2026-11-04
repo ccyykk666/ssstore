@@ -1,6 +1,6 @@
 # ssstore 项目文档
 
-更新日期：2026-11-03。本文按公开仓库当前 `main` 的 0.6.0（38）版本编写，介绍产品边界、代码结构、数据流、构建和交付方式。具体实现以源码及工作流为准；设备服务和 Apple 商店接口可能随系统或服务端变化。
+更新日期：2026-11-04。本文按公开仓库当前 `main` 的 0.6.0（39）版本编写，介绍产品边界、代码结构、数据流、构建和交付方式。具体实现以源码及工作流为准；设备服务和 Apple 商店接口可能随系统或服务端变化。
 
 ## 项目概览
 
@@ -38,6 +38,8 @@ ssstore 是面向 iPhone 和 iPad 的应用清单、版本查询、商店下载�
 - 某些历史版本下载可能被 Apple 以 HTTP 403 拒绝。403 是服务端拒绝本次 redownload 请求，不等同于本地缺少证书或历史列表没有数据。应用不绕过 Apple 的许可或签名验证。
 - 账户凭据和会话令牌通过系统 Keychain/上游账户存储管理。用户主动下载免费应用时，若服务返回缺少许可，会自动获取免费许可并重试一次下载；付费应用仍须已有购买许可。读取清单与搜索不会请求购买许可。验证码/双重验证按 Apple 返回的认证流程完成。
 - 下载页展示本地软件包状态，可继续、暂停、重试、分享或左滑删除。下载完成后的软件包可以预览或通过系统分享/AirDrop 导出。
+- 下载采用原生 `URLSessionDownloadTask` 直接写盘，进度合并后每 0.25 秒最多通知界面一次。暂停保存系统续传数据，恢复时交由 URLSession 请求剩余内容，不使用同步 HEAD 探测；文件校验和签名整理在后台执行。历史版本查询返回的可下载内容按账户会话、设备、地区、平台和版本在内存保留至多 60 秒，供一次下载复用，减少重复鉴权请求。
+- kbsync 验证数据按 DSID/GUID 保存在本机 Keychain，避免每次冷启动重新运行本地解释器；缓存被服务端拒绝时按现有规则失效并重新生成一次。首次生成与最新版本目录查询并行进行。首次验证、Apple 服务响应与 CDN/网络带宽仍会影响开始时间和实际速度，不承诺固定加速倍数。
 - 可选 Remote Pairing 安装由用户明确启动：通过已配对的本机网络连接上传已下载 IPA 到设备暂存区，再请求设备 InstallationProxy 安装，完成后清理由本次操作创建的暂存目录。原 IPA 会保留。系统仍负责验证应用签名及许可；此流程不提供重签名、越狱或绕过 Apple 验证的能力。
 - 证书方式是另一条单独安装路径，继续遵守 TLS 信任要求。配对安装不需要安装本地 HTTPS 根证书。
 
@@ -63,6 +65,7 @@ ssstore 是面向 iPhone 和 iPad 的应用清单、版本查询、商店下载�
 | `ssstore/OnDevicePairingController.swift` | iOS Remote Pairing 原生配对桥接 |
 | `ssstore/KBSyncGenerator.swift` | 本机 WebKit 中运行的 kbsync 准备与调用 |
 | `ssstore/StoreRuntime.swift` | 商店运行时、日志、下载并发及本地目录初始化 |
+| `Vendor/Asspp/Asspp/Backend/Downloader/PackageTransfer.swift` | 原生文件下载、进度合并、暂停与续传 |
 | `Packages/UpdateCore/` | 清单模型与解析、版本匹配、忽略名单、配对记录和只读检查模型；含 Swift 测试 |
 | `Packages/DeviceKit/` | 已固定版本的 `IDevice.xcframework` 二进制桥接包 |
 | `Vendor/Asspp/` | Asspp 商店、账户、下载、IPA 管理和安装代码的集成副本 |
@@ -142,6 +145,7 @@ bash scripts/build-ipa.sh
 - Swift Package 版本固定在 `project.yml`；生成项目的依赖解析文件来源于 `Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved`。
 - `UpdateCore`、`DeviceKit` 为仓库内包；`DeviceKit` 中的 IDevice 是固定版本 XCFramework，而非由 SwiftPM 从源代码编译。
 - 商店集成基于 `Vendor/Asspp` 的 Asspp 4.2.2 上游副本；本地 kbsync 资源基于 `Vendor/AssppWeb`。具体 commit、许可文本和适用范围见 `THIRD_PARTY_NOTICES.md` 及随应用打包的许可资源。
+- 下载流程优化参考 [majd/ipatool](https://github.com/majd/ipatool) 对版本绑定、历史下载回复与 HTTP 续传的处理；iOS 文件传输使用 Foundation 原生实现，移除了应用目标的 Digger 依赖。
 - 本仓库没有由 `THIRD_PARTY_NOTICES.md` 自动授予的统一项目级 MIT 许可。不要把单一依赖的许可误当作整个仓库的许可。
 - 当前许可记录指出：kbsync 构建含 Unicorn/WASM 及从 Apple OS X 10.9 更新提取的运行资源；对应源代码/许可与再分发边界详见通知文件。仓库公开或 CI 构建成功本身不代表这些组件获得额外再分发授权。
 
