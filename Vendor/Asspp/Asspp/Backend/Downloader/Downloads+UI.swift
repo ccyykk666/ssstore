@@ -37,7 +37,7 @@ extension Downloads {
         case .paused:
             [.resume, .delete]
         case .failed:
-            [.restart, .delete]
+            [.resume, .delete]
         case .completed, .processing:
             [.delete]
         }
