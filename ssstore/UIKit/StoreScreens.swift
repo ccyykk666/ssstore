@@ -116,11 +116,11 @@ final class NativeHistory: NativePage {
                     guard let self, let account = archive.accountIdentifier else { self?.alert("请先选择账户。"); return }
                     confirm("下载 \(package.software.version)？") { [weak self] in self?.run {
                         guard let self else { return }
-                        archive.cancelHistoryLoading()
+                        self.archive.cancelHistoryLoading()
                         if Downloads.this.downloadRequest(forArchive: package) == nil {
                             try await Downloads.this.startDownload(for: package, accountID: account)
                         }
-                        if let request = Downloads.this.downloadRequest(forArchive: package) { push(NativePackage(model, package: request)) }
+                        if let request = Downloads.this.downloadRequest(forArchive: package) { self.push(NativePackage(self.model, package: request)) }
                     } }
                 }, badge: date))
             } else {

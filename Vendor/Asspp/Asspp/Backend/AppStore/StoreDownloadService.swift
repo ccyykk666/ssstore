@@ -114,11 +114,6 @@ enum StoreDownloadService {
             let guid = Configuration.deviceIdentifier
             let response: [String: Any]
             if let endpoint = try await preferredEndpoint(session: session, guid: guid, trace: trace) {
-                func requestedVersion() async throws -> String {
-                    if let version { return version }
-                    return try await resolveVersion()
-                }
-                async let pinnedVersion = requestedVersion()
                 let dsid = account.directoryServicesIdentifier
                 let cached = await KBSyncStore.shared.cached(guid: guid, dsid: dsid)
                 logger.info("Store download [\(trace)]: preferred=ent/download kbsyncCached=\(cached != nil)")
@@ -130,11 +125,14 @@ enum StoreDownloadService {
                     logger.info("Store download [\(trace)]: local kbsync generation ready")
                     return blob
                 }
-                let generated = cached == nil ? try await generateBlob() : nil
-                let pinned = try await pinnedVersion
+                let generationTask: Task<String, Error>? = cached == nil ? Task { try await generateBlob() } : nil
+                defer { generationTask?.cancel() }
+                let pinned: String
+                if let version { pinned = version }
+                else { pinned = try await resolveVersion() }
                 effectiveVersion = pinned
                 response = try await StoreDownloadProtocol.preferredDownload(cached: cached) {
-                    if let generated { return generated }
+                    if let generationTask { return try await generationTask.value }
                     return try await generateBlob()
                 } invalidate: { blob in
                     await KBSyncStore.shared.invalidate(guid: guid, dsid: dsid, expected: blob)
