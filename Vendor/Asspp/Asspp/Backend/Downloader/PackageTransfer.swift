@@ -1,7 +1,7 @@
 import Foundation
 
 /// URLSession writes the IPA directly to disk. Only throttled progress reaches UI.
-final class PackageTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+final class NativePackageTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     typealias ProgressHandler = @MainActor @Sendable (Double, Int64) -> Void
     typealias CompletionHandler = @MainActor @Sendable (Result<URL, Error>) -> Void
 

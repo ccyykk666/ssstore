@@ -14,6 +14,7 @@ CHECK_INPUTS = {
     "downloads": (
         STORE + "Asspp/Backend/Downloader/Downloads.swift",
         STORE + "Asspp/Backend/Downloader/PackageTransfer.swift",
+        STORE + "Asspp/Backend/Downloader/ParallelPackageTransfer.swift",
         STORE + "Asspp/Backend/Downloader/PackageState.swift",
         STORE + "Resources/Tests/TransferChecks.swift",
         STORE + "Resources/Tests/TransferServer.py",

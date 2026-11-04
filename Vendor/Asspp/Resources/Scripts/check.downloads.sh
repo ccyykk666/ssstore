@@ -19,7 +19,7 @@ if [[ "$check_kind" != localization ]]; then
     Resources/Tests/HistorySupportChecks.swift \
     Resources/Tests/DownloadProtocolChecks.swift -o "$download_check_dir/download-checks"
     "$download_check_dir/download-checks"
-    swiftc Asspp/Backend/Downloader/PackageTransfer.swift Resources/Tests/TransferChecks.swift -o "$download_check_dir/transfer-checks"
+    swiftc Asspp/Backend/Downloader/PackageTransfer.swift Asspp/Backend/Downloader/ParallelPackageTransfer.swift Resources/Tests/TransferChecks.swift -o "$download_check_dir/transfer-checks"
     python3 Resources/Tests/TransferServer.py "$download_check_dir/port" &
     transfer_server_pid=$!
     for ((attempt=0; attempt<100; attempt++)); do

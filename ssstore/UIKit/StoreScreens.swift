@@ -42,6 +42,7 @@ final class NativeProductHeaderCell: UITableViewCell {
 
 @MainActor
 final class NativeProduct: NativePage {
+    private var prewarm: Task<Void, Never>?
     let package: AppStore.AppPackage
     let region: String
     var accountID: String?
@@ -52,6 +53,21 @@ final class NativeProduct: NativePage {
         navigationItem.largeTitleDisplayMode = .never
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        prewarm = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+            guard let self, let id = self.accountID,
+                  let account = AppStore.this.accounts.first(where: { $0.id == id }) else { return }
+            let guid = ApplePackage.Configuration.deviceIdentifier
+            if await KBSyncStore.shared.cached(guid: guid, dsid: account.account.directoryServicesIdentifier) == nil {
+                _ = try? await KBSyncStore.shared.generate(guid: guid, dsid: account.account.directoryServicesIdentifier)
+            }
+        }
+    }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated); prewarm?.cancel(); prewarm = nil
+    }
     override func rows() -> [NativeSection] {
         let accounts = AppStore.this.eligibleAccounts(for: region)
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }

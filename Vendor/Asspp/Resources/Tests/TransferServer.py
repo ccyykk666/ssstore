@@ -16,6 +16,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         requests[self.path].append("HEAD")
+        if self.path == "/parallel":
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(PAYLOAD) * 4))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("ETag", '\"parallel-fixture\"')
+            self.end_headers()
+            return
         self.send_response(405)
         self.end_headers()
 
@@ -34,18 +41,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
+        payload = PAYLOAD * 4 if self.path == "/parallel" else PAYLOAD
         start = int(request_range.removeprefix("bytes=").split("-")[0]) if request_range else 0
+        end_text = request_range.split("-")[-1] if request_range else ""
+        end = int(end_text) if end_text else len(payload)-1
         self.send_response(206 if request_range else 200)
-        self.send_header("Content-Length", str(len(PAYLOAD) - start))
+        self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("ETag", '"transfer-fixture"')
         self.send_header("Last-Modified", "Mon, 02 Nov 2026 00:00:00 GMT")
         if request_range:
-            self.send_header("Content-Range", f"bytes {start}-{len(PAYLOAD)-1}/{len(PAYLOAD)}")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")
         self.end_headers()
         try:
-            for offset in range(start, len(PAYLOAD), 65536):
-                self.wfile.write(PAYLOAD[offset:offset + 65536])
+            for offset in range(start, end + 1, 65536):
+                self.wfile.write(payload[offset:min(offset + 65536, end + 1)])
                 self.wfile.flush()
                 time.sleep(0.008)
         except (BrokenPipeError, ConnectionResetError):

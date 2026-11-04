@@ -12,7 +12,7 @@ struct TransferChecks {
         let base = URL(string: CommandLine.arguments[1])!
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let transfer = PackageTransfer(directory: directory)
+        let transfer = NativePackageTransfer(directory: directory)
         let payload = Data((0..<8_388_608).map { UInt8(truncatingIfNeeded: $0) })
         let expected = SHA256.hash(data: payload)
 
@@ -31,7 +31,7 @@ struct TransferChecks {
         precondition(SHA256.hash(data: firstBytes) == expected)
         precondition(progressCount > 0 && progressCount < 16, "Progress must be throttled before reaching MainActor")
         let recovered: URL = try await withCheckedThrowingContinuation { continuation in
-            let nextSession = PackageTransfer(directory: directory)
+            let nextSession = NativePackageTransfer(directory: directory)
             nextSession.resume(id: firstID, url: base.appendingPathComponent("single")) { _, _ in }
                 completion: { continuation.resume(with: $0) }
         }
@@ -52,7 +52,7 @@ struct TransferChecks {
                     }
                     precondition(FileManager.default.fileExists(atPath: resumeFile.path), "Pause must save native resume data")
                     // A new session must continue the persisted transfer, not issue a HEAD.
-                    let nextSession = PackageTransfer(directory: directory)
+                    let nextSession = NativePackageTransfer(directory: directory)
                     nextSession.resume(id: resumeID, url: base.appendingPathComponent("resume")) { _, _ in }
                         completion: { continuation.resume(with: $0) }
                 }
@@ -87,6 +87,18 @@ struct TransferChecks {
         precondition(stats["/single"] == ["GET"], "No duplicate requests or HEAD preflight")
         precondition(stats["/resume"]?.contains(where: { $0.hasPrefix("bytes=") }) == true, "Resume must request the remaining range")
         precondition(!stats.values.flatMap { $0 }.contains("HEAD"))
+        let parallel = PackageTransfer(directory: directory)
+        let parallelFile: URL = try await withCheckedThrowingContinuation { continuation in
+            parallel.resume(id: UUID(), url: base.appendingPathComponent("parallel")) { _, _ in }
+                completion: { continuation.resume(with: $0) }
+        }
+        let parallelBytes = try Data(contentsOf: parallelFile)
+        var parallelExpected = Data()
+        for _ in 0..<4 { parallelExpected.append(payload) }
+        precondition(SHA256.hash(data: parallelBytes) == SHA256.hash(data: parallelExpected))
+        let (parallelStats, _) = try await URLSession.shared.data(from: base.appendingPathComponent("stats"))
+        let ranges = try JSONDecoder().decode([String: [String]].self, from: parallelStats)["/parallel"] ?? []
+        precondition(ranges.filter { $0.hasPrefix("bytes=") }.count == 4, "One IPA must use four distinct ranges")
         print("Native transfer checks passed: integrity, coalescing, progress throttling, persisted and rapid resume, HTTP errors")
     }
 }
