@@ -71,7 +71,12 @@ final class NativeProduct: NativePage {
     override func rows() -> [NativeSection] {
         let accounts = AppStore.this.eligibleAccounts(for: region)
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "person.crop.circle"), menu: UIMenu(children: accounts.map { account in UIAction(title: account.account.email, state: accountID == account.id ? .on : .off) { [weak self] _ in self?.accountID = account.id; self?.reload() } }))
+        let accountMenu = UIMenu(title: "下载账户", options: .displayInline, children: accounts.map { account in UIAction(title: account.account.email, image: UIImage(systemName: "person.crop.circle"), state: accountID == account.id ? .on : .off) { [weak self] _ in self?.accountID = account.id; self?.reload() } })
+        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [
+            UIAction(title: "下载管理", image: UIImage(systemName: "arrow.down.circle")) { [weak self] _ in
+                guard let self else { return }; self.push(NativeDownloads(self.model))
+            }, accountMenu
+        ]))
         let app = package.software
         let descriptionRow = NativeRow(title: app.description, isDescription: true)
         var header = [NativeRow(title: app.name, detail: app.sellerName, icon: URL(string: app.artworkUrl), badge: app.formattedPrice ?? "—", productHeader: true), descriptionRow]
@@ -276,7 +281,20 @@ final class NativeDownloads: NativePage {
         })
     }
     override func rows() -> [NativeSection] {
-        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in NativeRow(title: package.package.software.name + " · " + package.package.software.version, detail: (package.state.error ?? package.state.status.title) + " · \(Int(package.state.percent * 100))% " + package.state.speed, icon: URL(string: package.package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativePackage(model, package: package)) }, delete: { Downloads.this.delete(request: package) }, compact: true) })]
+        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in
+            let active = [.pending, .downloading, .paused].contains(package.state.status)
+            let showPercent = active && package.state.percent < 1
+            let detail = [package.state.error ?? package.state.status.title,
+                          showPercent ? "\(Int(package.state.percent * 100))%" : "",
+                          package.state.status == .downloading ? package.state.speed : ""]
+                .filter { !$0.isEmpty }.joined(separator: " · ")
+            return NativeRow(title: package.package.software.name, detail: detail,
+                             icon: URL(string: package.package.software.artworkUrl),
+                             action: { [weak self] in guard let self else { return }; self.push(NativePackage(self.model, package: package)) },
+                             delete: { Downloads.this.delete(request: package) }, badge: package.package.software.version,
+                             compact: true, isDownload: true, progress: active ? package.state.percent : nil)
+        })]
+
     }
 }
 
@@ -289,31 +307,81 @@ final class NativePackage: NativePage {
         let app = package.package.software
         var controls: [NativeRow] = []
         if package.completed {
-            controls = [link("配对安装") { [weak self] in guard let self else { return }; let page = NativeInstall(model, package: package); sheet(page); page.start() }, link("证书安装") { [weak self] in guard let self else { return }; run { let installer = try await Installer(archive: self.package.package, path: self.package.targetLocation); self.push(NativeCertificateInstall(self.model, installer: installer)) } }, link("导出安装包 / AirDrop") { [weak self] in guard let self else { return }; share(package.targetLocation) }, link("查看安装包内容") { [weak self] in guard let self else { return }; push(NativeArchiveFiles(model, file: package.targetLocation)) }]
+            controls = [link("配对安装") { [weak self] in guard let self else { return }; let page = NativeInstall(model, package: package); present(page, animated: true); page.start() }, link("证书安装") { [weak self] in guard let self else { return }; run { let installer = try await Installer(archive: self.package.package, path: self.package.targetLocation); self.push(NativeCertificateInstall(self.model, installer: installer)) } }, link("导出安装包 / AirDrop") { [weak self] in guard let self else { return }; share(package.targetLocation) }, link("查看安装包内容") { [weak self] in guard let self else { return }; push(NativeArchiveFiles(model, file: package.targetLocation)) }]
         } else {
             controls = Downloads.this.getAvailableActions(for: package).filter { $0 != .delete }.map { action in link(Downloads.this.getActionLabel(for: action).title) { [weak self] in guard let self else { return }; Downloads.this.performDownloadAction(for: package, action: action); reload() } }
         }
-        return [NativeSection(rows: [NativeRow(title: app.name, detail: app.version, icon: URL(string: app.artworkUrl)), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: package.state.error ?? package.state.status.title, detail: "\(Int(package.state.percent * 100))%")]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
+        return [NativeSection(rows: [NativeRow(title: app.name, icon: URL(string: app.artworkUrl), badge: app.version, isDownload: true), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: package.state.error ?? package.state.status.title, detail: package.state.percent < 1 ? "\(Int(package.state.percent * 100))%" : "", progress: [.pending, .downloading, .paused].contains(package.state.status) ? package.state.percent : nil)]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
     }
 }
 
 @MainActor
-final class NativeInstall: NativePage {
-    let package: PackageManifest
-    var status = "正在连接设备…"
-    var fraction = 0.0
-    init(_ model: AppModel, package: PackageManifest) { self.package = package; super.init(model, title: "配对安装") }
+final class NativeInstall: UIViewController {
+    private let model: AppModel
+    private let package: PackageManifest
+    private let status = UILabel()
+    private let progress = UIProgressView(progressViewStyle: .default)
+    private let percent = UILabel()
+    private let done = UIButton(type: .system)
+    private let retry = UIButton(type: .system)
+    private var working = false
+    init(_ model: AppModel, package: PackageManifest) {
+        self.model = model; self.package = package
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
+    }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        let card = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+        card.layer.cornerRadius = 20; card.clipsToBounds = true
+        let title = UILabel(); title.text = "配对安装"; title.font = .preferredFont(forTextStyle: .headline)
+        status.font = .preferredFont(forTextStyle: .body); status.numberOfLines = 0
+        percent.font = .preferredFont(forTextStyle: .caption1); percent.textColor = .secondaryLabel
+        for label in [title, status, percent] { label.adjustsFontForContentSizeCategory = true }
+        progress.accessibilityLabel = "安装进度"
+        done.setTitle("完成", for: .normal)
+        done.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .touchUpInside)
+        retry.setTitle("重试", for: .normal)
+        retry.addAction(UIAction { [weak self] _ in self?.start() }, for: .touchUpInside)
+        let buttons = UIStackView(arrangedSubviews: [retry, done]); buttons.distribution = .fillEqually; buttons.spacing = 16
+        let stack = UIStackView(arrangedSubviews: [title, status, progress, percent, buttons])
+        stack.axis = .vertical; stack.spacing = 16
+        card.translatesAutoresizingMaskIntoConstraints = false; stack.translatesAutoresizingMaskIntoConstraints = false
+        let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(card); card.contentView.addSubview(scroll); scroll.addSubview(stack)
+        let contentHeight = scroll.heightAnchor.constraint(equalTo: stack.heightAnchor); contentHeight.priority = .defaultHigh
+        let width = card.widthAnchor.constraint(equalToConstant: 340); width.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            width, card.widthAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.widthAnchor, constant: -48),
+            card.heightAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.heightAnchor, constant: -48), contentHeight,
+            card.centerXAnchor.constraint(equalTo: view.centerXAnchor), card.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            scroll.leadingAnchor.constraint(equalTo: card.contentView.leadingAnchor, constant: 24), scroll.trailingAnchor.constraint(equalTo: card.contentView.trailingAnchor, constant: -24),
+            scroll.topAnchor.constraint(equalTo: card.contentView.topAnchor, constant: 24), scroll.bottomAnchor.constraint(equalTo: card.contentView.bottomAnchor, constant: -24),
+            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor), stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor), stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor), stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
+        ])
+    }
     func start() {
-        guard !working else { return }; working = true
-        navigationController?.isModalInPresentation = true; navigationItem.rightBarButtonItem?.isEnabled = false
+        guard !working else { return }
+        loadViewIfNeeded(); working = true; isModalInPresentation = true
+        retry.isHidden = true; done.isEnabled = false
+        status.text = "正在连接设备…"; progress.setProgress(0, animated: false); percent.text = "0%"
         Task { [self] in
-            do { try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID) { [weak self] stage, value in self?.status = stage; self?.fraction = value; self?.scheduleReload() }; status = "安装完成" }
-            catch { status = error.localizedDescription }
-            working = false; navigationController?.isModalInPresentation = false; navigationItem.rightBarButtonItem?.isEnabled = true; reload()
+            do {
+                try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID) { [weak self] stage, value in
+                    guard let self else { return }
+                    self.status.text = stage
+                    self.progress.setProgress(Float(min(1, max(0, value))), animated: true)
+                    self.percent.text = "\(Int(min(1, max(0, value)) * 100))%"
+                }
+                status.text = "安装完成"; progress.setProgress(1, animated: true); percent.text = nil
+            } catch { status.text = error.localizedDescription; retry.isHidden = false; done.setTitle("关闭", for: .normal) }
+            working = false; isModalInPresentation = false; done.isEnabled = true
         }
     }
-    override func rows() -> [NativeSection] { [NativeSection(rows: [NativeRow(title: status, detail: "\(Int(fraction * 100))%"), link("重试") { [weak self] in self?.start() }])] }
 }
 
 @MainActor

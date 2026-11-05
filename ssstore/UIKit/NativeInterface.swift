@@ -26,17 +26,21 @@ struct NativeRow {
     var compact = false
     var isDescription = false
     var productHeader = false
+    var isDownload = false
+    var progress: Double? = nil
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
         badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision && compact == other.compact &&
         accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
         isDescription == other.isDescription && productHeader == other.productHeader &&
+        isDownload == other.isDownload && progress == other.progress &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
 }
 @MainActor
 final class NativeCell: UITableViewCell {
+    let progressFill = NativeProgressFill(frame: .zero)
     var representedIcon: URL?
     var imageTask: DownloadTask?
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
@@ -53,6 +57,26 @@ final class NativeCell: UITableViewCell {
         imageTask = nil
         representedIcon = nil
     }
+}
+@MainActor
+final class NativeProgressFill: UIView {
+    private let fill = UIView()
+    private var fraction = 0.0
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false; clipsToBounds = true
+        fill.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.28)
+        addSubview(fill)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    func update(_ value: Double) {
+        fraction = min(1, max(0, value))
+        guard window != nil else { layoutFill(); return }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveLinear, .allowUserInteraction]) { self.layoutFill() }
+    }
+    func reset() { fill.layer.removeAllAnimations(); fraction = 0; layoutFill() }
+    override func layoutSubviews() { super.layoutSubviews(); layoutFill() }
+    private func layoutFill() { fill.frame = CGRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height) }
 }
 @MainActor
 final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
@@ -171,10 +195,9 @@ private struct NativeMetrics: View {
         let values = state.values
         let indices = values.indices.filter { ($0 != 1 && $0 != 3) || values[$0] > 0 }
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 0) {
+            HStack(alignment: .top, spacing: 32) {
                 ForEach(indices, id: \.self) { index in
                     metric(index)
-                    if index != indices.last { Spacer(minLength: 16) }
                 }
             }
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
@@ -321,6 +344,12 @@ class NativePage: UITableViewController {
             return cell
         }
         let cell = tableView.dequeueReusableCell(withIdentifier: "row", for: indexPath) as! NativeCell
+        var background = UIBackgroundConfiguration.listGroupedCell()
+        if let progress = row.progress {
+            cell.progressFill.update(progress)
+            background.customView = cell.progressFill
+        } else { cell.progressFill.reset() }
+        cell.backgroundConfiguration = background
         var config = cell.defaultContentConfiguration()
         config.text = row.title; config.secondaryText = row.detail.isEmpty ? nil : row.detail
         config.textProperties.color = row.color
@@ -362,7 +391,7 @@ class NativePage: UITableViewController {
             button.sizeToFit(); cell.accessoryView = button
         } else if let badge = row.badge {
             let label = (cell.accessoryView as? UILabel) ?? UILabel(); label.text = badge; label.textColor = badge == "新版本" ? .systemGreen : .secondaryLabel
-            label.font = .preferredFont(forTextStyle: .caption1); label.adjustsFontForContentSizeCategory = true
+            label.font = .preferredFont(forTextStyle: row.isDownload ? .subheadline : .caption1); label.adjustsFontForContentSizeCategory = true
             label.sizeToFit(); cell.accessoryView = label
         } else { cell.accessoryView = nil }
         cell.accessoryType = row.action == nil ? .none : .disclosureIndicator
