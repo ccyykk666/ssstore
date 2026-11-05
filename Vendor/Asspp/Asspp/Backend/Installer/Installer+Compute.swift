@@ -11,7 +11,7 @@ import Foundation
 extension Installer {
     var installPage: URL {
         var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
-        comps.path = "/"
+        comps.path = "/index.html"
         return comps.url!
     }
     var plistEndpoint: URL {
