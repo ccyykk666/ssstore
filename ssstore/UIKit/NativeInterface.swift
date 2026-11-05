@@ -512,8 +512,9 @@ final class NativePreviewNavigation: UINavigationController, UIGestureRecognizer
     private let imagePreview: Bool
     private let imageSize: CGSize?
     init(file: URL) {
-        imagePreview = UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true
-        imageSize = imagePreview ? UIImage(contentsOfFile: file.path)?.size : nil
+        let isImage = UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true
+        imagePreview = isImage
+        imageSize = isImage ? UIImage(contentsOfFile: file.path)?.size : nil
         let preview = NativePreview(file)
         super.init(rootViewController: preview)
         if imageSize != nil {
