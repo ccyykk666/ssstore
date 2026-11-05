@@ -510,6 +510,7 @@ class NativePage: UITableViewController, NativeSheetContent {
 final class NativePreviewNavigation: UINavigationController, UIGestureRecognizerDelegate {
     private let imagePreview: Bool
     private let imageSize: CGSize?
+    private var measuredImageHeight: CGFloat?
     init(file: URL) {
         let isImage = UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true
         imagePreview = isImage
@@ -518,8 +519,7 @@ final class NativePreviewNavigation: UINavigationController, UIGestureRecognizer
         super.init(rootViewController: preview)
         if imageSize != nil {
             sheetPresentationController?.detents = [.custom(identifier: .init("image")) { [weak self] context in
-                guard let height = self?.preferredContentSize.height, height > 0 else { return nil }
-                return min(height, context.maximumDetentValue)
+                return min(self?.imageContentHeight ?? context.maximumDetentValue, context.maximumDetentValue)
             }]
             sheetPresentationController?.prefersEdgeAttachedInCompactHeight = true
         }
@@ -528,20 +528,17 @@ final class NativePreviewNavigation: UINavigationController, UIGestureRecognizer
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        updateImageSize()
+        guard let height = imageContentHeight, measuredImageHeight != height else { return }
+        measuredImageHeight = height
+        sheetPresentationController?.invalidateDetents()
     }
-    func updateImageSize() {
-        guard let imageSize, imageSize.width > 0, let preview = topViewController, preview.isViewLoaded else { return }
-        let insets = preview.view.safeAreaInsets
-        let width = preview.view.bounds.width - insets.left - insets.right
-        guard width > 0 else { return }
-        let chrome = view.bounds.height - preview.view.bounds.height + insets.top + insets.bottom - view.safeAreaInsets.bottom
-        let height = ceil(imageSize.height * min(1, width / imageSize.width) + chrome)
-        if preferredContentSize.height != height {
-            preferredContentSize.height = height
-            sheetPresentationController?.invalidateDetents()
-            sheetPresentationController?.selectedDetentIdentifier = .init("image")
-        }
+    private var imageContentHeight: CGFloat? {
+        guard let imageSize, imageSize.width > 0, let view = viewIfLoaded else { return nil }
+        let width = view.bounds.width - view.safeAreaInsets.left - view.safeAreaInsets.right
+        guard width > 0, navigationBar.bounds.height > 0 else { return nil }
+        // Quick Look changes its safe area while the sheet is resizing. Only use
+        // the available width and our navigation bar, which do not depend on the detent height.
+        return ceil(imageSize.height * min(1, width / imageSize.width) + navigationBar.frame.maxY)
     }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -568,10 +565,6 @@ final class NativePreview: QLPreviewController, QLPreviewControllerDataSource {
     let file: URL
     init(_ file: URL) { self.file = file; super.init(nibName: nil, bundle: nil); dataSource = self }
     required init?(coder: NSCoder) { fatalError() }
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        (navigationController as? NativePreviewNavigation)?.updateImageSize()
-    }
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { file as NSURL }
 }
