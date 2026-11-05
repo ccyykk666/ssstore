@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'ssstore/**'
+      - 'ShareExtension/**'
       - 'Packages/**'
       - 'Vendor/**'
       - 'project.yml'

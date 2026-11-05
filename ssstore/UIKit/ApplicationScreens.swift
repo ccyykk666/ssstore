@@ -105,6 +105,18 @@ final class NativeStoreSearch: NativeSearchPage {
     private var menuKey = ""
     init(_ model: AppModel) { super.init(model, title: "搜索") }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "link"), primaryAction: UIAction { [weak self] _ in
+            guard let self else { return }
+            let clipboard = UIPasteboard.general.string.flatMap(AppStoreLink.parse)?.storeURL.absoluteString ?? ""
+            edit("App Store 链接", value: clipboard) { [weak self] text in
+                guard let self else { return }
+                guard let link = AppStoreLink.parse(text) else { alert("请输入有效的 App Store 应用链接。"); return }
+                (tabBarController as? NativeTabs)?.openStoreLink(link)
+            }
+        })
+    }
     override func rows() -> [NativeSection] {
         let regions = AppStore.this.possibleRegions.sorted()
         if let first = regions.first, !regions.contains(region) {
