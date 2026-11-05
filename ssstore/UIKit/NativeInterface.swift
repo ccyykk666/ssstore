@@ -266,9 +266,7 @@ protocol NativeSheetContent: AnyObject {
 
 @MainActor
 final class NativeFittingNavigation: UINavigationController {
-    private let content: UIViewController & NativeSheetContent
     init(root: UIViewController & NativeSheetContent) {
-        content = root
         super.init(rootViewController: root)
         modalPresentationStyle = .pageSheet
         sheetPresentationController?.detents = [.custom(identifier: .init("content")) { [weak self] context in
@@ -281,10 +279,11 @@ final class NativeFittingNavigation: UINavigationController {
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        content.view.layoutIfNeeded()
+        topViewController?.view.layoutIfNeeded()
         updateContentSize()
     }
     func updateContentSize() {
+        guard let content = topViewController as? (UIViewController & NativeSheetContent), content.isViewLoaded else { return }
         let scroll = content.sheetScrollView
         guard scroll.bounds.width > 0, scroll.bounds.height > 0 else { return }
         let chrome = view.bounds.height - scroll.bounds.height
