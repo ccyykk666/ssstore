@@ -28,6 +28,7 @@ enum StoreRuntime {
         _ = documentsDirectory
         _ = temporaryDirectory
         _ = AppStore.this
+        if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.register() }
         Task {
             do { _ = try await Installer(certificateAtPath: Installer.ca.path) }
             catch { logger.error("Unable to start local installation service: \(error.localizedDescription)") }

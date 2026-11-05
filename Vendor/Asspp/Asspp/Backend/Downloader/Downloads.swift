@@ -24,6 +24,11 @@ class Downloads {
     @ObservationIgnored
     var preparingDownloads: [String: Task<Void, Error>] = [:]
 
+    @ObservationIgnored
+    private var processingTasks: [UUID: Task<Void, Never>] = [:]
+
+    var backgroundNotice: String?
+
     private static let speedFormatter: ByteCountFormatter = {
         let fmt = ByteCountFormatter()
         fmt.allowedUnits = .useAll
@@ -50,7 +55,7 @@ class Downloads {
     private(set) var runningTaskCount: Int = 0
 
     private func refreshRunningTaskCount() {
-        runningTaskCount = manifests.count(where: { [.downloading, .processing].contains($0.state.status) })
+        runningTaskCount = manifests.count(where: { [.pending, .downloading, .processing].contains($0.state.status) })
     }
 
     private init() {
@@ -77,14 +82,37 @@ class Downloads {
 
     func suspend(request: PackageManifest) {
         transfer.pause(id: request.id)
+        if let processing = processingTasks[request.id] {
+            processing.cancel()
+            request.state.percent = 0
+        }
         request.state.resetIfNotCompleted()
         request.state.speed = ""
+        if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.finish(request) }
         refreshRunningTaskCount()
         saveManifests()
     }
 
     func resume(request: PackageManifest) {
         request.state.start()
+        if let processing = processingTasks[request.id] {
+            refreshRunningTaskCount(); saveManifests()
+            Task { [weak self] in
+                await processing.value
+                guard let self, request.state.status == .pending,
+                      self.manifests.contains(where: { $0.id == request.id }) else { return }
+                self.resume(request: request)
+            }
+            return
+        }
+        refreshRunningTaskCount()
+        if #available(iOS 26.0, *) {
+            DownloadBackgroundExecution.shared.begin(request) { [weak self] in self?.startTransfer(request: request) }
+        } else { startTransfer(request: request) }
+        saveManifests()
+    }
+
+    private func startTransfer(request: PackageManifest) {
         transfer.resume(id: request.id, url: request.url) { [weak self] fraction, speed in
             guard let self, [.pending, .downloading].contains(request.state.status) else { return }
             let wasDownloading = request.state.status == .downloading
@@ -92,46 +120,62 @@ class Downloads {
             state.status = .downloading; state.percent = fraction
             state.speed = Self.speedFormatter.string(fromByteCount: speed) + "/s"
             request.state = state
+            if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.update(request) }
             if !wasDownloading { self.refreshRunningTaskCount() }
         } completion: { [weak self] result in
             guard let self else { return }
-            guard self.manifests.contains(where: { $0.id == request.id }) else {
+            guard self.manifests.contains(where: { $0.id == request.id }),
+                  [.pending, .downloading].contains(request.state.status) else {
                 if case let .success(file) = result { try? FileManager.default.removeItem(at: file) }
                 return
             }
             switch result {
             case let .success(file):
                 request.state.status = .processing; request.state.percent = 1; request.state.speed = ""
+                if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.update(request) }
                 self.refreshRunningTaskCount()
                 let package = request.package
                 let target = request.targetLocation
                 let signatures = request.signatures
                 let metadata = request.iTunesMetadata
                 // ZIP validation and signature injection must not run on MainActor.
-                Task {
+                self.processingTasks[request.id] = Task {
+                    let work = Task.detached(priority: .utility) {
+                        try await Self.finalize(package: package, target: target, signatures: signatures, metadata: metadata, downloadedFile: file)
+                    }
                     do {
-                        try await Task.detached(priority: .utility) {
-                            try await Self.finalize(package: package, target: target, signatures: signatures, metadata: metadata, downloadedFile: file)
-                        }.value
+                        try await withTaskCancellationHandler {
+                            try await work.value
+                            try Task.checkCancellation()
+                        } onCancel: { work.cancel() }
                         guard self.manifests.contains(where: { $0.id == request.id }) else {
-                            request.delete(); return
+                            request.delete(); self.processingTasks.removeValue(forKey: request.id); return
                         }
                         request.state.complete()
-                    } catch { request.state.error = error.localizedDescription }
+                    } catch {
+                        if Task.isCancelled {
+                            if request.state.status == .processing { request.state.resetIfNotCompleted() }
+                            if !self.manifests.contains(where: { $0.id == request.id }) { request.delete() }
+                        } else { request.state.error = error.localizedDescription }
+                    }
+                    self.processingTasks.removeValue(forKey: request.id)
+                    if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.finish(request) }
                     self.refreshRunningTaskCount(); self.saveManifests()
                 }
             case let .failure(error):
                 request.state.error = error.localizedDescription
+                if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.finish(request) }
                 self.refreshRunningTaskCount(); self.saveManifests()
             }
         }
-        saveManifests()
     }
 
     private nonisolated static func finalize(package: AppStore.AppPackage, target: URL, signatures: [Sinf], metadata: Data, downloadedFile: URL) async throws {
         defer { try? FileManager.default.removeItem(at: downloadedFile) }
+        try Task.checkCancellation()
         // Verify the main bundle identity and platform before signature injection.
         try StorePackageValidator.validate(at: downloadedFile, package: package)
+        try Task.checkCancellation()
         try? FileManager.default.createDirectory(
             at: target.deletingLastPathComponent(),
             withIntermediateDirectories: true,
@@ -154,6 +198,8 @@ class Downloads {
             into: tempFile.path,
         )
 
+        try Task.checkCancellation()
+
         logger.info("moving finalized file: \(package.software.bundleID)")
         try FileManager.default.moveItem(at: tempFile, to: target)
     }
@@ -161,6 +207,9 @@ class Downloads {
     func delete(request: PackageManifest) {
         logger.info("deleting download request id: \(request.id)")
         transfer.cancel(id: request.id)
+        processingTasks[request.id]?.cancel()
+        request.state.resetIfNotCompleted()
+        if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.finish(request) }
         request.delete()
         manifests.removeAll(where: { $0.id == request.id })
         refreshRunningTaskCount()
@@ -169,15 +218,14 @@ class Downloads {
     func restart(request: PackageManifest) {
         logger.info("restarting download request id: \(request.id)")
         transfer.cancel(id: request.id)
+        processingTasks[request.id]?.cancel()
         request.delete()
         request.state = .init()
         resume(request: request)
     }
 
     func removeAll() {
-        manifests.forEach { transfer.cancel(id: $0.id); $0.delete() }
-        manifests.removeAll()
-        refreshRunningTaskCount()
+        for request in manifests { delete(request: request) }
     }
 }
 

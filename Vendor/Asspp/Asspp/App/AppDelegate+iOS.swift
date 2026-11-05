@@ -24,7 +24,7 @@
             withObservationTracking {
                 let count = Downloads.this.runningTaskCount
                 UIApplication.shared.isIdleTimerDisabled = count > 0
-                BackgroundAudioPlayer.shared.setActive(count > 0)
+                if #unavailable(iOS 26.0) { BackgroundAudioPlayer.shared.setActive(count > 0) }
             } onChange: {
                 Task { @MainActor in
                     self.observeDownloadCount()
@@ -35,6 +35,7 @@
         func applicationWillResignActive(_: UIApplication) {
             guard Downloads.this.runningTaskCount > 0 else { return }
             let task = UIApplication.shared.beginBackgroundTask(withName: "Downloads") {
+                if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.pauseIfUnprotected() }
                 UIApplication.shared.endBackgroundTask(self.backgroundTaskIdentifier)
                 self.backgroundTaskIdentifier = .invalid
             }

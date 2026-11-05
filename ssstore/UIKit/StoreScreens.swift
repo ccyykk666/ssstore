@@ -264,7 +264,9 @@ final class NativeDownloads: NativePage {
         })
     }
     override func rows() -> [NativeSection] {
-        [NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in
+        var sections: [NativeSection] = []
+        if let notice = Downloads.this.backgroundNotice { sections.append(NativeSection(rows: [NativeRow(title: notice, color: .secondaryLabel)])) }
+        sections.append(NativeSection(rows: Downloads.this.manifests.sorted { $0.creation > $1.creation }.map { package in
             let active = [.pending, .downloading, .paused].contains(package.state.status)
             let showPercent = active && package.state.percent < 1
             let detail = [package.state.error ?? package.state.status.title,
@@ -276,8 +278,8 @@ final class NativeDownloads: NativePage {
                              action: { [weak self] in guard let self else { return }; self.push(NativePackage(self.model, package: package)) },
                              delete: { Downloads.this.delete(request: package) }, badge: package.package.software.version,
                              compact: true, isDownload: true, progress: active ? package.state.percent : nil)
-        })]
-
+        }))
+        return sections
     }
 }
 

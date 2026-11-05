@@ -44,7 +44,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "47"
+    CURRENT_PROJECT_VERSION: "48"
 targets:
   ssstore:
     type: application
@@ -77,7 +77,7 @@ targets:
         NSLocalNetworkUsageDescription: 用于发现配对主机、读取设备信息及在本机安装应用。
         NSBonjourServices: [_remotepairing-pairable-host._tcp, _remotepairing._tcp]
         UIBackgroundModes: [processing, audio]
-        BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).pairing.*]
+        BGTaskSchedulerPermittedIdentifiers: [$(PRODUCT_BUNDLE_IDENTIFIER).pairing.*, $(PRODUCT_BUNDLE_IDENTIFIER).downloads]
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         UIFileSharingEnabled: true
