@@ -129,7 +129,7 @@ final class DownloadBackgroundExecution {
 
     /// Called when the short UIKit grace period ends without a granted system task.
     func pauseIfUnprotected() {
-        if task == nil { stop() }
+        if task == nil, UIApplication.shared.applicationState == .background { stop() }
     }
 
     private func stop() {

@@ -33,7 +33,7 @@
         }
 
         func applicationWillResignActive(_: UIApplication) {
-            guard Downloads.this.runningTaskCount > 0 else { return }
+            guard Downloads.this.runningTaskCount > 0, backgroundTaskIdentifier == .invalid else { return }
             let task = UIApplication.shared.beginBackgroundTask(withName: "Downloads") {
                 if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.pauseIfUnprotected() }
                 UIApplication.shared.endBackgroundTask(self.backgroundTaskIdentifier)
