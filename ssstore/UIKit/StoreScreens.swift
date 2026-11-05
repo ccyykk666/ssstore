@@ -377,7 +377,7 @@ final class NativeCertificateInstall: NativePage {
     let installer: Installer
     init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: "证书安装") }
     required init?(coder: NSCoder) { fatalError() }
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); UIApplication.shared.open(installer.iTunesLink) }
+    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); openInstaller() }
     override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); if isMovingFromParent { installer.destroy() } }
     override func rows() -> [NativeSection] {
         let text: String
@@ -388,7 +388,13 @@ final class NativeCertificateInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        return [NativeSection(rows: [NativeRow(title: text), link("安装") { [weak self] in guard let self else { return }; UIApplication.shared.open(installer.iTunesLink) }])]
+        return [NativeSection(rows: [NativeRow(title: text), link("安装") { [weak self] in self?.openInstaller() }])]
+    }
+    private func openInstaller() {
+        UIApplication.shared.open(installer.iTunesLink) { [weak self] opened in
+            guard !opened else { return }
+            self?.alert("系统未能打开安装链接。请检查设备是否允许安装应用，然后重试。")
+        }
     }
 }
 
