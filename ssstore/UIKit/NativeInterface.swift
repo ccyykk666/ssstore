@@ -270,7 +270,7 @@ final class NativeFittingNavigation: UINavigationController {
         super.init(rootViewController: root)
         modalPresentationStyle = .pageSheet
         sheetPresentationController?.detents = [.custom(identifier: .init("content")) { [weak self] context in
-            guard let height = self?.preferredContentSize.height, height > 0 else { return nil }
+            guard let height = self?.preferredContentSize.height, height > 0 else { return context.maximumDetentValue }
             return min(height, context.maximumDetentValue)
         }]
         sheetPresentationController?.prefersGrabberVisible = true
@@ -497,62 +497,89 @@ class NativePage: UITableViewController, NativeSheetContent {
         present(activity, animated: true)
     }
     func preview(_ url: URL) {
-        let page = NativePreviewNavigation(file: url)
-        page.modalPresentationStyle = .pageSheet
-        page.sheetPresentationController?.prefersGrabberVisible = true
-        page.sheetPresentationController?.prefersScrollingExpandsWhenScrolledToEdge = false
-        present(page, animated: true)
+        let nav: UINavigationController
+        if UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true,
+           let image = UIImage(contentsOfFile: url.path) {
+            nav = NativeFittingNavigation(root: NativeImagePreview(image: image, file: url))
+        } else {
+            nav = UINavigationController(rootViewController: NativePreview(url))
+        }
+        nav.topViewController?.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak nav] _ in nav?.dismiss(animated: true) })
+        nav.modalPresentationStyle = .pageSheet
+        nav.sheetPresentationController?.prefersGrabberVisible = true
+        nav.sheetPresentationController?.prefersScrollingExpandsWhenScrolledToEdge = false
+        present(nav, animated: true)
     }
     func link(_ title: String, _ action: @escaping () -> Void) -> NativeRow { NativeRow(title: title, color: .systemBlue, action: action) }
 }
 
 @MainActor
-final class NativePreviewNavigation: UINavigationController, UIGestureRecognizerDelegate {
-    private let imagePreview: Bool
-    private let imageSize: CGSize?
-    private var measuredImageHeight: CGFloat?
-    init(file: URL) {
-        let isImage = UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true
-        imagePreview = isImage
-        imageSize = isImage ? UIImage(contentsOfFile: file.path)?.size : nil
-        let preview = NativePreview(file)
-        super.init(rootViewController: preview)
-        if imageSize != nil {
-            sheetPresentationController?.detents = [.custom(identifier: .init("image")) { [weak self] context in
-                return min(self?.imageContentHeight ?? context.maximumDetentValue, context.maximumDetentValue)
-            }]
-            sheetPresentationController?.prefersEdgeAttachedInCompactHeight = true
-        }
-        preview.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
+final class NativeImagePreview: UIViewController, NativeSheetContent, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    private let scroll = UIScrollView()
+    private let imageView: UIImageView
+    private let imageSize: CGSize
+    private let file: URL
+    private var viewportSize = CGSize.zero
+    var sheetScrollView: UIScrollView { scroll }
+    var sheetContentHeight: CGFloat {
+        ceil(imageSize.height * min(1, scroll.bounds.width / imageSize.width))
+    }
+    init(image: UIImage, file: URL) {
+        imageView = UIImageView(image: image)
+        imageSize = image.size
+        self.file = file
+        super.init(nibName: nil, bundle: nil)
+        title = file.deletingPathExtension().lastPathComponent
     }
     required init?(coder: NSCoder) { fatalError() }
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        guard let height = imageContentHeight, measuredImageHeight != height else { return }
-        measuredImageHeight = height
-        sheetPresentationController?.invalidateDetents()
-    }
-    private var imageContentHeight: CGFloat? {
-        guard let imageSize, imageSize.width > 0, let view = viewIfLoaded else { return nil }
-        let width = view.bounds.width - view.safeAreaInsets.left - view.safeAreaInsets.right
-        guard width > 0, navigationBar.bounds.height > 0 else { return nil }
-        // Quick Look changes its safe area while the sheet is resizing. Only use
-        // the available width and our navigation bar, which do not depend on the detent height.
-        return ceil(imageSize.height * min(1, width / imageSize.width) + navigationBar.frame.maxY)
-    }
     override func viewDidLoad() {
         super.viewDidLoad()
-        if imagePreview {
-            let pan = UIPanGestureRecognizer(target: self, action: #selector(pulledDown(_:)))
-            pan.maximumNumberOfTouches = 1
-            pan.delegate = self; pan.cancelsTouchesInView = false
-            view.addGestureRecognizer(pan)
+        view.backgroundColor = .systemBackground
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.delegate = self; scroll.maximumZoomScale = 4
+        view.addSubview(scroll); scroll.addSubview(imageView)
+        let margins = view.layoutMarginsGuide
+        NSLayoutConstraint.activate([
+            scroll.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: margins.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: margins.bottomAnchor)
+        ])
+        navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .action, primaryAction: UIAction { [weak self] _ in
+            guard let self else { return }
+            let activity = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+            activity.popoverPresentationController?.barButtonItem = navigationItem.leftBarButtonItem
+            present(activity, animated: true)
+        })
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(pulledDown(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = self; pan.cancelsTouchesInView = false
+        view.addGestureRecognizer(pan)
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        let viewport = scroll.bounds.size
+        if viewport.width > 0, viewport.height > 0, viewportSize != viewport {
+            viewportSize = viewport
+            scroll.zoomScale = 1
+            let scale = min(1, viewport.width / imageSize.width, viewport.height / imageSize.height)
+            imageView.frame = CGRect(origin: .zero, size: CGSize(width: imageSize.width * scale, height: imageSize.height * scale))
+            scroll.contentSize = imageView.bounds.size
+            centerImage()
         }
+        (navigationController as? NativeFittingNavigation)?.updateContentSize()
+    }
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) { centerImage() }
+    private func centerImage() {
+        imageView.center = CGPoint(x: max(scroll.bounds.width, scroll.contentSize.width) / 2,
+                                   y: max(scroll.bounds.height, scroll.contentSize.height) / 2)
     }
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
         let velocity = pan.velocity(in: view)
-        return velocity.y > abs(velocity.x)
+        return scroll.zoomScale == scroll.minimumZoomScale && velocity.y > abs(velocity.x)
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
     @objc private func pulledDown(_ pan: UIPanGestureRecognizer) {
