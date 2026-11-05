@@ -608,21 +608,10 @@ class NativeSearchPage: NativePage, UISearchResultsUpdating, UISearchBarDelegate
         search.hidesNavigationBarDuringPresentation = true
         search.searchResultsUpdater = self; search.searchBar.delegate = self; search.delegate = self
         search.searchBar.placeholder = "关键词"
-        search.searchBar.searchBarStyle = .minimal
-        search.searchBar.autoresizingMask = .flexibleWidth
-        search.searchBar.sizeToFit()
-        tableView.tableHeaderView = search.searchBar
-    }
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        guard !search.isActive else { return }
-        let width = tableView.bounds.width
-        let height = search.searchBar.sizeThatFits(CGSize(width: width, height: 0)).height
-        let size = CGSize(width: width, height: height)
-        if search.searchBar.frame.size != size {
-            search.searchBar.frame.size = size
-            tableView.tableHeaderView = search.searchBar
-        }
+        navigationItem.searchController = search
+        navigationItem.preferredSearchBarPlacement = .stacked
+        navigationItem.hidesSearchBarWhenScrolling = true
+        if #available(iOS 26.0, *) { navigationItem.searchBarPlacementAllowsToolbarIntegration = false }
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)

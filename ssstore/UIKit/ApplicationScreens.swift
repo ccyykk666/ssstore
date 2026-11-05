@@ -116,6 +116,7 @@ final class NativeStoreSearch: NativeSearchPage {
             UserDefaults.standard.set(first, forKey: "searchRegion")
             reset()
         }
+        navigationItem.hidesSearchBarWhenScrolling = !results.isEmpty
         let key = ([region, entity.rawValue] + regions).joined(separator: "|")
         if key != menuKey {
         menuKey = key
