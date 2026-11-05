@@ -10,8 +10,33 @@ import Foundation
 import Logging
 
 extension AppStore {
-    enum AuthenticationError: Error {
+    enum AuthenticationError: LocalizedError {
         case accountNotFound
+        case sessionExpired
+        var errorDescription: String? {
+            switch self {
+            case .accountNotFound: "找不到下载账户，请先添加账户。"
+            case .sessionExpired: "账户会话已过期，自动刷新未完成，请在账户页重新登录并完成验证。"
+            }
+        }
+    }
+
+    @MainActor
+    func refreshSession(id: String, expectedToken: String) async throws {
+        guard let original = accounts.first(where: { $0.id == id }) else { throw AuthenticationError.accountNotFound }
+        if original.account.passwordToken != expectedToken { return }
+        if let pending = sessionRefreshes[id] { return try await pending.value }
+        let pending = Task { [self] in
+            var refreshed = original
+            do { try await ApplePackage.Authenticator.rotatePasswordToken(for: &refreshed.account) }
+            catch { throw AuthenticationError.sessionExpired }
+            guard let index = accounts.firstIndex(where: { $0.id == id }),
+                  accounts[index].account.passwordToken == expectedToken else { return }
+            accounts[index] = refreshed
+        }
+        sessionRefreshes[id] = pending
+        defer { sessionRefreshes.removeValue(forKey: id) }
+        try await pending.value
     }
 
     @MainActor

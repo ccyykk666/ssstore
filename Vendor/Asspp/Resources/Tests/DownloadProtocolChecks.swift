@@ -4,6 +4,31 @@ import Foundation
 struct DownloadProtocolChecks {
     static func main() async throws {
         try await HistorySupportChecks.run()
+        var sessionAttempts = 0
+        var sessionRefreshes = 0
+        let recovered = try await StoreDownloadProtocol.retryExpiredSession {
+            sessionAttempts += 1
+            if sessionAttempts == 1 { throw StoreDownloadError.rejected("2034", "expired") }
+            return "ready"
+        } refresh: { sessionRefreshes += 1 }
+        precondition(recovered == "ready" && sessionAttempts == 2 && sessionRefreshes == 1)
+        precondition(StoreDownloadProtocol.isExpiredSession(NSError(domain: "purchase-fixture", code: 0,
+            userInfo: [NSLocalizedDescriptionKey: "password token is expired (failureType: 2034)"])))
+        sessionAttempts = 0; sessionRefreshes = 0
+        do {
+            let _: String = try await StoreDownloadProtocol.retryExpiredSession {
+                sessionAttempts += 1; throw StoreDownloadError.rejected("2034", "expired")
+            } refresh: { sessionRefreshes += 1 }
+            fatalError("Repeated expiry must reach the caller")
+        } catch {}
+        precondition(sessionAttempts == 2 && sessionRefreshes == 1, "Refresh must never loop")
+        for failure in [StoreDownloadError.serviceResponse(403, "ent/download"), .rejected("9610", "license"), .rejected("2042", "other")] {
+            do {
+                let _: String = try await StoreDownloadProtocol.retryExpiredSession { throw failure }
+                    refresh: { fatalError("Unrelated failures must not authenticate") }
+                fatalError("Expected the original failure")
+            } catch {}
+        }
         let ent = "https://downloaddispatch.itunes.apple.com" + StoreDownloadProtocol.entPath
         for bag in [["volumeStoreDownloadProduct": ent], ["urlBag": ["volumeStoreDownloadProduct": ent]],
                     ["urlBag": ["loc-volumeStoreDownloadProduct": ent]]] as [[String: Any]] {

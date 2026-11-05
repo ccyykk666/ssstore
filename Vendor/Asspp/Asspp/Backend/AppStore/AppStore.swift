@@ -11,6 +11,7 @@ import Foundation
 @Observable
 @MainActor
 class AppStore {
+    @ObservationIgnored var sessionRefreshes: [String: Task<Void, Error>] = [:]
     @ObservationIgnored
     private var _accounts = Persist<[UserAccount]>(
         key: "Accounts",
@@ -118,17 +119,37 @@ class AppStore {
     }
 
     nonisolated func withAccount<T>(id: String, _ body: (inout UserAccount) async throws -> T) async throws -> T {
-        guard var account = await accounts.first(where: { $0.id == id }) else {
+        guard var original = await accounts.first(where: { $0.id == id }) else {
             throw AuthenticationError.accountNotFound
         }
-        let result = try await body(&account)
-        let updatedAccount = account
-        // Re-resolve by id: the accounts array may have been mutated (added,
-        // removed, re-sorted) during the await, so the original index is stale.
-        await MainActor.run {
-            if let idx = accounts.firstIndex(where: { $0.id == id }) {
-                accounts[idx] = updatedAccount
+        var account = original
+        let guid = Configuration.deviceIdentifier
+        let result: T
+        do {
+            result = try await StoreDownloadProtocol.retryExpiredSession {
+                try await body(&account)
+            } refresh: {
+                try await self.refreshSession(id: id, expectedToken: original.account.passwordToken)
+                guard let refreshed = await self.accounts.first(where: { $0.id == id }) else { throw AuthenticationError.accountNotFound }
+                original = refreshed; account = refreshed
             }
+        } catch {
+            if StoreDownloadProtocol.isExpiredSession(error) { throw AuthenticationError.sessionExpired }
+            throw error
+        }
+        let updatedAccount = account
+        let baseline = original
+        // Parallel requests must not restore a token or cookies from an older login.
+        await MainActor.run {
+            guard Configuration.deviceIdentifier == guid,
+                  let idx = accounts.firstIndex(where: { $0.id == id }),
+                  accounts[idx].account.passwordToken == baseline.account.passwordToken,
+                  accounts[idx].account.store == baseline.account.store,
+                  accounts[idx].account.directoryServicesIdentifier == baseline.account.directoryServicesIdentifier else { return }
+            accounts[idx].account.cookie = StoreHistorySupport.mergingChanges(current: accounts[idx].account.cookie,
+                original: baseline.account.cookie, updated: updatedAccount.account.cookie) {
+                    [$0.name, $0.path, StoreProtocol.storeCookieDomain($0.domain) ?? ""]
+                }
         }
         return result
     }
@@ -136,30 +157,9 @@ class AppStore {
     /// Historical metadata is read concurrently from account snapshots. Commit
     /// only cookie deltas, and never write stale credentials over a rotated login.
     nonisolated func historyMetadata(accountID: String, package: AppPackage, versionID: String) async throws -> StoreHistorySupport.Metadata {
-        guard let original = await accounts.first(where: { $0.id == accountID }) else {
-            throw AuthenticationError.accountNotFound
+        try await withAccount(id: accountID) { user in
+            try await StoreDownloadService.versionMetadata(account: &user.account, package: package, versionID: versionID)
         }
-        let guid = Configuration.deviceIdentifier
-        var snapshot = original.account
-        let metadata = try await StoreDownloadService.versionMetadata(account: &snapshot, package: package, versionID: versionID)
-        try Task.checkCancellation()
-        let cookies = snapshot.cookie
-        await MainActor.run {
-            guard Configuration.deviceIdentifier == guid,
-                  let index = accounts.firstIndex(where: { $0.id == accountID }),
-                  accounts[index].account.directoryServicesIdentifier == original.account.directoryServicesIdentifier,
-                  accounts[index].account.passwordToken == original.account.passwordToken,
-                  accounts[index].account.store == original.account.store
-            else { return }
-            let merged = StoreHistorySupport.mergingChanges(current: accounts[index].account.cookie,
-                original: original.account.cookie, updated: cookies) {
-                    [$0.name, $0.path, StoreProtocol.storeCookieDomain($0.domain) ?? ""]
-                }
-            if merged != accounts[index].account.cookie { accounts[index].account.cookie = merged }
-        }
-        return metadata
     }
 
 }
-
-

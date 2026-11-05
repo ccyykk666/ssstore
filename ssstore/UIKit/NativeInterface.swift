@@ -450,13 +450,43 @@ class NativePage: UITableViewController {
         present(activity, animated: true)
     }
     func preview(_ url: URL) {
-        let page = NativePreview(url)
+        let page = NativePreviewNavigation(file: url)
         page.modalPresentationStyle = .pageSheet
         page.sheetPresentationController?.detents = [.medium(), .large()]
         page.sheetPresentationController?.prefersGrabberVisible = true
+        page.sheetPresentationController?.prefersScrollingExpandsWhenScrolledToEdge = false
         present(page, animated: true)
     }
     func link(_ title: String, _ action: @escaping () -> Void) -> NativeRow { NativeRow(title: title, color: .systemBlue, action: action) }
+}
+
+@MainActor
+final class NativePreviewNavigation: UINavigationController, UIGestureRecognizerDelegate {
+    private let imagePreview: Bool
+    init(file: URL) {
+        imagePreview = UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true
+        let preview = NativePreview(file)
+        super.init(rootViewController: preview)
+        preview.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        if imagePreview {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(pulledDown(_:)))
+            pan.delegate = self; pan.cancelsTouchesInView = false
+            view.addGestureRecognizer(pan)
+        }
+    }
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        let velocity = pan.velocity(in: view)
+        return velocity.y > abs(velocity.x)
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+    @objc private func pulledDown(_ pan: UIPanGestureRecognizer) {
+        if pan.state == .ended, pan.translation(in: view).y > 90, !isBeingDismissed { dismiss(animated: true) }
+    }
 }
 
 @MainActor

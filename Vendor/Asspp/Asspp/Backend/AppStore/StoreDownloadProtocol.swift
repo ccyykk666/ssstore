@@ -38,6 +38,23 @@ enum StoreDownloadError: LocalizedError {
 
 /// Response classification and request rules without credentials or networking.
 enum StoreDownloadProtocol {
+    static func isExpiredSession(_ error: Error) -> Bool {
+        if case StoreDownloadError.rejected("2034", _) = error { return true }
+        // ApplePackage's purchase API exposes this verdict as a localized NSError.
+        let message = error.localizedDescription.lowercased()
+        return message.contains("failuretype: 2034") || message.contains("password token is expired")
+    }
+
+    static func retryExpiredSession<Value>(operation: () async throws -> Value, refresh: () async throws -> Void) async throws -> Value {
+        do { return try await operation() }
+        catch {
+            guard isExpiredSession(error) else { throw error }
+            try Task.checkCancellation()
+            try await refresh()
+            try Task.checkCancellation()
+            return try await operation()
+        }
+    }
 
     static let entPath = "/WebObjects/DownloadDispatch.woa/wa/ent/download"
 
