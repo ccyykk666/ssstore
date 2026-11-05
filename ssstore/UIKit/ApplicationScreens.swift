@@ -107,15 +107,7 @@ final class NativeStoreSearch: NativeSearchPage {
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
-        navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "link"), primaryAction: UIAction { [weak self] _ in
-            guard let self else { return }
-            let clipboard = UIPasteboard.general.string.flatMap(AppStoreLink.parse)?.storeURL.absoluteString ?? ""
-            edit("App Store 链接", value: clipboard) { [weak self] text in
-                guard let self else { return }
-                guard let link = AppStoreLink.parse(text) else { alert("请输入有效的 App Store 应用链接。"); return }
-                (tabBarController as? NativeTabs)?.openStoreLink(link)
-            }
-        })
+        search.searchBar.placeholder = "关键词、Bundle ID 或链接"
     }
     override func rows() -> [NativeSection] {
         let regions = AppStore.this.possibleRegions.sorted()
@@ -150,6 +142,11 @@ final class NativeStoreSearch: NativeSearchPage {
         super.searchBarSearchButtonClicked(searchBar)
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { reset(); reload(); return }
+        if let link = AppStoreLink.parse(term) {
+            reset()
+            (tabBarController as? NativeTabs)?.openStoreLink(link)
+            return
+        }
         reset(); let id = generation; let country = region; let type = entity
         loading = true; reload()
         request = Task { [weak self] in
