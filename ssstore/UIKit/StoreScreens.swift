@@ -166,13 +166,7 @@ final class NativeAccounts: NativePage {
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .add, primaryAction: UIAction { [weak self] _ in
             guard let self else { return }
             let add = NativeAddAccount(model)
-            let nav = UINavigationController(rootViewController: add)
-            nav.sheetPresentationController?.detents = [.custom(identifier: .init("account")) { [weak add] context in
-                guard let add else { return nil }
-                let height = add.preferredContentSize.height
-                return height > 0 ? min(height, context.maximumDetentValue) : context.maximumDetentValue
-            }, .large()]
-            nav.sheetPresentationController?.prefersGrabberVisible = true
+            let nav = NativeFittingNavigation(root: add)
             present(nav, animated: true)
         })
     }
@@ -221,14 +215,6 @@ final class NativeAddAccount: NativePage {
         }
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "取消", primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "确认", primaryAction: UIAction { [weak self] _ in self?.authenticate() })
-    }
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        let height = tableView.contentSize.height + (navigationController?.navigationBar.bounds.height ?? 0)
-        if preferredContentSize.height != height {
-            preferredContentSize = CGSize(width: view.bounds.width, height: height)
-            navigationController?.sheetPresentationController?.invalidateDetents()
-        }
     }
     override func rows() -> [NativeSection] { [NativeSection(rows: Array(repeating: NativeRow(title: ""), count: needsCode ? 3 : 2)), NativeSection(rows: [link(password.isSecureTextEntry ? "显示密码" : "隐藏密码") { [weak self] in self?.password.isSecureTextEntry.toggle(); self?.reload() }])] }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -313,7 +299,7 @@ final class NativePackage: NativePage {
 }
 
 @MainActor
-final class NativeInstall: UIViewController {
+final class NativeInstall: UIViewController, NativeSheetContent {
     private let model: AppModel
     private let package: PackageManifest
     private let status = UILabel()
@@ -321,21 +307,20 @@ final class NativeInstall: UIViewController {
     private let percent = UILabel()
     private let retry = UIButton(type: .system)
     private let stack = UIStackView()
+    private let scroll = UIScrollView()
+    var sheetScrollView: UIScrollView { scroll }
+    var sheetContentHeight: CGFloat {
+        stack.systemLayoutSizeFitting(CGSize(width: scroll.frameLayoutGuide.layoutFrame.width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height
+    }
     private var working = false
     init(_ model: AppModel, package: PackageManifest) {
         self.model = model; self.package = package
         super.init(nibName: nil, bundle: nil)
         title = "配对安装"
-        preferredContentSize.height = 200
     }
     required init?(coder: NSCoder) { fatalError() }
     func present(from owner: UIViewController) {
-        let nav = UINavigationController(rootViewController: self)
-        nav.modalPresentationStyle = .pageSheet
-        nav.sheetPresentationController?.detents = [.custom(identifier: .init("installation")) { [weak self] context in
-            min(self?.preferredContentSize.height ?? 200, context.maximumDetentValue * 0.6)
-        }]
-        nav.sheetPresentationController?.prefersGrabberVisible = true
+        let nav = NativeFittingNavigation(root: self)
         owner.present(nav, animated: true)
     }
     override func viewDidLoad() {
@@ -348,7 +333,7 @@ final class NativeInstall: UIViewController {
         progress.accessibilityLabel = "安装进度"
         retry.setTitle("重试", for: .normal)
         retry.addAction(UIAction { [weak self] _ in self?.start() }, for: .touchUpInside)
-        let scroll = UIScrollView(); scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
         stack.axis = .vertical; stack.spacing = 12
         for item in [status, progress, percent, retry] { stack.addArrangedSubview(item) }
@@ -362,18 +347,14 @@ final class NativeInstall: UIViewController {
     }
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let height = stack.systemLayoutSizeFitting(CGSize(width: stack.bounds.width, height: 0), withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height + 32 + (navigationController?.navigationBar.bounds.height ?? 44)
-        if preferredContentSize.height != height {
-            preferredContentSize.height = height
-            navigationController?.sheetPresentationController?.invalidateDetents()
-        }
+        (navigationController as? NativeFittingNavigation)?.updateContentSize()
     }
     func start() {
         guard !working else { return }
         loadViewIfNeeded(); working = true
         navigationController?.isModalInPresentation = true
         retry.isHidden = true; navigationItem.rightBarButtonItem?.isEnabled = false
-        status.text = "正在连接设备…"; progress.setProgress(0, animated: false); percent.text = "0%"
+        status.text = "正在连接设备…"; progress.setProgress(0, animated: false); percent.isHidden = false; percent.text = "0%"
         Task { [self] in
             do {
                 try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID) { [weak self] stage, value in
@@ -382,7 +363,7 @@ final class NativeInstall: UIViewController {
                     self.progress.setProgress(Float(min(1, max(0, value))), animated: true)
                     self.percent.text = "\(Int(min(1, max(0, value)) * 100))%"
                 }
-                status.text = "安装完成"; progress.setProgress(1, animated: true); percent.text = nil
+                status.text = "安装完成"; progress.setProgress(1, animated: true); percent.isHidden = true
             } catch { status.text = error.localizedDescription; retry.isHidden = false }
             working = false; navigationController?.isModalInPresentation = false; navigationItem.rightBarButtonItem?.isEnabled = true
         }

@@ -100,8 +100,9 @@ final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
         textView.textContainerInset = .zero; textView.textContainer.lineFragmentPadding = 0
         textView.adjustsFontForContentSizeCategory = true; textView.delegate = self
         textView.linkTextAttributes = [.foregroundColor: UIColor.systemBlue]
+        contentView.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 12, leading: 20, bottom: 12, trailing: 20)
         textView.translatesAutoresizingMaskIntoConstraints = false; contentView.addSubview(textView)
-        NSLayoutConstraint.activate([textView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), textView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), textView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), textView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
+        NSLayoutConstraint.activate([textView.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor), textView.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor), textView.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor), textView.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor)])
         more.setTitle("更多", for: .normal); more.isHidden = true
         more.addAction(UIAction { [weak self] _ in self?.toggleExpanded() }, for: .touchUpInside)
         contentView.addSubview(more)
@@ -112,7 +113,7 @@ final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
         if source != text { source = text; expanded = false; cachedWidth = 0 }
     }
     override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
-        prepareText(width: targetSize.width - 40)
+        prepareText(width: targetSize.width - contentView.layoutMargins.left - contentView.layoutMargins.right)
         return super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
     }
     override func layoutSubviews() {
@@ -258,7 +259,49 @@ struct NativeSection {
 
 /// All active screens use UIKit tables and native navigation; no hosting controllers.
 @MainActor
-class NativePage: UITableViewController {
+protocol NativeSheetContent: AnyObject {
+    var sheetScrollView: UIScrollView { get }
+    var sheetContentHeight: CGFloat { get }
+}
+
+@MainActor
+final class NativeFittingNavigation: UINavigationController {
+    private let content: UIViewController & NativeSheetContent
+    init(root: UIViewController & NativeSheetContent) {
+        content = root
+        super.init(rootViewController: root)
+        modalPresentationStyle = .pageSheet
+        sheetPresentationController?.detents = [.custom(identifier: .init("content")) { [weak self] context in
+            guard let height = self?.preferredContentSize.height, height > 0 else { return nil }
+            return min(height, context.maximumDetentValue)
+        }]
+        sheetPresentationController?.prefersGrabberVisible = true
+        sheetPresentationController?.prefersEdgeAttachedInCompactHeight = true
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        content.view.layoutIfNeeded()
+        updateContentSize()
+    }
+    func updateContentSize() {
+        let scroll = content.sheetScrollView
+        guard scroll.bounds.width > 0, scroll.bounds.height > 0 else { return }
+        let chrome = view.bounds.height - scroll.bounds.height
+            + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom - view.safeAreaInsets.bottom
+        let height = ceil(content.sheetContentHeight + chrome)
+        if preferredContentSize.height != height {
+            preferredContentSize.height = height
+            sheetPresentationController?.invalidateDetents()
+            sheetPresentationController?.selectedDetentIdentifier = .init("content")
+        }
+    }
+}
+
+@MainActor
+class NativePage: UITableViewController, NativeSheetContent {
+    var sheetScrollView: UIScrollView { tableView }
+    var sheetContentHeight: CGFloat { tableView.contentSize.height }
     let model: AppModel
     var sections: [NativeSection] = []
     private var changes: AnyCancellable?
@@ -277,7 +320,7 @@ class NativePage: UITableViewController {
         tableView.register(NativeDescriptionCell.self, forCellReuseIdentifier: "description")
         tableView.register(NativeProductHeaderCell.self, forCellReuseIdentifier: "product-header")
         tableView.rowHeight = UITableView.automaticDimension
-        tableView.estimatedRowHeight = 70
+        tableView.estimatedRowHeight = UITableView.automaticDimension
         tableView.keyboardDismissMode = .interactive
         if #available(iOS 26.0, *) { tableView.topEdgeEffect.style = .soft }
     }
@@ -289,6 +332,10 @@ class NativePage: UITableViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         changes = nil
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        (navigationController as? NativeFittingNavigation)?.updateContentSize()
     }
     func scheduleReload() {
         guard !scheduled, viewIfLoaded?.window != nil else { return }
@@ -411,9 +458,10 @@ class NativePage: UITableViewController {
     }
     func push(_ page: UIViewController) { navigationController?.pushViewController(page, animated: true) }
     func sheet(_ page: UIViewController) {
-        let nav = UINavigationController(rootViewController: page)
+        let nav: UINavigationController
+        if let content = page as? (UIViewController & NativeSheetContent) { nav = NativeFittingNavigation(root: content) }
+        else { nav = UINavigationController(rootViewController: page) }
         page.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak page] _ in page?.dismiss(animated: true) })
-        nav.sheetPresentationController?.prefersGrabberVisible = false
         present(nav, animated: true)
     }
     func alert(_ message: String) {
@@ -452,7 +500,6 @@ class NativePage: UITableViewController {
     func preview(_ url: URL) {
         let page = NativePreviewNavigation(file: url)
         page.modalPresentationStyle = .pageSheet
-        page.sheetPresentationController?.detents = [.medium(), .large()]
         page.sheetPresentationController?.prefersGrabberVisible = true
         page.sheetPresentationController?.prefersScrollingExpandsWhenScrolledToEdge = false
         present(page, animated: true)
@@ -463,13 +510,39 @@ class NativePage: UITableViewController {
 @MainActor
 final class NativePreviewNavigation: UINavigationController, UIGestureRecognizerDelegate {
     private let imagePreview: Bool
+    private let imageSize: CGSize?
     init(file: URL) {
         imagePreview = UTType(filenameExtension: file.pathExtension)?.conforms(to: .image) == true
+        imageSize = imagePreview ? UIImage(contentsOfFile: file.path)?.size : nil
         let preview = NativePreview(file)
         super.init(rootViewController: preview)
+        if imageSize != nil {
+            sheetPresentationController?.detents = [.custom(identifier: .init("image")) { [weak self] context in
+                guard let height = self?.preferredContentSize.height, height > 0 else { return nil }
+                return min(height, context.maximumDetentValue)
+            }]
+            sheetPresentationController?.prefersEdgeAttachedInCompactHeight = true
+        }
         preview.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateImageSize()
+    }
+    func updateImageSize() {
+        guard let imageSize, imageSize.width > 0, let preview = topViewController, preview.isViewLoaded else { return }
+        let insets = preview.view.safeAreaInsets
+        let width = preview.view.bounds.width - insets.left - insets.right
+        guard width > 0 else { return }
+        let chrome = view.bounds.height - preview.view.bounds.height + insets.top + insets.bottom - view.safeAreaInsets.bottom
+        let height = ceil(imageSize.height * min(1, width / imageSize.width) + chrome)
+        if preferredContentSize.height != height {
+            preferredContentSize.height = height
+            sheetPresentationController?.invalidateDetents()
+            sheetPresentationController?.selectedDetentIdentifier = .init("image")
+        }
+    }
     override func viewDidLoad() {
         super.viewDidLoad()
         if imagePreview {
@@ -495,6 +568,10 @@ final class NativePreview: QLPreviewController, QLPreviewControllerDataSource {
     let file: URL
     init(_ file: URL) { self.file = file; super.init(nibName: nil, bundle: nil); dataSource = self }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        (navigationController as? NativePreviewNavigation)?.updateImageSize()
+    }
     func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
     func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { file as NSURL }
 }
