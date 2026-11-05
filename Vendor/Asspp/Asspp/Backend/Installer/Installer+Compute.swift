@@ -9,6 +9,11 @@ import ApplePackage
 import Foundation
 
 extension Installer {
+    var pingEndpoint: URL {
+        var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
+        comps.path = "/ping"
+        return comps.url!
+    }
     var installPage: URL {
         var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
         comps.path = "/index.html"

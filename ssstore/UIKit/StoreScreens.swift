@@ -71,7 +71,7 @@ final class NativeProduct: NativePage {
     override func rows() -> [NativeSection] {
         let accounts = AppStore.this.eligibleAccounts(for: region)
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "arrow.down.circle"), primaryAction: UIAction { [weak self] _ in
+        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "arrow.down"), primaryAction: UIAction { [weak self] _ in
             guard let self else { return }; self.push(NativeDownloads(self.model))
         })
         let app = package.software
@@ -296,7 +296,9 @@ final class NativePackage: NativePage {
         } else {
             controls = Downloads.this.getAvailableActions(for: package).filter { $0 != .delete }.map { action in link(Downloads.this.getActionLabel(for: action).title) { [weak self] in guard let self else { return }; Downloads.this.performDownloadAction(for: package, action: action); reload() } }
         }
-        return [NativeSection(rows: [NativeRow(title: app.name, icon: URL(string: app.artworkUrl), badge: app.version, isDownload: true), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: package.state.error ?? package.state.status.title, detail: package.state.percent < 1 ? "\(Int(package.state.percent * 100))%" : "", progress: [.pending, .downloading, .paused].contains(package.state.status) ? package.state.percent : nil)]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
+        let bytes = package.completed ? (try? FileManager.default.attributesOfItem(atPath: package.targetLocation.path)[.size] as? NSNumber)?.int64Value : nil
+        let size = bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? (package.completed ? "未知" : "下载完成后可查看")
+        return [NativeSection(rows: [NativeRow(title: app.name, icon: URL(string: app.artworkUrl), badge: app.version, isDownload: true), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "大小", detail: size), NativeRow(title: package.state.error ?? package.state.status.title, detail: package.state.percent < 1 ? "\(Int(package.state.percent * 100))%" : "", progress: [.pending, .downloading, .paused].contains(package.state.status) ? package.state.percent : nil)]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
     }
 }
 
@@ -391,18 +393,34 @@ final class NativeCertificateInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        return [NativeSection(rows: [NativeRow(title: text, detail: "在浏览器中点击安装并确认。"), link("安装") { [weak self] in self?.openInstaller() }])]
+        return [NativeSection(rows: [NativeRow(title: working ? "正在检查本地连接…" : text, detail: "在浏览器中点击安装并确认。"), link("安装") { [weak self] in self?.openInstaller() }])]
     }
     private func openInstaller() {
-        if backgroundTask == .invalid {
-            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CertificateInstall") { [weak self] in
-                self?.endBackgroundTask()
+        run { [self] in
+            var request = URLRequest(url: installer.pingEndpoint)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            request.timeoutInterval = 10
+            do {
+                let (_, response) = try await URLSession.shared.data(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw NSError(domain: "ssstore.install", code: 1, userInfo: [NSLocalizedDescriptionKey: "本机安装服务未正常响应。"])
+                }
+            } catch {
+                guard view.window != nil, navigationController?.topViewController === self else { return }
+                let error = error as NSError
+                throw NSError(domain: "ssstore.install", code: error.code, userInfo: [NSLocalizedDescriptionKey: "本机安装服务连接失败（\(error.code)）：\(error.localizedDescription)"])
             }
-        }
-        UIApplication.shared.open(installer.installPage) { [weak self] opened in
-            guard let self, !opened else { return }
-            self.endBackgroundTask()
-            self.alert("无法打开安装页面，请检查网络和本地服务后重试。")
+            guard view.window != nil, navigationController?.topViewController === self else { return }
+            if backgroundTask == .invalid {
+                backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CertificateInstall") { [weak self] in
+                    self?.endBackgroundTask()
+                }
+            }
+            UIApplication.shared.open(installer.installPage) { [weak self] opened in
+                guard let self, !opened else { return }
+                self.endBackgroundTask()
+                self.alert("无法打开安装页面，请检查网络和本地服务后重试。")
+            }
         }
     }
     private func endBackgroundTask() {
