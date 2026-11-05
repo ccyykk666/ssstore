@@ -375,10 +375,13 @@ final class NativeInstall: UIViewController, NativeSheetContent {
 @MainActor
 final class NativeCertificateInstall: NativePage {
     let installer: Installer
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: "证书安装") }
     required init?(coder: NSCoder) { fatalError() }
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); openInstaller() }
-    override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); if isMovingFromParent { installer.destroy() } }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if isMovingFromParent { endBackgroundTask(); installer.destroy() }
+    }
     override func rows() -> [NativeSection] {
         let text: String
         switch installer.status {
@@ -388,13 +391,24 @@ final class NativeCertificateInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        return [NativeSection(rows: [NativeRow(title: text), link("安装") { [weak self] in self?.openInstaller() }])]
+        return [NativeSection(rows: [NativeRow(title: text, detail: "在 Safari 中点击安装并确认。"), link("安装") { [weak self] in self?.openInstaller() }])]
     }
     private func openInstaller() {
-        UIApplication.shared.open(installer.iTunesLink) { [weak self] opened in
-            guard !opened else { return }
-            self?.alert("系统未能打开安装链接。请检查设备是否允许安装应用，然后重试。")
+        if backgroundTask == .invalid {
+            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CertificateInstall") { [weak self] in
+                self?.endBackgroundTask()
+            }
         }
+        UIApplication.shared.open(installer.installPage) { [weak self] opened in
+            guard let self, !opened else { return }
+            self.endBackgroundTask()
+            self.alert("无法打开安装页面，请检查网络和本地服务后重试。")
+        }
+    }
+    private func endBackgroundTask() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
     }
 }
 

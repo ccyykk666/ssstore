@@ -6,6 +6,7 @@
 //
 
 import ApplePackage
+import Foundation
 import Logging
 #if canImport(UIKit)
     import UIKit
@@ -18,6 +19,8 @@ class Installer: Identifiable, @unchecked Sendable {
     @ObservationIgnored let app: Application
     @ObservationIgnored let archive: AppStore.AppPackage
     @ObservationIgnored let port = Int.random(in: 4000 ... 8000)
+    @ObservationIgnored private let shutdownLock = NSLock()
+    @ObservationIgnored private var shuttingDown = false
 
     enum Status {
         case ready
@@ -144,13 +147,16 @@ class Installer: Identifiable, @unchecked Sendable {
     }
 
     func destroy() {
-        guard !app.didShutdown else { return }
+        shutdownLock.lock()
+        guard !shuttingDown else { shutdownLock.unlock(); return }
+        shuttingDown = true
+        shutdownLock.unlock()
         logger.info("destroying installer id: \(id)")
+        let app = app
         Task.detached {
-            await self.app.server.shutdown()
-            try await self.app.asyncShutdown()
-            withExtendedLifetime(self) { _ in }
-            withExtendedLifetime(self.app) { _ in }
+            guard !app.didShutdown else { return }
+            await app.server.shutdown()
+            try await app.asyncShutdown()
         }
     }
 }

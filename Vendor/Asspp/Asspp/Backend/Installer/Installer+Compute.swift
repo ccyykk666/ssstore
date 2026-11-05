@@ -9,6 +9,11 @@ import ApplePackage
 import Foundation
 
 extension Installer {
+    var installPage: URL {
+        var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
+        comps.path = "/"
+        return comps.url!
+    }
     var plistEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
@@ -65,8 +70,10 @@ extension Installer {
     }
 
     var indexHtml: String {
-        """
-        <html> <head> <meta http-equiv="refresh" content="0;url=\(iTunesLink.absoluteString)"> </head> </html>
+        let link = iTunesLink.absoluteString.replacingOccurrences(of: "&", with: "&amp;")
+        return """
+        <!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>安装应用</title><style>html{color-scheme:light dark;font-family:-apple-system,system-ui}main{max-width:32rem;margin:15vh auto;padding:1.5rem}a{display:inline-block;padding:.8rem 1.5rem;background:#007aff;color:white;text-decoration:none;border-radius:.75rem;font-weight:600}</style></head>
+        <body><main><h2>安装应用</h2><p>请点击下方按钮，并在系统提示中确认安装。</p><a href="\(link)">安装</a></main></body></html>
         """
     }
 
