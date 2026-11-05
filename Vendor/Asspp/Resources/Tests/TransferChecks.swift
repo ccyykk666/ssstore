@@ -4,18 +4,23 @@ import Foundation
 @main
 struct TransferChecks {
     @MainActor static func main() async throws {
+        var phase = "setup"
         let timeout = Task {
-            do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { return }
-            fatalError("Native transfer checks timed out")
+            do { try await Task.sleep(nanoseconds: 120_000_000_000) } catch { return }
+            fatalError("Native transfer checks timed out during \(phase)")
         }
         defer { timeout.cancel() }
         let base = URL(string: CommandLine.arguments[1])!
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let transfer = NativePackageTransfer(directory: directory)
-        let payload = Data((0..<8_388_608).map { UInt8(truncatingIfNeeded: $0) })
+        let block = Data((0..<256).map { UInt8($0) })
+        var payload = Data(capacity: 8_388_608)
+        for _ in 0..<32768 { payload.append(block) }
         let expected = SHA256.hash(data: payload)
 
+        phase = "single stream"
+        print("Checking \(phase)"); fflush(stdout)
         let firstStarted = ProcessInfo.processInfo.systemUptime
         let firstID = UUID()
         var progressCount = 0
@@ -38,6 +43,8 @@ struct TransferChecks {
         }
         precondition(recovered == first, "A completed transfer must survive interruption before IPA finalization")
 
+        phase = "persisted resume"
+        print("Checking \(phase)"); fflush(stdout)
         let resumeID = UUID()
         var paused = false
         let resumed: URL = try await withCheckedThrowingContinuation { continuation in
@@ -62,6 +69,8 @@ struct TransferChecks {
         let resumedBytes = try Data(contentsOf: resumed)
         precondition(SHA256.hash(data: resumedBytes) == expected, "Resume must preserve every byte")
 
+        phase = "rapid resume"
+        print("Checking \(phase)"); fflush(stdout)
         let raceID = UUID()
         var toggled = false
         let rapidResume: URL = try await withCheckedThrowingContinuation { continuation in
@@ -88,6 +97,8 @@ struct TransferChecks {
         precondition(stats["/single"] == ["GET"], "No duplicate requests or HEAD preflight")
         precondition(stats["/resume"]?.contains(where: { $0.hasPrefix("bytes=") }) == true, "Resume must request the remaining range")
         precondition(!stats.values.flatMap { $0 }.contains("HEAD"))
+        phase = "parallel download"
+        print("Checking \(phase)"); fflush(stdout)
         let parallel = PackageTransfer(directory: directory)
         let parallelFile: URL = try await withCheckedThrowingContinuation { continuation in
             parallel.resume(id: UUID(), url: base.appendingPathComponent("parallel")) { _, _ in }
@@ -100,6 +111,8 @@ struct TransferChecks {
         let (parallelStats, _) = try await URLSession.shared.data(from: base.appendingPathComponent("stats"))
         let ranges = try JSONDecoder().decode([String: [String]].self, from: parallelStats)["/parallel"] ?? []
         precondition(ranges.filter { $0.hasPrefix("bytes=") }.count == 4, "One IPA must use four distinct ranges")
+        phase = "parallel resume"
+        print("Checking \(phase)"); fflush(stdout)
         let parallelResumeID = UUID()
         var parallelPaused = false
         let parallelResumed: URL = try await withCheckedThrowingContinuation { continuation in
@@ -114,6 +127,8 @@ struct TransferChecks {
         }
         let resumedParallelData = try Data(contentsOf: parallelResumed)
         precondition(parallelPaused && SHA256.hash(data: resumedParallelData) == SHA256.hash(data: parallelExpected))
+        phase = "range fallback"
+        print("Checking \(phase)"); fflush(stdout)
         let ignoredRange: URL = try await withCheckedThrowingContinuation { continuation in
             parallel.resume(id: UUID(), url: base.appendingPathComponent("parallel-ignored")) { _, _ in }
                 completion: { continuation.resume(with: $0) }
