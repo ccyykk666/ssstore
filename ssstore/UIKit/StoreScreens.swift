@@ -391,7 +391,7 @@ final class NativeCertificateInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        return [NativeSection(rows: [NativeRow(title: text, detail: "在 Safari 中点击安装并确认。"), link("安装") { [weak self] in self?.openInstaller() }])]
+        return [NativeSection(rows: [NativeRow(title: text, detail: "在浏览器中点击安装并确认。"), link("安装") { [weak self] in self?.openInstaller() }])]
     }
     private func openInstaller() {
         if backgroundTask == .invalid {
