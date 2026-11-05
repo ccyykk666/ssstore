@@ -474,6 +474,7 @@ final class NativePreviewNavigation: UINavigationController, UIGestureRecognizer
         super.viewDidLoad()
         if imagePreview {
             let pan = UIPanGestureRecognizer(target: self, action: #selector(pulledDown(_:)))
+            pan.maximumNumberOfTouches = 1
             pan.delegate = self; pan.cancelsTouchesInView = false
             view.addGestureRecognizer(pan)
         }
