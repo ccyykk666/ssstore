@@ -3,6 +3,13 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        precondition(StoreProtocol.storefrontIdentifier(" 143441-1,34 ") == "143441")
+        precondition(StoreProtocol.storefrontIdentifier("143443,34") == "143443")
+        precondition(StoreProtocol.dialogMessage(["dialog": ["message": "Account action required", "explanation": "Review your account"]]) == "Account action required\nReview your account")
+        do {
+            _ = try StoreDownloadProtocol.packageItem(["dialog": ["message": "Account locked", "explanation": "Reset your password"]], bundleID: "test.app")
+            fatalError("An account dialog must stop the package request")
+        } catch StoreDownloadError.rejected(_, let message) { precondition(message.contains("Reset your password")) }
         try await HistorySupportChecks.run()
         var sessionAttempts = 0
         var sessionRefreshes = 0
@@ -40,9 +47,10 @@ struct DownloadProtocolChecks {
             precondition(StoreDownloadProtocol.entEndpoint(in: ["volumeStoreDownloadProduct": bad]) == nil)
         }
         let preferred = try StoreDownloadProtocol.entRequest(endpoint: URL(string: ent)!, appID: 123,
-            guid: "001122334455", dsid: "123456789", store: "143465", token: "synthetic-token",
+            guid: "001122334455", dsid: "123456789", store: "143465-1,34", token: "synthetic-token",
             version: "historical-id", blob: "synthetic-blob")
         precondition(preferred.value(forHTTPHeaderField: "X-Token") == "synthetic-token")
+        precondition(preferred.value(forHTTPHeaderField: "User-Agent") == StoreProtocol.userAgent)
         precondition(preferred.value(forHTTPHeaderField: "X-Apple-Store-Front") == "143465-1")
         let payload = StoreProtocol.plist(preferred.httpBody!)!
         precondition(payload["externalVersionId"] as? String == "historical-id" && payload["appExtVrsId"] == nil)

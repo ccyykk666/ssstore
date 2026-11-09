@@ -1,5 +1,7 @@
 # Third-party references and dependencies
 
+The 2026-11-09 store compatibility updates reference MIT-licensed [ipatool](https://github.com/majd/ipatool), Copyright (c) 2021 Majd Alfhaily. Applied behavior changes and upstream commits are documented in `docs/UPSTREAM_REVIEW_2026-11-09.md`; the desktop emulator and its Apple framework assets are not bundled.
+
 The public Apple catalog query design (`mdm-lockup` lookup and external version ID) was researched from [AssppWeb](https://github.com/ccyykk666/AssppWeb). AssppWeb is also used for the local WebKit kbsync runtime described below; the earlier statement that it was only a research reference is no longer accurate.
 
 The device transport links the published **idevice v0.1.68** Apple XCFramework from [jkcoxson/idevice](https://github.com/jkcoxson/idevice). The Rust `idevice` crate declares MIT licensing in its [package metadata](https://github.com/jkcoxson/idevice/blob/v0.1.68/idevice/Cargo.toml). Its distributed static binary also contains transitive dependencies; consult the upstream repository and release for their applicable license terms before distributing a finished build.

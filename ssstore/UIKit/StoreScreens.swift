@@ -71,7 +71,7 @@ final class NativeProduct: NativePage {
     override func rows() -> [NativeSection] {
         let accounts = AppStore.this.eligibleAccounts(for: region)
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "arrow.down"), primaryAction: UIAction { [weak self] _ in
+        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "tray.and.arrow.down"), primaryAction: UIAction { [weak self] _ in
             guard let self else { return }; self.push(NativeDownloads(self.model))
         })
         let app = package.software
@@ -171,7 +171,7 @@ final class NativeAccounts: NativePage {
         })
     }
     override func rows() -> [NativeSection] {
-        [NativeSection(title: "Apple ID", rows: AppStore.this.accounts.map { account in NativeRow(title: account.account.email, detail: ApplePackage.Configuration.countryCode(for: account.account.store) ?? account.account.store, action: { [weak self] in guard let self else { return }; push(NativeAccountDetail(model, id: account.id)) }) })]
+        [NativeSection(title: "Apple ID", rows: AppStore.this.accounts.map { account in NativeRow(title: account.account.email, detail: ApplePackage.Configuration.countryCode(for: StoreProtocol.storefrontIdentifier(account.account.store)) ?? account.account.store, action: { [weak self] in guard let self else { return }; push(NativeAccountDetail(model, id: account.id)) }) })]
     }
 }
 
@@ -256,7 +256,7 @@ final class NativeDownloads: NativePage {
                 guard let self else { return }
                 let accounts = AppStore.this.accounts
                 let picker = NativeChoices(model, title: "选择账户", items: accounts.map { ($0.id, $0.account.email) }) { [weak self] id in
-                    guard let self, let account = accounts.first(where: { $0.id == id }), let region = ApplePackage.Configuration.countryCode(for: account.account.store) else { return }
+                    guard let self, let account = accounts.first(where: { $0.id == id }), let region = ApplePackage.Configuration.countryCode(for: StoreProtocol.storefrontIdentifier(account.account.store)) else { return }
                     run { let app = try await ApplePackage.Lookup.lookup(bundleID: bundle, countryCode: region); try await Downloads.this.startDownload(for: AppStore.AppPackage(software: app), accountID: id) }
                 }
                 push(picker)

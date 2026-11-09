@@ -48,7 +48,7 @@ class Installer: Identifiable, @unchecked Sendable {
                 return Response(status: .ok, body: .init(string: "pong"))
             case "/", "/index.html":
                 return Response(status: .ok, version: req.version, headers: [
-                    "Content-Type": "text/html",
+                    "Content-Type": "text/html; charset=utf-8",
                 ], body: .init(string: indexHtml))
             case plistEndpoint.path:
                 await MainActor.run { self.status = .sendingManifest }

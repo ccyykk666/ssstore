@@ -90,8 +90,8 @@ enum StoreDownloadProtocol {
         var request = URLRequest(url: url.url!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("Configurator/2.18 (Macintosh; OS X 15.3.2; 24D81) AppleWebKit/0620.2.4.11.6", forHTTPHeaderField: "User-Agent")
-        request.setValue(store + "-1", forHTTPHeaderField: "X-Apple-Store-Front")
+        request.setValue(StoreProtocol.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(StoreProtocol.storefrontIdentifier(store) + "-1", forHTTPHeaderField: "X-Apple-Store-Front")
         request.setValue(token, forHTTPHeaderField: "X-Token")
         request.setValue(dsid, forHTTPHeaderField: "iCloud-DSID")
         request.setValue(dsid, forHTTPHeaderField: "X-Dsid")
@@ -290,6 +290,7 @@ enum StoreDownloadProtocol {
     static func packageItem(_ response: [String: Any], bundleID: String, version: String? = nil) throws -> [String: Any] {
         let code = failureCode(response)
         let message = StoreProtocol.string(response["customerMessage"])
+        if let dialog = StoreProtocol.dialogMessage(response) { throw StoreDownloadError.rejected(code, dialog) }
         if !code.isEmpty {
             throw StoreDownloadError.rejected(code, message)
         }

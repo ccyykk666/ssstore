@@ -92,7 +92,7 @@ enum StoreDownloadService {
         defer { logger.info("Store download [\(trace)]: operation=\(operation) elapsedMs=\(elapsed(started))") }
         let session = Self.session
         do {
-            let region = Configuration.countryCode(for: account.store)
+            let region = Configuration.countryCode(for: StoreProtocol.storefrontIdentifier(account.store))
             var effectiveVersion = version
             func resolveVersion() async throws -> String {
                 // An unpinned redownload can return a tvOS build for an iOS app.

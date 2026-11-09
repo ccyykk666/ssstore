@@ -111,11 +111,11 @@ class AppStore {
     }
 
     var possibleRegions: Set<String> {
-        Set(accounts.compactMap { ApplePackage.Configuration.countryCode(for: $0.account.store) })
+        Set(accounts.compactMap { ApplePackage.Configuration.countryCode(for: StoreProtocol.storefrontIdentifier($0.account.store)) })
     }
 
     func eligibleAccounts(for region: String) -> [UserAccount] {
-        accounts.filter { ApplePackage.Configuration.countryCode(for: $0.account.store) == region }
+        accounts.filter { ApplePackage.Configuration.countryCode(for: StoreProtocol.storefrontIdentifier($0.account.store)) == region }
     }
 
     nonisolated func withAccount<T>(id: String, _ body: (inout UserAccount) async throws -> T) async throws -> T {

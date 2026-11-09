@@ -2,6 +2,23 @@ import Foundation
 
 /// Serialization and cookie conventions shared by store authentication and product requests.
 enum StoreProtocol {
+    // ipatool 72c47d538b / 001d889896: keep store requests on the current client profile.
+    static let userAgent = "Configurator/2.21 (Macintosh; OS X 27.0.1; 26A434) AppleWebKit/0625.2.5.11.6"
+
+    static func storefrontIdentifier(_ value: String) -> String {
+        String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix { $0 != "," && $0 != "-" })
+    }
+
+    // Preserve Apple's account-action explanation without surfacing arbitrary action URLs.
+    static func dialogMessage(_ response: [String: Any]) -> String? {
+        guard let dialog = response["dialog"] as? [String: Any] else { return nil }
+        var parts: [String] = []
+        for value in [dialog["message"] ?? response["customerMessage"], dialog["explanation"]] {
+            let text = string(value).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty && !parts.contains(text) { parts.append(text) }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
+    }
     struct SessionCookie {
         var name: String
         var value: String
