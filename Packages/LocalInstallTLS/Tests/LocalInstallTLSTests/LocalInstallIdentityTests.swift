@@ -7,6 +7,17 @@ import SwiftASN1
 @testable import LocalInstallTLS
 
 final class LocalInstallIdentityTests: XCTestCase {
+    func testInstallationLinkPreservesNestedHTTPSURLPortAndQuery() throws {
+        let manifest = try XCTUnwrap(URL(string: "https://localhost:5678/app.plist?version=1&label=a%2Bb"))
+        let link = LocalInstallURL.installationLink(manifestURL: manifest)
+        let components = try XCTUnwrap(URLComponents(url: link, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "itms-services")
+        XCTAssertNil(components.port)
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "action" })?.value, "download-manifest")
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "url" })?.value, manifest.absoluteString)
+        XCTAssertTrue(components.percentEncodedQuery?.contains("https%3A%2F%2Flocalhost%3A5678%2F") == true)
+    }
+
     func testRealCertificateChainMatchesLoopbackAddressesAndServerPrivateKey() throws {
         let now = Date()
         let record = try IdentityRecord.generate(now: now)

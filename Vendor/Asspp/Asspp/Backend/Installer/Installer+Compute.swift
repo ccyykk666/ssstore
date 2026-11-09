@@ -7,6 +7,7 @@
 
 import ApplePackage
 import Foundation
+import LocalInstallTLS
 
 extension Installer {
     var certificateProfileEndpoint: URL {
@@ -46,14 +47,7 @@ extension Installer {
     }
 
     var iTunesLink: URL {
-        var comps = URLComponents()
-        comps.scheme = "itms-services"
-        comps.host = ""
-        comps.queryItems = [
-            URLQueryItem(name: "action", value: "download-manifest"),
-            URLQueryItem(name: "url", value: plistEndpoint.absoluteString),
-        ]
-        return comps.url!
+        LocalInstallURL.installationLink(manifestURL: plistEndpoint)
     }
 
     var displayImageSmallEndpoint: URL {
