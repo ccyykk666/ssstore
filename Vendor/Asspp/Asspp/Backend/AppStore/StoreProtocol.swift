@@ -12,8 +12,10 @@ enum StoreProtocol {
     // Preserve Apple's account-action explanation without surfacing arbitrary action URLs.
     static func dialogMessage(_ response: [String: Any]) -> String? {
         guard let dialog = response["dialog"] as? [String: Any] else { return nil }
+        var message = string(dialog["message"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.isEmpty { message = string(response["customerMessage"]) }
         var parts: [String] = []
-        for value in [dialog["message"] ?? response["customerMessage"], dialog["explanation"]] {
+        for value in [message, string(dialog["explanation"])] {
             let text = string(value).trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty && !parts.contains(text) { parts.append(text) }
         }

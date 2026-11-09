@@ -6,6 +6,7 @@ struct DownloadProtocolChecks {
         precondition(StoreProtocol.storefrontIdentifier(" 143441-1,34 ") == "143441")
         precondition(StoreProtocol.storefrontIdentifier("143443,34") == "143443")
         precondition(StoreProtocol.dialogMessage(["dialog": ["message": "Account action required", "explanation": "Review your account"]]) == "Account action required\nReview your account")
+        precondition(StoreProtocol.dialogMessage(["dialog": ["message": "  ", "explanation": "Review your account"], "customerMessage": "Account action required"]) == "Account action required\nReview your account")
         do {
             _ = try StoreDownloadProtocol.packageItem(["dialog": ["message": "Account locked", "explanation": "Reset your password"]], bundleID: "test.app")
             fatalError("An account dialog must stop the package request")
