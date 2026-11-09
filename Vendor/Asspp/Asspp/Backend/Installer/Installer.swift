@@ -18,6 +18,7 @@ import Vapor
 class Installer: Identifiable, @unchecked Sendable {
     @ObservationIgnored let id: UUID
     @ObservationIgnored let app: Application
+    @ObservationIgnored private let ipv6App: Application?
     @ObservationIgnored let archive: AppStore.AppPackage
     @ObservationIgnored let certificateIdentity: LocalInstallIdentity
     @ObservationIgnored let port = Int.random(in: 4000 ... 8000)
@@ -41,61 +42,67 @@ class Installer: Identifiable, @unchecked Sendable {
         self.archive = archive
         certificateIdentity = try await Task.detached { try LocalInstallIdentity.current() }.value
         app = try await Self.setupApp(port: port, identity: certificateIdentity)
+        ipv6App = try await Self.setupApp(port: port, identity: certificateIdentity, host: "::1")
         logger.info("Installer app setup completed for ID: \(id)")
 
-        app.get("*") { [weak self] req in
-            guard let self else { return Response(status: .badGateway) }
+        for server in [app, ipv6App].compactMap({ $0 }) {
+            server.get("*") { [weak self] req in
+                guard let self else { return Response(status: .badGateway) }
+                logger.info("local installer request id=\(self.id) method=\(req.method) path=\(req.url.path) userAgent=\(req.headers.first(name: "User-Agent") ?? "unknown")")
 
-            switch req.url.path {
-            case "/ping":
-                return Response(status: .ok, body: .init(string: "pong"))
-            case "/", "/index.html":
-                return Response(status: .ok, version: req.version, headers: [
-                    "Content-Type": "text/html; charset=utf-8",
-                ], body: .init(string: indexHtml))
-            case plistEndpoint.path:
-                await MainActor.run { self.status = .sendingManifest }
-                logger.info("sending manifest for installer id: \(self.id)")
-                return Response(status: .ok, version: req.version, headers: [
-                    "Content-Type": "text/xml",
-                ], body: .init(data: installManifestData))
-            case displayImageSmallEndpoint.path:
-                await MainActor.run { self.status = .sendingManifest }
-                logger.info("sending small display image for installer id: \(self.id)")
-                return Response(status: .ok, version: req.version, headers: [
-                    "Content-Type": "image/png",
-                ], body: .init(data: displayImageSmallData))
-            case displayImageLargeEndpoint.path:
-                await MainActor.run { self.status = .sendingManifest }
-                logger.info("sending large display image for installer id: \(self.id)")
-                return Response(status: .ok, version: req.version, headers: [
-                    "Content-Type": "image/png",
-                ], body: .init(data: displayImageLargeData))
-            case payloadEndpoint.path:
-                await MainActor.run { self.status = .sendingPayload }
-                logger.info("starting payload transfer for installer id: \(self.id)")
+                switch req.url.path {
+                case "/ping":
+                    return Response(status: .ok, body: .init(string: "pong"))
+                case "/", "/index.html":
+                    return Response(status: .ok, version: req.version, headers: [
+                        "Content-Type": "text/html; charset=utf-8",
+                    ], body: .init(string: indexHtml))
+                case plistEndpoint.path:
+                    await MainActor.run { self.status = .sendingManifest }
+                    logger.info("sending manifest for installer id: \(self.id)")
+                    return Response(status: .ok, version: req.version, headers: [
+                        "Content-Type": "text/xml",
+                    ], body: .init(data: installManifestData))
+                case displayImageSmallEndpoint.path:
+                    await MainActor.run { self.status = .sendingManifest }
+                    logger.info("sending small display image for installer id: \(self.id)")
+                    return Response(status: .ok, version: req.version, headers: [
+                        "Content-Type": "image/png",
+                    ], body: .init(data: displayImageSmallData))
+                case displayImageLargeEndpoint.path:
+                    await MainActor.run { self.status = .sendingManifest }
+                    logger.info("sending large display image for installer id: \(self.id)")
+                    return Response(status: .ok, version: req.version, headers: [
+                        "Content-Type": "image/png",
+                    ], body: .init(data: displayImageLargeData))
+                case payloadEndpoint.path:
+                    await MainActor.run { self.status = .sendingPayload }
+                    logger.info("starting payload transfer for installer id: \(self.id)")
 
-                return try await req.fileio.asyncStreamFile(
-                    at: packagePath.path,
-                    chunkSize: 64 * 1024,
-                ) { result in
-                    await MainActor.run {
-                        self.status = .completed(result)
-                        if case .success = result {
-                            logger.info("payload transfer completed for installer id: \(self.id)")
-                        } else {
-                            logger.error("payload transfer failed for installer id: \(self.id)")
+                    return try await req.fileio.asyncStreamFile(
+                        at: packagePath.path,
+                        chunkSize: 64 * 1024,
+                    ) { result in
+                        await MainActor.run {
+                            self.status = .completed(result)
+                            if case .success = result {
+                                logger.info("payload transfer completed for installer id: \(self.id)")
+                            } else {
+                                logger.error("payload transfer failed for installer id: \(self.id)")
+                            }
                         }
                     }
+                default:
+                    // 404
+                    logger.warning("unknown request path: \(req.url.path) for installer id: \(self.id)")
+                    return Response(status: .notFound)
                 }
-            default:
-                // 404
-                logger.warning("unknown request path: \(req.url.path) for installer id: \(self.id)")
-                return Response(status: .notFound)
             }
         }
 
         try app.server.start()
+        do { try ipv6App?.server.start() }
+        catch { logger.warning("IPv6 installer listener unavailable; IPv4 listener remains active: \(error.localizedDescription)") }
         logger.info("installer init at port \(port) for loopback host \(Self.host)")
     }
 
@@ -103,6 +110,7 @@ class Installer: Identifiable, @unchecked Sendable {
         let id: UUID = .init()
         self.id = id
         self.certificateIdentity = certificateIdentity
+        ipv6App = nil
         archive = .init(software: .init(
             id: .random(),
             bundleID: "",
@@ -144,11 +152,14 @@ class Installer: Identifiable, @unchecked Sendable {
         shuttingDown = true
         shutdownLock.unlock()
         logger.info("destroying installer id: \(id)")
-        let app = app
+        let servers = [app, ipv6App].compactMap { $0 }
         Task.detached {
-            guard !app.didShutdown else { return }
-            await app.server.shutdown()
-            try await app.asyncShutdown()
+            for app in servers {
+                guard !app.didShutdown else { continue }
+                await app.server.shutdown()
+                do { try await app.asyncShutdown() }
+                catch { logger.error("Installer shutdown failed: \(error.localizedDescription)") }
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ import X509
 /// A device-local CA and server identity. No CA or server private key is bundled or exported.
 public struct LocalInstallIdentity: Sendable {
     public static let host = "127.0.0.1"
+    public static let installationHost = "localhost"
     private static let store = IdentityStore(service: "dev.personal.ssstore.loopback-tls")
 
     public let rootName: String
@@ -53,7 +54,7 @@ public struct LocalInstallIdentity: Sendable {
             "PayloadIdentifier": "dev.personal.ssstore.loopback-ca",
             "PayloadUUID": record.profileID.uuidString,
             "PayloadDisplayName": "ssstore 本机安装证书",
-            "PayloadDescription": "用于通过 127.0.0.1 安装应用。安装后，请在设置 → 通用 → 关于本机 → 证书信任设置中，启用 \(rootName) 的完整信任。",
+            "PayloadDescription": "用于通过本机回环连接安装应用。安装后，请在设置 → 通用 → 关于本机 → 证书信任设置中，启用 \(rootName) 的完整信任。",
             "PayloadContent": [rootPayload],
         ], format: .xml, options: 0)
     }
@@ -105,7 +106,11 @@ struct IdentityRecord: Codable {
                 Critical(BasicConstraints.notCertificateAuthority)
                 Critical(KeyUsage(digitalSignature: true))
                 try ExtendedKeyUsage([.serverAuth])
-                SubjectAlternativeNames([.ipAddress(ASN1OctetString(contentBytes: [127, 0, 0, 1]))])
+                SubjectAlternativeNames([
+                    .ipAddress(ASN1OctetString(contentBytes: [127, 0, 0, 1])),
+                    .ipAddress(ASN1OctetString(contentBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])),
+                    .dnsName(LocalInstallIdentity.installationHost),
+                ])
                 SubjectKeyIdentifier(hash: .init(key.publicKey))
                 AuthorityKeyIdentifier(keyIdentifier: SubjectKeyIdentifier(hash: root.publicKey).keyIdentifier)
             }, issuerPrivateKey: .init(rootPrivateKey)
@@ -148,9 +153,14 @@ final class IdentityStore: @unchecked Sendable {
         if root.notValidAfter <= now.addingTimeInterval(30 * 86400) {
             record = try IdentityRecord.generate(now: now)
             changed = true
-        } else if try Certificate(derEncoded: Array(record.serverCertificate)).notValidAfter <= now.addingTimeInterval(30 * 86400) {
-            try record.renewServer(now: now)
-            changed = true
+        } else {
+            let server = try Certificate(derEncoded: Array(record.serverCertificate))
+            let names = try server.extensions.subjectAlternativeNames
+            if server.notValidAfter <= now.addingTimeInterval(30 * 86400)
+                || names?.contains(.dnsName(LocalInstallIdentity.installationHost)) != true {
+                try record.renewServer(now: now)
+                changed = true
+            }
         }
         if changed {
             let data = try JSONEncoder().encode(record)

@@ -72,7 +72,7 @@ final class NativeProduct: NativePage {
     override func rows() -> [NativeSection] {
         let accounts = AppStore.this.eligibleAccounts(for: region)
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
-        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "tray.and.arrow.down"), primaryAction: UIAction { [weak self] _ in
+        navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "arrow.down.circle"), primaryAction: UIAction { [weak self] _ in
             guard let self else { return }; self.push(NativeDownloads(self.model))
         })
         let app = package.software
@@ -380,6 +380,7 @@ final class NativeCertificateInstall: NativePage {
     let installer: Installer
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     private var certificateTrusted = false
+    private var awaitingSystem = false
     private var trustTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
     init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: "证书安装") }
@@ -416,7 +417,7 @@ final class NativeCertificateInstall: NativePage {
     override func rows() -> [NativeSection] {
         let text: String
         switch installer.status {
-        case .ready: text = "准备安装"
+        case .ready: text = awaitingSystem ? "等待系统获取安装清单…" : "准备安装"
         case .sendingManifest: text = "正在发送清单…"
         case .sendingPayload: text = "正在发送安装包…"
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
@@ -458,14 +459,27 @@ final class NativeCertificateInstall: NativePage {
                 throw NSError(domain: "ssstore.install", code: error.code, userInfo: [NSLocalizedDescriptionKey: "本机安装服务连接失败（\(error.code)）：\(error.localizedDescription)"])
             }
             guard view.window != nil, navigationController?.topViewController === self else { return }
+            installer.status = .ready
             if backgroundTask == .invalid {
                 backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CertificateInstall") { [weak self] in
-                    self?.endBackgroundTask()
+                    guard let self else { return }
+                    switch installer.status {
+                    case .completed, .broken: break
+                    default:
+                        installer.status = .broken(NSError(domain: "ssstore.install", code: 4,
+                            userInfo: [NSLocalizedDescriptionKey: "系统已结束本机安装服务的后台执行时间，请返回软件重新点击安装。"]))
+                    }
+                    logger.warning("Local installer background time expired")
+                    endBackgroundTask()
                 }
             }
+            awaitingSystem = true
+            logger.info("Opening local installation page: \(installer.installPage.absoluteString)")
             UIApplication.shared.open(installer.installPage) { [weak self] opened in
                 guard let self, !opened else { return }
+                self.awaitingSystem = false
                 self.endBackgroundTask()
+                self.reload()
                 self.alert("无法打开安装页面，请检查网络和本地服务后重试。")
             }
         }

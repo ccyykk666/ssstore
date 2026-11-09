@@ -20,6 +20,7 @@ let package = Package(
             "LocalInstallTLS",
             .product(name: "X509", package: "swift-certificates"),
             .product(name: "Crypto", package: "swift-crypto"),
+            .product(name: "SwiftASN1", package: "swift-asn1"),
         ]),
     ]
 )

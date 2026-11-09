@@ -16,6 +16,7 @@ import UIKit
 
 extension Installer {
     static let host = LocalInstallIdentity.host
+    static let installationHost = LocalInstallIdentity.installationHost
 
     @MainActor private static var certificateServer: Task<Installer, Error>?
 

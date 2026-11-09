@@ -3,14 +3,17 @@ import Foundation
 import Security
 import Crypto
 import X509
+import SwiftASN1
 @testable import LocalInstallTLS
 
 final class LocalInstallIdentityTests: XCTestCase {
-    func testRealCertificateChainMatchesOnlyLoopbackIPAndServerPrivateKey() throws {
+    func testRealCertificateChainMatchesLoopbackAddressesAndServerPrivateKey() throws {
         let now = Date()
         let record = try IdentityRecord.generate(now: now)
         let identity = try LocalInstallIdentity(record: record)
         XCTAssertTrue(try trusts(identity, host: "127.0.0.1", at: now))
+        XCTAssertTrue(try trusts(identity, host: "localhost", at: now))
+        XCTAssertTrue(try trusts(identity, host: "::1", at: now))
         XCTAssertFalse(try trusts(identity, host: "127.0.0.2", at: now))
         XCTAssertFalse(try trusts(identity, host: "app.localhost.qaq.wiki", at: now))
         XCTAssertFalse(identity.isTrusted, "A generated CA must not become a system trust anchor automatically")
@@ -56,6 +59,40 @@ final class LocalInstallIdentityTests: XCTestCase {
         XCTAssertNotEqual(first.certificateDER, renewed.certificateDER)
         XCTAssertNotEqual(first.privateKeyPEM, renewed.privateKeyPEM)
         XCTAssertTrue(try trusts(renewed, host: "127.0.0.1", at: later))
+    }
+
+    func testBuild56IPCertificateUpgradesWithoutReplacingTrustedRoot() throws {
+        let now = Date()
+        var record = try IdentityRecord.generate(now: now)
+        let leaf = try Certificate(derEncoded: Array(record.serverCertificate))
+        var extensions = leaf.extensions
+        extensions.update(try SubjectAlternativeNames([
+            .ipAddress(ASN1OctetString(contentBytes: [127, 0, 0, 1])),
+        ]).makeCertificateExtension())
+        let legacyLeaf = try Certificate(version: leaf.version, serialNumber: leaf.serialNumber,
+            publicKey: leaf.publicKey, notValidBefore: leaf.notValidBefore, notValidAfter: leaf.notValidAfter,
+            issuer: leaf.issuer, subject: leaf.subject, signatureAlgorithm: leaf.signatureAlgorithm,
+            extensions: extensions, issuerPrivateKey: .init(try P256.Signing.PrivateKey(rawRepresentation: record.rootKey)))
+        record.serverCertificate = Data(try legacyLeaf.serializeAsPEM().derBytes)
+        XCTAssertFalse(try trusts(LocalInstallIdentity(record: record), host: "localhost", at: now))
+        let service = "dev.personal.ssstore.loopback-tls.migration.\(UUID())"
+        defer {
+            SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary)
+        }
+        XCTAssertEqual(SecItemAdd([
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: "identity-v1",
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: try JSONEncoder().encode(record),
+        ] as CFDictionary, nil), errSecSuccess)
+        let upgraded = try IdentityStore(service: service).load(now: now)
+        XCTAssertEqual(upgraded.rootDER, record.rootCertificate)
+        XCTAssertEqual(try profileID(upgraded), record.profileID.uuidString)
+        XCTAssertNotEqual(upgraded.certificateDER, record.serverCertificate)
+        XCTAssertTrue(try trusts(upgraded, host: "localhost", at: now))
+        XCTAssertTrue(try trusts(upgraded, host: "127.0.0.1", at: now))
+        XCTAssertTrue(try trusts(upgraded, host: "::1", at: now))
     }
 
     private func trusts(_ identity: LocalInstallIdentity, host: String, at date: Date) throws -> Bool {

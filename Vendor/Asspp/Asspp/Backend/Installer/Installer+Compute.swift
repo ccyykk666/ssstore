@@ -30,7 +30,7 @@ extension Installer {
     var plistEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.host
+        comps.host = Self.installationHost
         comps.path = "/\(id).plist"
         comps.port = port
         return comps.url!
@@ -39,7 +39,7 @@ extension Installer {
     var payloadEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.host
+        comps.host = Self.installationHost
         comps.path = "/\(id).ipa"
         comps.port = port
         return comps.url!
@@ -59,7 +59,7 @@ extension Installer {
     var displayImageSmallEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.host
+        comps.host = Self.installationHost
         comps.path = "/app57x57.png"
         comps.port = port
         return comps.url!
@@ -72,7 +72,7 @@ extension Installer {
     var displayImageLargeEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.host
+        comps.host = Self.installationHost
         comps.path = "/app512x512.png"
         comps.port = port
         return comps.url!
