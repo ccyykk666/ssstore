@@ -8,6 +8,7 @@
 import ApplePackage
 import Foundation
 import Logging
+import LocalInstallTLS
 #if canImport(UIKit)
     import UIKit
 #endif
@@ -18,6 +19,7 @@ class Installer: Identifiable, @unchecked Sendable {
     @ObservationIgnored let id: UUID
     @ObservationIgnored let app: Application
     @ObservationIgnored let archive: AppStore.AppPackage
+    @ObservationIgnored let certificateIdentity: LocalInstallIdentity
     @ObservationIgnored let port = Int.random(in: 4000 ... 8000)
     @ObservationIgnored private let shutdownLock = NSLock()
     @ObservationIgnored private var shuttingDown = false
@@ -37,7 +39,8 @@ class Installer: Identifiable, @unchecked Sendable {
         let id: UUID = .init()
         self.id = id
         self.archive = archive
-        app = try await Self.setupApp(port: port, secured: true)
+        certificateIdentity = try await Task.detached { try LocalInstallIdentity.current() }.value
+        app = try await Self.setupApp(port: port, identity: certificateIdentity)
         logger.info("Installer app setup completed for ID: \(id)")
 
         app.get("*") { [weak self] req in
@@ -93,15 +96,13 @@ class Installer: Identifiable, @unchecked Sendable {
         }
 
         try app.server.start()
-        logger.info("installer init at port \(port) for sni \(Self.sni)")
+        logger.info("installer init at port \(port) for loopback host \(Self.host)")
     }
 
-    /// avoid misleading name, default parm Installer.ca is not used
-    init(certificateAtPath: String) async throws {
-        precondition(Installer.caInstaller == nil)
-
+    init(certificateIdentity: LocalInstallIdentity) async throws {
         let id: UUID = .init()
         self.id = id
+        self.certificateIdentity = certificateIdentity
         archive = .init(software: .init(
             id: .random(),
             bundleID: "",
@@ -120,26 +121,17 @@ class Installer: Identifiable, @unchecked Sendable {
             primaryGenreName: "",
         ))
 
-        app = try await Self.setupApp(port: port, secured: false)
+        app = try await Self.setupApp(port: port, identity: nil)
 
-        app.get("*") { req in
-            try await req.fileio.asyncStreamFile(
-                at: certificateAtPath,
-                chunkSize: 64 * 1024,
-            )
+        let profile = certificateIdentity.profile
+        app.get("ssstore-loopback.mobileconfig") { _ in
+            Response(status: .ok, headers: [
+                "Content-Type": "application/x-apple-aspen-config",
+                "Content-Disposition": "attachment; filename=ssstore-loopback.mobileconfig",
+                "Cache-Control": "no-store",
+            ], body: .init(data: profile))
         }
-
-        var comps = URLComponents()
-        comps.scheme = "http"
-        comps.host = "localhost"
-        comps.port = port
-        comps.path = "/ca.crt"
-        let url = comps.url!
-        Installer.caURL = url
-
         try app.server.start()
-
-        Installer.caInstaller = self
     }
 
     deinit {

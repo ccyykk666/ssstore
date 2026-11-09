@@ -31,7 +31,7 @@ enum StoreRuntime {
         _ = AppStore.this
         if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.register() }
         Task {
-            do { _ = try await Installer(certificateAtPath: Installer.ca.path) }
+            do { _ = try await Installer.prepareCertificateServer() }
             catch { logger.error("Unable to start local installation service: \(error.localizedDescription)") }
         }
     }

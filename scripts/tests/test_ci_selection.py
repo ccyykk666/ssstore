@@ -24,6 +24,8 @@ class SelectionTests(unittest.TestCase):
             "Packages/UpdateCore/Sources/UpdateCore/Models.swift": {"core"},
             "Packages/UpdateCore/Package.swift": {"core"},
             "Packages/UpdateCore/Tests/UpdateCoreTests/CatalogTests.swift": {"core"},
+            "Packages/LocalInstallTLS/Sources/LocalInstallTLS/LocalInstallIdentity.swift": {"installation"},
+            selection.STORE + "Asspp/Backend/Installer/Installer+TLS.swift": {"installation"},
             selection.STORE + "Asspp/Backend/AppStore/StoreProtocol.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreHistorySupport.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreCatalogHistoryService.swift": {"downloads"},

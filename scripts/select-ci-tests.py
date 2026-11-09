@@ -11,6 +11,10 @@ import urllib.request
 STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
     "core": ("Packages/UpdateCore/",),
+    "installation": (
+        "Packages/LocalInstallTLS/",
+        STORE + "Asspp/Backend/Installer/",
+    ),
     "downloads": (
         STORE + "Asspp/Backend/AppStore/AppStore.swift",
         STORE + "Asspp/Backend/AppStore/AuthenticationService.swift",

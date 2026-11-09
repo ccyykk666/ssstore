@@ -43,7 +43,7 @@ No permission to redistribute those Apple components is granted by Asspp, AssppW
 
 ## Public localhost TLS fixture
 
-`Vendor/Asspp/Certificates/localhost.qaq.wiki/localhost.qaq.wiki-key.pem` is the public localhost TLS fixture supplied by the pinned Asspp upstream. It is not a user's device pairing key, Apple ID credential or code-signing key. It must not be reused to protect a public server or other confidential service.
+`Vendor/Asspp/Certificates/localhost.qaq.wiki/localhost.qaq.wiki-key.pem` is the public localhost TLS fixture supplied by the pinned Asspp upstream. From build 56 it remains only in the vendored source and is not bundled or used by ssstore. Local installation generates a device-specific CA and loopback IP server identity using Apple's Apache-2.0-licensed Swift Certificates, Swift Crypto and Swift ASN.1 (the existing pinned versions). Private keys are stored in the device-only Keychain; only the public root certificate is included in the configuration profile.
 
 ## License scope
 

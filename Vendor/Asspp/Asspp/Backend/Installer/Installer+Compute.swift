@@ -9,6 +9,14 @@ import ApplePackage
 import Foundation
 
 extension Installer {
+    var certificateProfileEndpoint: URL {
+        var comps = URLComponents()
+        comps.scheme = "http"
+        comps.host = Self.host
+        comps.port = port
+        comps.path = "/ssstore-loopback.mobileconfig"
+        return comps.url!
+    }
     var pingEndpoint: URL {
         var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
         comps.path = "/ping"
@@ -22,7 +30,7 @@ extension Installer {
     var plistEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.sni
+        comps.host = Self.host
         comps.path = "/\(id).plist"
         comps.port = port
         return comps.url!
@@ -31,7 +39,7 @@ extension Installer {
     var payloadEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.sni
+        comps.host = Self.host
         comps.path = "/\(id).ipa"
         comps.port = port
         return comps.url!
@@ -51,7 +59,7 @@ extension Installer {
     var displayImageSmallEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.sni
+        comps.host = Self.host
         comps.path = "/app57x57.png"
         comps.port = port
         return comps.url!
@@ -64,7 +72,7 @@ extension Installer {
     var displayImageLargeEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "https"
-        comps.host = Self.sni
+        comps.host = Self.host
         comps.path = "/app512x512.png"
         comps.port = port
         return comps.url!

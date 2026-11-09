@@ -8,6 +8,8 @@ packages:
     path: Packages/UpdateCore
   DeviceKit:
     path: Packages/DeviceKit
+  LocalInstallTLS:
+    path: Packages/LocalInstallTLS
   ApplePackage:
     url: https://github.com/Lakr233/ApplePackage
     exactVersion: "2.0.3"
@@ -44,7 +46,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "55"
+    CURRENT_PROJECT_VERSION: "56"
 targets:
   ssstore:
     type: application
@@ -58,9 +60,6 @@ targets:
           - Interface
           - Backend/DeviceCTL
           - Interface/Download/DeviceCTLInstallSection.swift
-      - path: Vendor/Asspp/Certificates
-        type: folder
-        buildPhase: resources
       - path: build/KBSyncRuntime
         type: folder
         buildPhase: resources
@@ -98,6 +97,7 @@ targets:
       - target: ShareExtension
         embed: true
       - package: UpdateCore
+      - package: LocalInstallTLS
       - package: DeviceKit
         product: IDevice
       - package: ApplePackage

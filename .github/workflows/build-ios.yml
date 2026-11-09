@@ -70,6 +70,9 @@ jobs:
       - name: Test UpdateCore
         if: steps.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore
+      - name: Check local installation certificates
+        if: steps.checks.outputs.installation == 'true'
+        run: swift test --package-path Packages/LocalInstallTLS
       - name: Check download protocol
         if: steps.checks.outputs.downloads == 'true'
         run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh protocol

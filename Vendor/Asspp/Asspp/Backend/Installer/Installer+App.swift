@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import LocalInstallTLS
 import Vapor
 
 extension Installer {
@@ -15,18 +16,18 @@ extension Installer {
         return env
     }()
 
-    static func setupApp(port: Int, secured: Bool) async throws -> Application {
+    static func setupApp(port: Int, identity: LocalInstallIdentity?) async throws -> Application {
         let app = try await Application.make()
 
         app.threadPool = .init(numberOfThreads: 1)
 
-        if secured {
-            app.http.server.configuration.tlsConfiguration = try Self.setupTLS()
+        if let identity {
+            app.http.server.configuration.tlsConfiguration = try Self.setupTLS(identity: identity)
         }
-        app.http.server.configuration.hostname = Self.sni
+        app.http.server.configuration.hostname = Self.host
         app.http.server.configuration.tcpNoDelay = true
 
-        app.http.server.configuration.address = .hostname("0.0.0.0", port: port)
+        app.http.server.configuration.address = .hostname(Self.host, port: port)
         app.http.server.configuration.port = port
 
         app.routes.defaultMaxBodySize = "128mb"

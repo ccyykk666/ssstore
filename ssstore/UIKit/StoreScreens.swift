@@ -7,6 +7,7 @@ import Kingfisher
 import QuickLook
 import UniformTypeIdentifiers
 import ZIPFoundation
+import LocalInstallTLS
 
 @MainActor
 final class NativeProductHeaderCell: UITableViewCell {
@@ -378,8 +379,36 @@ final class NativeInstall: UIViewController, NativeSheetContent {
 final class NativeCertificateInstall: NativePage {
     let installer: Installer
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var certificateTrusted = false
+    private var trustTask: Task<Void, Never>?
+    private var foregroundObserver: NSObjectProtocol?
     init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: "证书安装") }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.refreshCertificateTrust() }
+        }
+    }
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        refreshCertificateTrust()
+    }
+    deinit {
+        trustTask?.cancel()
+        if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
+    }
+    private func refreshCertificateTrust() {
+        trustTask?.cancel()
+        let identity = installer.certificateIdentity
+        trustTask = Task { [weak self] in
+            let trusted = await Task.detached { identity.isTrusted }.value
+            guard !Task.isCancelled else { return }
+            self?.certificateTrusted = trusted
+            self?.reload()
+        }
+    }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isMovingFromParent { endBackgroundTask(); installer.destroy() }
@@ -393,10 +422,28 @@ final class NativeCertificateInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        return [NativeSection(rows: [NativeRow(title: working ? "正在检查本地连接…" : text, detail: "在浏览器中点击安装并确认。"), link("安装") { [weak self] in self?.openInstaller() }])]
+        var sections = [NativeSection(rows: [NativeRow(title: working ? "正在检查本地连接…" : text,
+            detail: "通过本机连接安装，无需 Wi-Fi。"), link("安装") { [weak self] in self?.openInstaller() }])]
+        if !certificateTrusted {
+            sections.insert(NativeSection(title: "首次使用 IP 安装", rows: [
+                NativeRow(title: installer.certificateIdentity.rootName,
+                    detail: "安装描述文件后，在设置 → 通用 → 关于本机 → 证书信任设置中启用此证书的完整信任。旧版 Asspp 证书不适用于本机 IP。"),
+                link("安装本机证书") { [weak self] in self?.openCertificateProfile() },
+            ]), at: 0)
+        }
+        return sections
+    }
+    private func openCertificateProfile() {
+        run { try await Installer.openCertificateProfile() }
     }
     private func openInstaller() {
         run { [self] in
+            let identity = installer.certificateIdentity
+            certificateTrusted = await Task.detached { identity.isTrusted }.value
+            guard certificateTrusted else {
+                throw NSError(domain: "ssstore.install", code: 2, userInfo: [NSLocalizedDescriptionKey:
+                    "请先安装本机证书，并在系统的证书信任设置中启用 \(identity.rootName) 的完整信任，然后返回重试。"])
+            }
             var request = URLRequest(url: installer.pingEndpoint)
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.timeoutInterval = 10
