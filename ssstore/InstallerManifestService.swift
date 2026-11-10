@@ -4,7 +4,10 @@ import UpdateCore
 /// Changing this setting affects future installation attempts only. A chosen
 /// custom service is never silently replaced by another metadata recipient.
 enum InstallerManifestService {
-    static let defaultEndpoint = URL(string: "https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist")!
+    static let defaultEndpoint = URL(string: "https://install.kang666.site/manifest.plist")!
+    // Kept only for users who explicitly select the existing public service.
+    // A built-in address is not evidence that a service allows anonymous use.
+    static let legacyPublicEndpoint = URL(string: "https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist")!
     private static let preferenceKey = "installationManifestService"
 
     static var savedAddress: String? { UserDefaults.standard.string(forKey: preferenceKey) }
@@ -37,10 +40,15 @@ enum InstallerManifestService {
         // Validate before disclosing any metadata, including in the private flow.
         let publicURL = try InstallationManifest.serviceURL(endpoint: endpoint, metadata: metadata, payload: payload)
         let token: String?
-        // Our existing public endpoint never requires a credential. Avoid
-        // querying the Keychain at all for the default installation flow.
-        if endpoint == defaultEndpoint { token = nil }
-        else { token = try await ManifestAPICredentials.load(for: endpoint) }
+        if endpoint == legacyPublicEndpoint { token = nil }
+        else {
+            token = try await ManifestAPICredentials.load(for: endpoint)
+            guard endpoint != defaultEndpoint || token != nil else {
+                throw NSError(domain: "ssstore.install.manifest", code: 401, userInfo: [
+                    NSLocalizedDescriptionKey: "请先在设置的清单服务中填写当前地址的访问令牌。",
+                ])
+            }
+        }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil

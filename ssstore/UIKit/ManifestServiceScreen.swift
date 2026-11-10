@@ -10,8 +10,8 @@ final class NativeManifestService: NativePage {
     private var credentialGeneration = UUID()
     private var credentialWorkDescription: String?
     private var testing = false
-    private var usingDefaultService: Bool {
-        (try? InstallerManifestService.endpoint()) == InstallerManifestService.defaultEndpoint
+    private var usingPublicService: Bool {
+        (try? InstallerManifestService.endpoint()) == InstallerManifestService.legacyPublicEndpoint
     }
     init(_ model: AppModel) { super.init(model, title: "安装清单服务") }
     required init?(coder: NSCoder) { fatalError() }
@@ -33,7 +33,7 @@ final class NativeManifestService: NativePage {
             NativeRow(title: "服务地址", detail: InstallerManifestService.displayAddress,
                 action: working ? nil : { [weak self] in self?.editEndpoint() }),
             NativeRow(title: "访问令牌", detail: credentialWorkDescription ?? credentialStatus,
-                action: working || usingDefaultService ? nil : { [weak self] in self?.editToken() }),
+                action: working || usingPublicService ? nil : { [weak self] in self?.editToken() }),
             NativeRow(title: testing ? "正在测试连接…" : "测试连接", color: working ? .secondaryLabel : .systemBlue,
                 action: working ? nil : { [weak self] in self?.probe() }),
         ]
@@ -50,7 +50,7 @@ final class NativeManifestService: NativePage {
     }
 
     private var credentialStatus: String {
-        if usingDefaultService { return "默认公开服务无需设置" }
+        if usingPublicService { return "公开服务无需设置" }
         return switch credentialState {
         case .loading: "正在读取…"
         case .absent: "未设置"
@@ -70,7 +70,7 @@ final class NativeManifestService: NativePage {
         let endpoint: URL
         do { endpoint = try InstallerManifestService.endpoint() }
         catch { credentialState = .unavailable; reload(); return }
-        if endpoint == InstallerManifestService.defaultEndpoint {
+        if endpoint == InstallerManifestService.legacyPublicEndpoint {
             credentialState = .absent
             reload()
             return

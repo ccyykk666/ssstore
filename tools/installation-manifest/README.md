@@ -8,6 +8,8 @@
 
 原有公开 Worker 配置保留在 `wrangler.public.toml`，已有 Sites 公开服务不受影响。
 
+68 版起，App 默认地址为 `https://install.kang666.site/manifest.plist`，首次使用需要为这个完整地址填写服务访问令牌。地址可以内置，令牌不随安装包分发；未配置令牌时，默认私有服务不会退回公开 GET 请求。用户已保存的自定义地址继续生效，更换地址需要重新保存令牌。
+
 ## 私有 VPS 部署（64 版起）
 
 按 [DEPLOY.md](DEPLOY.md) 部署。Node.js 后端需要强随机令牌才能启动；签发接口使用鉴权 POST，系统通过不含长期令牌或应用信息的短期随机票据 URL 读取清单。没有令牌的调用不会生成清单。容器仅暴露本机端口，以非 root 用户和只读文件系统运行。
@@ -26,6 +28,6 @@ node --test tools/installation-manifest/worker.test.mjs tools/installation-manif
 
 ## 已有公开服务
 
-默认地址为 <https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist>，保持旧客户端的公开 GET 协议。它接收应用名、Bundle ID、内部版本和带随机文件名的本机 IPA 地址，不接收账号、许可证或 IPA。平台自身可能保留访问 URL 和日志；大陆网络可达性需由目标手机验证。
+67 版及之前的默认地址为 <https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist>，保持旧客户端的公开 GET 协议。它接收应用名、Bundle ID、内部版本和带随机文件名的本机 IPA 地址，不接收账号、许可证或 IPA。平台自身可能保留访问 URL 和日志；大陆网络可达性需由目标手机验证。
 
 Sites 项目：`appgprj_6af2e2c46b2c81918d65bde6eeb87b91`，部署源 `/workspace/sites/ssstore-install-manifest`，项目身份保存在该目录的 `.openai/hosting.json`。私有 VPS 部署不修改此公开服务，不影响已有用户。
