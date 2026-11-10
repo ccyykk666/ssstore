@@ -2,6 +2,18 @@ import XCTest
 @testable import UpdateCore
 
 final class InstallationManifestTests: XCTestCase {
+    func testNormalizesCustomServiceWithoutWeakeningHTTPS() throws {
+        XCTAssertEqual(try InstallationManifest.endpoint(from: "  install.example\n").absoluteString, "https://install.example/manifest.plist")
+        XCTAssertEqual(try InstallationManifest.endpoint(from: "https://install.example/").absoluteString, "https://install.example/manifest.plist")
+        XCTAssertEqual(try InstallationManifest.endpoint(from: "HTTPS://install.example/").absoluteString, "https://install.example/manifest.plist")
+        XCTAssertEqual(try InstallationManifest.endpoint(from: "https://install.example:8443/ssstore/manifest.plist").absoluteString,
+                       "https://install.example:8443/ssstore/manifest.plist")
+        for address in ["", "http://install.example", "https://user:secret@install.example/manifest.plist",
+                        "https://install.example/?token=secret", "https://install.example/#fragment", "https://bad host/manifest.plist"] {
+            XCTAssertThrowsError(try InstallationManifest.endpoint(from: address), address)
+        }
+    }
+
     let payload = URL(string: "http://127.0.0.1:5678/00000000-0000-4000-8000-000000000001.ipa")!
     func metadata() throws -> InstallationManifest.Metadata {
         try .init(info: ["CFBundleIdentifier": "com.example.app", "CFBundleVersion": "123",

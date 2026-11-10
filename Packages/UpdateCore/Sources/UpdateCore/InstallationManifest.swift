@@ -1,6 +1,22 @@
 import Foundation
 
 public enum InstallationManifest {
+    /// Accept an HTTPS origin or an explicit endpoint behind a reverse proxy.
+    public static func endpoint(from input: String) throws -> URL {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.utf8.count <= 2048,
+              value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { throw ManifestError.invalidEndpoint }
+        let address = value.contains("://") ? value : "https://" + value
+        guard var parts = URLComponents(string: address), parts.scheme?.lowercased() == "https",
+              let host = parts.host, !host.isEmpty,
+              parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { throw ManifestError.invalidEndpoint }
+        parts.scheme = "https"
+        if parts.path.isEmpty || parts.path == "/" { parts.path = "/manifest.plist" }
+        guard let url = parts.url else { throw ManifestError.invalidEndpoint }
+        return url
+    }
+
     public struct Metadata: Equatable, Sendable {
         public let bundleID: String
         public let name: String

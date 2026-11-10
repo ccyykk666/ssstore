@@ -17,6 +17,8 @@ node --test tools/installation-manifest/server.test.mjs
 
 ## 部署方式
 
+自有服务器部署文件和操作说明见 [DEPLOY.md](DEPLOY.md)。Docker 镜像及只读、非 root 容器运行、健康检查与实际 XML 响应均已在本地验证；服务器的域名、证书和手机直连结果需在真实部署后检查。
+
 部署者登录自己的 Cloudflare 账号后，在此目录执行 `npx wrangler deploy`，取得 Worker 的公网 HTTPS 地址；无需安装页面或持有用于 App 签名的私钥。也可把相同的 HTTP 接口部署到自己的 HTTPS 服务。未执行部署前不产生外部服务或费用。
 
 ### 普通服务器部署
@@ -35,6 +37,6 @@ node tools/installation-manifest/server.mjs
 
 接口为 `GET /manifest.plist`，参数为 `bundleid`、`name`、`version`、`fetchurl`。`version` 应取 IPA 内的 `CFBundleVersion`，不是商店展示版本。`fetchurl` 仅接受带端口、随机 UUID 文件名的 `127.0.0.1` IPA 地址。
 
-客户端实现包括：仅监听回环地址的本机 HTTP IPA 入口、持续后台任务、实际清单预检，以及对 IPA 内 `CFBundleVersion` 的读取。服务地址固定在 `Installer+Compute.swift`，主机由用户拥有的 Sites 项目管理；修改服务时需要同步客户端地址。不能只替换 `itms-services` 的主机名，也不能用网页上的 JavaScript 替代系统读取的 XML 清单。
+客户端实现包括：仅监听回环地址的本机 HTTP IPA 入口、持续后台任务、实际清单预检，以及对 IPA 内 `CFBundleVersion` 的读取。63 版起，服务地址在“设置 → 兼容安装 → 清单服务”中配置，支持域名、HTTPS origin 或完整接口地址。地址不再固定为某个托管域名；自定义服务失败时不会静默发送到另一服务。默认服务常量及凭据隔离的预检代码位于 `ssstore/InstallerManifestService.swift`。不能只替换 `itms-services` 的主机名，也不能用网页上的 JavaScript 替代系统读取的 XML 清单。
 
 Sites 项目：`appgprj_6af2e2c46b2c81918d65bde6eeb87b91`，部署源位于 `/workspace/sites/ssstore-install-manifest`。该目录的 `.openai/hosting.json` 为已保存的项目身份；维护时复用该项目，不能重新创建重复服务。这里的 Worker 为可自行部署的等价后端，Sites 版本增加了根路径的纯文本健康响应。Worker 不主动写日志；Sites/Cloudflare 平台可能保留请求 URL 和访问日志。

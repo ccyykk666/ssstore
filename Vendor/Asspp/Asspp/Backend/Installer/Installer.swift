@@ -124,7 +124,7 @@ class Installer: Identifiable, @unchecked Sendable {
             ipv6App = try await Self.setupApp(port: port, identity: certificateIdentity, host: "::1")
         } else { ipv6App = nil }
         if mode == .compatible, let packageMetadata {
-            remoteManifestEndpoint = try InstallationManifest.serviceURL(endpoint: Self.manifestService,
+            remoteManifestEndpoint = try InstallationManifest.serviceURL(endpoint: InstallerManifestService.endpoint(),
                 metadata: packageMetadata, payload: payloadEndpoint)
         }
         logger.info("Installer app setup completed for ID: \(id)")

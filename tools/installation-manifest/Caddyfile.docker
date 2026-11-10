@@ -1,0 +1,3 @@
+{$MANIFEST_DOMAIN} {
+    reverse_proxy manifest:8080
+}

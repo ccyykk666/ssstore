@@ -10,8 +10,6 @@ import Foundation
 import LocalInstallTLS
 
 extension Installer {
-    static let manifestService = URL(string: "https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist")!
-
     private var localScheme: String { isCompatible ? "http" : "https" }
     private var localHost: String { isCompatible ? Self.host : Self.installationHost }
     var certificateProfileEndpoint: URL {
