@@ -80,11 +80,26 @@ def main():
         raise RuntimeError("No iOS simulator runtime is installed; no UI result can be claimed")
     runtime = max(available, key=lambda r: tuple(map(int, r["version"].split("."))))
     devices = json.loads(run("xcrun", "simctl", "list", "devicetypes", "--json", capture=True).stdout)["devicetypes"]
-    # A supported older model avoids pairing a newly introduced device type
-    # with an older installed runtime on runners with several Xcode versions.
-    device_type = next((d["identifier"] for d in devices if d["name"] == "iPhone 16 Pro"),
-                       next(d["identifier"] for d in devices if d["name"].startswith("iPhone")))
-    device = run("xcrun", "simctl", "create", "ssstore-sheet-probe-" + stage.name, device_type, runtime["identifier"], capture=True).stdout.strip()
+    # Use runtime compatibility metadata, never a hard-coded phone model. A
+    # configured device supplies a compatible type without touching that device.
+    configured = json.loads(run("xcrun", "simctl", "list", "devices", "--json", capture=True).stdout)["devices"]
+    supported = {item["identifier"] if isinstance(item, dict) else item for item in runtime.get("supportedDeviceTypes", [])}
+    supported.update(d["deviceTypeIdentifier"] for d in configured.get(runtime["identifier"], [])
+                     if d.get("isAvailable") and d.get("deviceTypeIdentifier") and d["name"].startswith("iPhone"))
+    candidates = [d for d in devices if d["name"].startswith("iPhone") and d["identifier"] in supported]
+    if not candidates:
+        version = tuple(map(int, runtime["version"].split(".")))
+        version = version + (0,) * (3-len(version))
+        def compatible(d):
+            low = tuple(map(int, d.get("minRuntimeVersionString", "0.0.0").split(".")))
+            high = tuple(map(int, d.get("maxRuntimeVersionString", "65535.255.255").split(".")))
+            return d["name"].startswith("iPhone") and low <= version <= high
+        candidates = [d for d in devices if compatible(d)]
+    if not candidates:
+        raise RuntimeError("No compatible iPhone type is installed for " + runtime["name"])
+    device_type = candidates[0]
+    phase("creating " + device_type["name"] + " for " + runtime["name"])
+    device = run("xcrun", "simctl", "create", "ssstore-sheet-probe-" + stage.name, device_type["identifier"], runtime["identifier"], capture=True).stdout.strip()
     bundle = "dev.personal.ssstore.NativeSheetProbe"
     report = None
     pid = None
