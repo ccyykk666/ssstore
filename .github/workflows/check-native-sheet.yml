@@ -1,0 +1,39 @@
+name: Check native sheet navigation
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Optional full commit SHA whose production navigation container should be tested
+        required: false
+        default: ''
+  push:
+    paths:
+      - 'tests/native-sheet/**'
+      - '.github/workflows/check-native-sheet.yml'
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: xcode-27
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Exercise production sheet navigation in an iOS simulator
+        env:
+          PROBE_REVISION: ${{ inputs.revision }}
+        run: python3 tests/native-sheet/run.py --revision "$PROBE_REVISION"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-sheet-diagnostics
+          path: |
+            build/native-sheet-results/probe.json
+            build/native-sheet-results/main-thread-sample.txt
+            build/native-sheet-results/screen.png
+          if-no-files-found: warn

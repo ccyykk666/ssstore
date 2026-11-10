@@ -1,0 +1,106 @@
+"""Exercise the production adaptive navigation container in an iOS simulator."""
+import argparse
+import json
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def run(*args, timeout=180, capture=False):
+    return subprocess.run(list(map(str, args)), check=True, timeout=timeout,
+                          text=True, capture_output=capture)
+
+
+def source(revision):
+    def read(path):
+        if revision:
+            return subprocess.check_output(["git", "show", f"{revision}:{path}"], cwd=ROOT, text=True)
+        return (ROOT / path).read_text()
+    path = "ssstore/UIKit/NativeFittingNavigation.swift"
+    exists = subprocess.run(["git", "cat-file", "-e", f"{revision}:{path}"], cwd=ROOT,
+                            capture_output=True).returncode == 0 if revision else (ROOT / path).exists()
+    if exists:
+        return read(path)
+    text = read("ssstore/UIKit/NativeInterface.swift")
+    start = text.index("/// Native scrollable content shares the adaptive UIKit sheet container.")
+    end = text.index("@MainActor\nclass NativePage:", start)
+    return "import UIKit\n\n" + text[start:end]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--revision", default="")
+    parser.add_argument("--output", default="build/native-sheet-results")
+    args = parser.parse_args()
+    if args.revision and not re.fullmatch(r"[0-9a-f]{40}", args.revision):
+        parser.error("revision must be a full commit SHA")
+    output = (ROOT / args.output).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix="sheet-probe-", dir=output))
+    (stage / "NativeFittingNavigation.swift").write_text(source(args.revision))
+    shutil.copyfile(ROOT / "tests/native-sheet/Probe.swift", stage / "Probe.swift")
+    config = {"name": "NativeSheetProbe", "options": {"deploymentTarget": {"iOS": "17.0"}}, "targets": {
+        "NativeSheetProbe": {"type": "application", "platform": "iOS", "sources": ["Probe.swift", "NativeFittingNavigation.swift"],
+            "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": "dev.personal.ssstore.NativeSheetProbe", "SWIFT_VERSION": "5.9", "TARGETED_DEVICE_FAMILY": "1"}},
+            "info": {"path": "Info.plist", "properties": {"UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
+                "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"]}}}}}
+    spec = stage / "project.json"
+    spec.write_text(json.dumps(config))
+    run("xcodegen", "generate", "--spec", spec)
+    derived = stage / "DerivedData"
+    run("xcodebuild", "-quiet", "-project", stage / "NativeSheetProbe.xcodeproj", "-scheme", "NativeSheetProbe",
+        "-configuration", "Debug", "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator",
+        "-derivedDataPath", derived, "CODE_SIGNING_ALLOWED=NO", "build", timeout=300)
+    runtimes = json.loads(run("xcrun", "simctl", "list", "runtimes", "--json", capture=True).stdout)["runtimes"]
+    available = [r for r in runtimes if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
+    if not available:
+        raise RuntimeError("No iOS simulator runtime is installed; no UI result can be claimed")
+    runtime = max(available, key=lambda r: tuple(map(int, r["version"].split("."))))
+    devices = json.loads(run("xcrun", "simctl", "list", "devicetypes", "--json", capture=True).stdout)["devicetypes"]
+    # A supported older model avoids pairing a newly introduced device type
+    # with an older installed runtime on runners with several Xcode versions.
+    device_type = next((d["identifier"] for d in devices if d["name"] == "iPhone 16 Pro"),
+                       next(d["identifier"] for d in devices if d["name"].startswith("iPhone")))
+    device = run("xcrun", "simctl", "create", "ssstore-sheet-probe-" + stage.name, device_type, runtime["identifier"], capture=True).stdout.strip()
+    bundle = "dev.personal.ssstore.NativeSheetProbe"
+    report = None
+    pid = None
+    try:
+        run("xcrun", "simctl", "boot", device)
+        run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
+        run("xcrun", "simctl", "install", device, derived / "Build/Products/Debug-iphonesimulator/NativeSheetProbe.app")
+        container = Path(run("xcrun", "simctl", "get_app_container", device, bundle, "data", capture=True).stdout.strip())
+        launched = run("xcrun", "simctl", "launch", device, bundle, capture=True).stdout.strip()
+        print(launched, flush=True)
+        pid = re.search(r": (\d+)$", launched).group(1)
+        deadline = time.monotonic() + 35
+        while time.monotonic() < deadline:
+            try:
+                report = json.loads((container / "Documents/probe.json").read_text())
+                if report["status"] != "running":
+                    break
+            except (OSError, json.JSONDecodeError):
+                pass
+            time.sleep(0.2)
+        if not report or report["status"] != "passed":
+            subprocess.run(["sample", pid, "2", "1", "-file", str(output / "main-thread-sample.txt")], capture_output=True, timeout=15)
+        (output / "probe.json").write_text(json.dumps(report or {"status": "no-report"}, indent=2, ensure_ascii=False))
+        subprocess.run(["xcrun", "simctl", "io", device, "screenshot", str(output / "screen.png")], capture_output=True, timeout=15)
+        print(json.dumps(report, ensure_ascii=False), flush=True)
+        if not report or report["status"] != "passed":
+            raise RuntimeError("Sheet UI probe failed or its main thread stopped responding")
+        print("Native sheet UI probe passed on " + runtime["name"], flush=True)
+    finally:
+        subprocess.run(["xcrun", "simctl", "terminate", device, bundle], capture_output=True, timeout=15)
+        subprocess.run(["xcrun", "simctl", "shutdown", device], capture_output=True, timeout=30)
+        subprocess.run(["xcrun", "simctl", "delete", device], capture_output=True, timeout=30)
+
+
+if __name__ == "__main__":
+    main()
