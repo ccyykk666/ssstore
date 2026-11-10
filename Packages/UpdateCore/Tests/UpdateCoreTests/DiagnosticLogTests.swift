@@ -2,6 +2,14 @@ import XCTest
 @testable import UpdateCore
 
 final class DiagnosticLogTests: XCTestCase {
+    func testPrivateManifestCapabilitiesAreRemovedFromURLsAndRelativePaths() {
+        let ticket = String(repeating: "a", count: 64)
+        let report = DiagnosticLog.redact("GET /tickets/\(ticket).plist url=https://install.example/prefix/tickets/\(ticket).plist")
+        XCTAssertFalse(report.contains(ticket))
+        XCTAssertTrue(report.contains("GET /tickets/<redacted>.plist"))
+        XCTAssertTrue(report.contains("https://install.example/prefix/tickets/<redacted>.plist"))
+    }
+
     func testSecretsAreRemovedWithoutRemovingUsefulErrorAndEndpointDetails() {
         let source = """
         Authorization: Bearer bearer-secret

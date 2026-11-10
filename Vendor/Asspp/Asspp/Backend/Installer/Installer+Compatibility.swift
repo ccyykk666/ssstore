@@ -3,10 +3,11 @@ import UpdateCore
 
 extension Installer {
     func checkCompatibleManifest() async throws {
-        guard isCompatible, let remoteManifestEndpoint, let packageMetadata else {
+        guard isCompatible, let manifestServiceEndpoint, let packageMetadata else {
             throw InstallationManifest.ManifestError.invalidEndpoint
         }
-        try await InstallerManifestService.verify(url: remoteManifestEndpoint, metadata: packageMetadata,
+        let url = try await InstallerManifestService.prepare(endpoint: manifestServiceEndpoint, metadata: packageMetadata,
             payload: payloadEndpoint, logID: id.uuidString)
+        setPreparedManifestEndpoint(url)
     }
 }

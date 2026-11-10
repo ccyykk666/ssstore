@@ -1,3 +1,6 @@
 {$MANIFEST_DOMAIN} {
+    request_body {
+        max_size 16KB
+    }
     reverse_proxy manifest:8080
 }

@@ -20,7 +20,15 @@ class Installer: Identifiable, @unchecked Sendable {
     enum Mode: Equatable, Sendable { case certificate, compatible }
     @ObservationIgnored let mode: Mode
     @ObservationIgnored let packageMetadata: InstallationManifest.Metadata?
-    @ObservationIgnored private(set) var remoteManifestEndpoint: URL?
+    @ObservationIgnored let manifestServiceEndpoint: URL?
+    @ObservationIgnored private let manifestLock = NSLock()
+    @ObservationIgnored private var preparedManifestEndpoint: URL?
+    var remoteManifestEndpoint: URL? {
+        manifestLock.withLock { preparedManifestEndpoint }
+    }
+    func setPreparedManifestEndpoint(_ url: URL) {
+        manifestLock.withLock { preparedManifestEndpoint = url }
+    }
     var isCompatible: Bool { mode == .compatible }
     @ObservationIgnored let id: UUID
     @ObservationIgnored let app: Application
@@ -112,6 +120,8 @@ class Installer: Identifiable, @unchecked Sendable {
         self.id = id
         self.archive = archive
         self.mode = mode
+        if mode == .compatible { manifestServiceEndpoint = try InstallerManifestService.endpoint() }
+        else { manifestServiceEndpoint = nil }
         let bundleID = archive.software.bundleID
         let name = archive.software.name
         packageMetadata = try await Task.detached { try Self.readMetadata(at: packagePath, bundleID: bundleID, fallbackName: name) }.value
@@ -123,10 +133,6 @@ class Installer: Identifiable, @unchecked Sendable {
         if mode == .certificate {
             ipv6App = try await Self.setupApp(port: port, identity: certificateIdentity, host: "::1")
         } else { ipv6App = nil }
-        if mode == .compatible, let packageMetadata {
-            remoteManifestEndpoint = try InstallationManifest.serviceURL(endpoint: InstallerManifestService.endpoint(),
-                metadata: packageMetadata, payload: payloadEndpoint)
-        }
         logger.info("Installer app setup completed for ID: \(id)")
 
         for server in [app, ipv6App].compactMap({ $0 }) {
@@ -147,7 +153,7 @@ class Installer: Identifiable, @unchecked Sendable {
                     return Response(status: .ok, version: req.version, headers: [
                         "Content-Type": "text/html; charset=utf-8",
                     ], body: .init(string: indexHtml))
-                case plistEndpoint.path where !isCompatible:
+                case "/\(self.id).plist" where !isCompatible:
                     await MainActor.run { if case .ready = self.status { self.status = .sendingManifest } }
                     logger.info("sending manifest for installer id: \(self.id)")
                     return Response(status: .ok, version: req.version, headers: [
@@ -184,6 +190,7 @@ class Installer: Identifiable, @unchecked Sendable {
         self.id = id
         self.certificateIdentity = certificateIdentity
         mode = .certificate
+        manifestServiceEndpoint = nil
         packageMetadata = nil
         payloadSize = 0
         ipv6App = nil

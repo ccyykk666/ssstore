@@ -11,6 +11,7 @@ xcuserdata/
 *.p12
 *.mobileprovision
 pairing*.plist
+tools/installation-manifest/secrets/
 Packages/DeviceKit/IDevice.xcframework/
 ssstore.xcodeproj/
 /README.md

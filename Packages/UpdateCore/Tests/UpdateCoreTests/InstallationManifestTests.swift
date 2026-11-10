@@ -2,6 +2,21 @@ import XCTest
 @testable import UpdateCore
 
 final class InstallationManifestTests: XCTestCase {
+    func testPrivateTicketCannotChangeOriginOrInjectPathOrQuery() throws {
+        let endpoint = URL(string: "https://install.example:8443/prefix/manifest.plist")!
+        let path = "tickets/" + String(repeating: "a", count: 64) + ".plist"
+        func json(_ value: String) throws -> Data { try JSONSerialization.data(withJSONObject: ["path": value]) }
+        XCTAssertEqual(try InstallationManifest.ticketURL(json(path), endpoint: endpoint).absoluteString,
+                       "https://install.example:8443/prefix/" + path)
+        for invalid in ["https://other.example/" + path, "//other.example/" + path,
+                        "/" + path, "../" + path, path + "?token=secret", path + "#fragment",
+                        path + "\n", path.replacingOccurrences(of: "/", with: "%2F"), "tickets/short.plist"] {
+            XCTAssertThrowsError(try InstallationManifest.ticketURL(json(invalid), endpoint: endpoint), invalid)
+        }
+        XCTAssertThrowsError(try InstallationManifest.ticketURL(Data(repeating: 32, count: 8193), endpoint: endpoint))
+        XCTAssertThrowsError(try InstallationManifest.ticketURL(json(path), endpoint: URL(string: "http://install.example/manifest.plist")!))
+    }
+
     func testNormalizesCustomServiceWithoutWeakeningHTTPS() throws {
         XCTAssertEqual(try InstallationManifest.endpoint(from: "  install.example\n").absoluteString, "https://install.example/manifest.plist")
         XCTAssertEqual(try InstallationManifest.endpoint(from: "https://install.example/").absoluteString, "https://install.example/manifest.plist")

@@ -62,6 +62,22 @@ public enum InstallationManifest {
         return url
     }
 
+    /// A private service returns a short-lived capability relative to its own
+    /// endpoint. Never accept a different origin or a server-selected arbitrary URL.
+    public static func ticketURL(_ data: Data, endpoint: URL) throws -> URL {
+        guard data.count <= 8192,
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let path = value["path"] as? String,
+              path.range(of: "^tickets/[a-f0-9]{64}\\.plist\\z", options: .regularExpression) != nil,
+              let url = URL(string: path, relativeTo: endpoint)?.absoluteURL,
+              endpoint.scheme == "https", endpoint.user == nil, endpoint.password == nil,
+              endpoint.query == nil, endpoint.fragment == nil, endpoint.host?.isEmpty == false,
+              url.scheme == endpoint.scheme, url.host == endpoint.host, url.port == endpoint.port,
+              url.query == nil, url.fragment == nil
+        else { throw ManifestError.invalidResponse }
+        return url
+    }
+
     /// Reject HTML login/error pages and manifests pointing to another package.
     public static func validate(_ data: Data, metadata: Metadata, payload: URL) throws {
         guard data.count <= 64 * 1024,

@@ -1,6 +1,6 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY --chown=node:node --chmod=0444 server.mjs worker.mjs ./
+COPY --chown=node:node --chmod=0444 server.mjs worker.mjs private-service.mjs ./
 ENV MANIFEST_BIND_HOST=0.0.0.0 MANIFEST_HTTP_PORT=8080
 USER node
 EXPOSE 8080

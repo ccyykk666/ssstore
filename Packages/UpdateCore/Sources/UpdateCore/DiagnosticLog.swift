@@ -8,6 +8,7 @@ public enum DiagnosticLog {
     private static let field = regex(#"(?i)(\b(?:"# + secretNames + #")\b["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^,\r\n;\]}]+)"#)
     private static let email = regex(#"(?i)[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}"#)
     private static let url = regex(#"(?i)\b(?:https?|itms-services)://[^\s<>"']+"#)
+    private static let manifestTicket = regex(#"(?i)(/tickets/)[a-f0-9]{64}\.plist"#)
 
     public static func isSensitiveKey(_ key: String) -> Bool {
         let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
@@ -48,6 +49,7 @@ public enum DiagnosticLog {
             }
         }
         result = replace(field, in: result, with: "$1<redacted>")
+        result = replace(manifestTicket, in: result, with: "$1<redacted>.plist")
         return replace(email, in: result, with: "<email redacted>")
     }
 
