@@ -10,16 +10,18 @@ permissions:
   contents: read
 jobs:
   simulator:
-    runs-on: xcode-27
+    runs-on: macos-latest
     timeout-minutes: 15
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Identify simulator SDK
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
       - name: Exercise production sheet navigation in an iOS simulator
         env:
           PROBE_REVISION: ${{ inputs.revision }}
