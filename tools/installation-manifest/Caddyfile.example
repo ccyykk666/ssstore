@@ -1,0 +1,4 @@
+# Replace this with a domain you own that resolves to your server.
+manifest.example.com {
+    reverse_proxy 127.0.0.1:8080
+}

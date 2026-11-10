@@ -12,11 +12,26 @@
 
 ```sh
 node --test tools/installation-manifest/worker.test.mjs
+node --test tools/installation-manifest/server.test.mjs
 ```
 
 ## 部署方式
 
 部署者登录自己的 Cloudflare 账号后，在此目录执行 `npx wrangler deploy`，取得 Worker 的公网 HTTPS 地址；无需安装页面或持有用于 App 签名的私钥。也可把相同的 HTTP 接口部署到自己的 HTTPS 服务。未执行部署前不产生外部服务或费用。
+
+### 普通服务器部署
+
+对于无法直连 `chatgpt.site` 的网络，可将相同清单协议迁移到用户可以直连的域名及主机，例如合适的国内或香港节点。这里没有来自中国大陆的网络探测点，不能仅凭服务器所在地区或更换域名就保证可用；必须在目标手机关闭 VPN 后验证。
+
+已提供无第三方运行依赖的 Node.js 版本（Node.js 20+）：
+
+```sh
+node tools/installation-manifest/server.mjs
+```
+
+服务默认仅监听 `127.0.0.1:8080`，由 Caddy 等反向代理提供公开、受 iOS 信任的 HTTPS。`Caddyfile.example` 为最小示例，需将域名替换成自己拥有且已解析到服务器的域名。不要把示例域名填进 App，也不要用 HTTP 清单或本机自签名证书替代公网 HTTPS。
+
+部署后可先检查 `/healthz`，再使用合成的应用元数据请求 `/manifest.plist` 验证 XML。迁移只涉及清单接口，IPA 仍由手机本机传输。若仅将自定义域名绑定到现有 Sites 项目，也需要拥有该域名并完成 DNS 验证；这种方式仍使用原托管网络，不能保证解决源站链路问题。
 
 接口为 `GET /manifest.plist`，参数为 `bundleid`、`name`、`version`、`fetchurl`。`version` 应取 IPA 内的 `CFBundleVersion`，不是商店展示版本。`fetchurl` 仅接受带端口、随机 UUID 文件名的 `127.0.0.1` IPA 地址。
 
