@@ -392,15 +392,15 @@ final class NativeCertificateInstall: NativePage {
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if awaitingSystem { logger.info("Certificate install [\(installer.id)]: app returned to foreground, stage=\(installer.diagnosticStatus)") }
-                refreshCertificateTrust()
+                if self.awaitingSystem { logger.info("Certificate install [\(self.installer.id)]: app returned to foreground, stage=\(self.installer.diagnosticStatus)") }
+                self.refreshCertificateTrust()
             }
         }
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
-                guard let self, awaitingSystem else { return }
-                logger.info("Certificate install [\(installer.id)]: app entered background, stage=\(installer.diagnosticStatus)")
+                guard let self, self.awaitingSystem else { return }
+                logger.info("Certificate install [\(self.installer.id)]: app entered background, stage=\(self.installer.diagnosticStatus)")
             }
         }
     }
