@@ -15,7 +15,7 @@ final class CertificateInstallBackgroundExecution {
         return identifier == nil ? "none" : "waiting-for-grant"
     }
 
-    func start(id: UUID, name: String, onReady: @escaping () -> Void,
+    func start(id: UUID, name: String, subtitle: String = "等待系统获取安装清单…", onReady: @escaping () -> Void,
                onStop: @escaping () -> Void) throws {
         finish(success: false)
         guard UIApplication.shared.applicationState == .active else {
@@ -56,7 +56,7 @@ final class CertificateInstallBackgroundExecution {
                 throw InstallBackgroundError.message("无法注册安装后台任务，请返回软件重试。")
             }
             let request = BGContinuedProcessingTaskRequest(identifier: requestID,
-                title: name, subtitle: "等待系统获取安装清单…")
+                title: name, subtitle: subtitle)
             request.strategy = .fail
             do {
                 try BGTaskScheduler.shared.submit(request)

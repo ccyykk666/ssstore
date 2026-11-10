@@ -10,6 +10,10 @@ import Foundation
 import LocalInstallTLS
 
 extension Installer {
+    static let manifestService = URL(string: "https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist")!
+
+    private var localScheme: String { isCompatible ? "http" : "https" }
+    private var localHost: String { isCompatible ? Self.host : Self.installationHost }
     var certificateProfileEndpoint: URL {
         var comps = URLComponents()
         comps.scheme = "http"
@@ -19,19 +23,20 @@ extension Installer {
         return comps.url!
     }
     var pingEndpoint: URL {
-        var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
+        var comps = URLComponents(url: payloadEndpoint, resolvingAgainstBaseURL: false)!
         comps.path = "/ping"
         return comps.url!
     }
     var installPage: URL {
-        var comps = URLComponents(url: plistEndpoint, resolvingAgainstBaseURL: false)!
+        var comps = URLComponents(url: payloadEndpoint, resolvingAgainstBaseURL: false)!
         comps.path = "/index.html"
         return comps.url!
     }
     var plistEndpoint: URL {
+        if let remoteManifestEndpoint { return remoteManifestEndpoint }
         var comps = URLComponents()
-        comps.scheme = "https"
-        comps.host = Self.installationHost
+        comps.scheme = localScheme
+        comps.host = localHost
         comps.path = "/\(id).plist"
         comps.port = port
         return comps.url!
@@ -39,8 +44,8 @@ extension Installer {
 
     var payloadEndpoint: URL {
         var comps = URLComponents()
-        comps.scheme = "https"
-        comps.host = Self.installationHost
+        comps.scheme = localScheme
+        comps.host = localHost
         comps.path = "/\(id).ipa"
         comps.port = port
         return comps.url!
@@ -109,10 +114,10 @@ extension Installer {
                         ],
                     ],
                     "metadata": [
-                        "bundle-identifier": archive.software.bundleID,
-                        "bundle-version": archive.software.version,
+                        "bundle-identifier": packageMetadata?.bundleID ?? archive.software.bundleID,
+                        "bundle-version": packageMetadata?.version ?? archive.software.version,
                         "kind": "software",
-                        "title": archive.software.name,
+                        "title": packageMetadata?.name ?? archive.software.name,
                     ],
                 ],
             ],

@@ -17,11 +17,16 @@ import Vapor
 
 @Observable
 class Installer: Identifiable, @unchecked Sendable {
+    enum Mode: Equatable, Sendable { case certificate, compatible }
+    @ObservationIgnored let mode: Mode
+    @ObservationIgnored let packageMetadata: InstallationManifest.Metadata?
+    @ObservationIgnored private(set) var remoteManifestEndpoint: URL?
+    var isCompatible: Bool { mode == .compatible }
     @ObservationIgnored let id: UUID
     @ObservationIgnored let app: Application
     @ObservationIgnored private let ipv6App: Application?
     @ObservationIgnored let archive: AppStore.AppPackage
-    @ObservationIgnored let certificateIdentity: LocalInstallIdentity
+    @ObservationIgnored let certificateIdentity: LocalInstallIdentity?
     @ObservationIgnored let payloadSize: Int64
     @ObservationIgnored let port = Int.random(in: 4000 ... 8000)
     @ObservationIgnored private let shutdownLock = NSLock()
@@ -52,7 +57,7 @@ class Installer: Identifiable, @unchecked Sendable {
     @MainActor
     var diagnosticStatus: String {
         switch status {
-        case .ready: "waiting-for-manifest"
+        case .ready: isCompatible ? "waiting-for-system-payload" : "waiting-for-manifest"
         case .sendingManifest: "manifest-or-icon-requested"
         case .sendingPayload: "payload-requested"
         case .completed(let result): (try? result.get()) != nil ? "payload-sent" : "payload-transfer-failed"
@@ -60,14 +65,26 @@ class Installer: Identifiable, @unchecked Sendable {
         }
     }
 
-    init(archive: AppStore.AppPackage, path packagePath: URL) async throws {
+    init(archive: AppStore.AppPackage, path packagePath: URL, mode: Mode = .certificate) async throws {
         let id: UUID = .init()
         self.id = id
         self.archive = archive
+        self.mode = mode
+        let bundleID = archive.software.bundleID
+        let name = archive.software.name
+        packageMetadata = try await Task.detached { try Self.readMetadata(at: packagePath, bundleID: bundleID, fallbackName: name) }.value
         payloadSize = (try FileManager.default.attributesOfItem(atPath: packagePath.path)[.size] as? NSNumber)?.int64Value ?? 0
-        certificateIdentity = try await Task.detached { try LocalInstallIdentity.current() }.value
+        if mode == .certificate {
+            certificateIdentity = try await Task.detached { try LocalInstallIdentity.current() }.value
+        } else { certificateIdentity = nil }
         app = try await Self.setupApp(port: port, identity: certificateIdentity)
-        ipv6App = try await Self.setupApp(port: port, identity: certificateIdentity, host: "::1")
+        if mode == .certificate {
+            ipv6App = try await Self.setupApp(port: port, identity: certificateIdentity, host: "::1")
+        } else { ipv6App = nil }
+        if mode == .compatible, let packageMetadata {
+            remoteManifestEndpoint = try InstallationManifest.serviceURL(endpoint: Self.manifestService,
+                metadata: packageMetadata, payload: payloadEndpoint)
+        }
         logger.info("Installer app setup completed for ID: \(id)")
 
         for server in [app, ipv6App].compactMap({ $0 }) {
@@ -88,7 +105,7 @@ class Installer: Identifiable, @unchecked Sendable {
                     return Response(status: .ok, version: req.version, headers: [
                         "Content-Type": "text/html; charset=utf-8",
                     ], body: .init(string: indexHtml))
-                case plistEndpoint.path:
+                case plistEndpoint.path where !isCompatible:
                     await MainActor.run { if case .ready = self.status { self.status = .sendingManifest } }
                     logger.info("sending manifest for installer id: \(self.id)")
                     return Response(status: .ok, version: req.version, headers: [
@@ -132,6 +149,8 @@ class Installer: Identifiable, @unchecked Sendable {
                             }
                         }
                     }
+                    response.headers.replaceOrAdd(name: "Accept-Ranges", value: "bytes")
+                    response.headers.replaceOrAdd(name: "Cache-Control", value: "no-store")
                     receipt.configure(response)
                     return response
                 default:
@@ -145,13 +164,15 @@ class Installer: Identifiable, @unchecked Sendable {
         try app.server.start()
         do { try ipv6App?.server.start() }
         catch { logger.warning("IPv6 installer listener unavailable; IPv4 listener remains active: \(error.localizedDescription)") }
-        logger.info("installer init at port \(port) for loopback host \(Self.host)")
+        logger.info("installer init at port \(port) for loopback host \(Self.host) mode=\(isCompatible ? "compatible-http" : "certificate-https")")
     }
 
     init(certificateIdentity: LocalInstallIdentity) async throws {
         let id: UUID = .init()
         self.id = id
         self.certificateIdentity = certificateIdentity
+        mode = .certificate
+        packageMetadata = nil
         payloadSize = 0
         ipv6App = nil
         archive = .init(software: .init(

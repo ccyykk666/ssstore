@@ -1,12 +1,22 @@
 # 证书安装与 VPN
 
+## 61 版：兼容安装入口
+
+用户同意试用公网清单方案后，在下载详情新增独立的“兼容安装”。该入口启动仅绑定 `127.0.0.1` 的 HTTP 服务提供本机 IPA 和浏览器安装页面，以公网 HTTPS 生成的 XML 作为 `itms-services` 清单，不检查或使用本机根证书。清单服务用 Sites 部署在 <https://ssstore-install-manifest.kkkk0615.chatgpt.site>。
+
+点击安装后，先检查本机 HTTP 连接，再通过不含账号凭据、Cookie 或持久缓存的临时 URLSession 请求公网清单。预检校验 Bundle ID、IPA 内部 `CFBundleVersion`、标题及唯一 IPA 地址完全一致，拒绝登录页、错误页、替换安装包或版本不符的清单。获得持续后台执行授权后才打开 Safari，保留原生安装链接和心跳日志。分段发送及完成判断沿用 60 版的覆盖范围记录。
+
+元数据读取在后台线程进行，只读取主应用的 Info.plist，最大 2 MiB；不解压整个 IPA。中文名称、加号和嵌套 IPA URL 分别正确编码。清单服务只收到应用名称、Bundle ID、内部版本和随机本机下载地址，不接收账号、许可证或 IPA 文件。公网服务可能记录这些请求 URL。
+
+已确认服务部署成功且访问模式为 public，Worker 本地测试通过。当前云端探测收到托管层 HTTP 403 / error code 1010。App 会显示预检的具体 HTTP 错误并在日志记录服务错误码。真实手机上的连通和系统安装仍待验证，不能将本版描述为已确认修复 VPN 下安装。该方式获取清单需要互联网，蜂窝网络即可；本机包传输仍可能受 VPN 路由策略影响。
+
 ## 60 版真机复测结论（2026-11-10）
 
 VPN 始终开启时，系统已授予持续后台执行任务，Safari 在点击安装后仍连续收到心跳响应，直到用户返回 App。因此本次失败可排除后台服务被挂起。系统清单请求仍未进入 HTTP 路由，故不能把“无法连接 localhost”进一步判定为某个具体 TLS 错误或 VPN 路由错误。
 
 Apple 从 iOS 27 起对 `appstored` 等选定系统进程执行更严格的 TLS 要求：[Apple 网络环境说明](https://support.apple.com/en-gb/126655)。当前固定的 swift-nio-ssl 2.36.0 / BoringSSL 已支持 TLS 1.3，并在 TLS 1.2 客户端请求时协商 EMS；不能仅凭新策略就宣称是缺少 EMS。修改本 App 的 ATS 例外也不能修改系统安装器的策略。
 
-已准备一个[可自行托管的公网清单候选后端](../tools/installation-manifest/README.md)，参考 Feather 的 semi-local 数据流。尚未部署、未接入 App、未向任何新服务发送应用信息；需要先确定是否接受外部清单服务及其托管地址，之后才能接入和验证。
+后续用户已同意试用，61 版接入[公网清单后端](../tools/installation-manifest/README.md)，参考 Feather 的 semi-local 数据流，验证范围见上文。
 
 ## 60 版：后台执行与可区分的请求日志
 

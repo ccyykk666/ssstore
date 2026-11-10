@@ -1,10 +1,12 @@
-# 可自行托管的 HTTPS 安装清单服务（尚未接入客户端）
+# HTTPS 安装清单服务
 
 60 版真机日志已证实：持续后台任务获得授权，用户点击安装后，本机服务仍能持续响应 Safari 心跳，但没有收到系统安装器的清单 HTTP 请求。此前怀疑的后台挂起可排除；系统进程的 TLS 校验失败和 VPN 对其流量的影响，当前日志仍无法区分。
 
 这个候选方案参考 Feather 的 semi-local 数据流：公网 HTTPS 仅生成 plist，IPA 从手机的 HTTP 回环服务传输。代码独立编写，不复制 Feather 的实现。它需要联网获取清单，蜂窝网络即可；IPA 不上传到清单服务。服务会收到应用名称、Bundle ID、内部构建版本和带随机标识的本机 IPA 地址，不接收账号、许可证、IPA 文件或配对记录。此实现不读取外部资源，也不记录查询参数；托管平台自身的访问日志设置仍由部署者控制。
 
-这只是待选择、部署和接入的候选后端，没有部署到任何公共地址，没有改变 App 的安装方式。HTTP IPA 在 iOS 27 和用户 VPN 下的真实安装结果仍需验证，不能承诺它绕过所有 VPN 对回环连接的接管。
+用户同意试用后，已通过 Sites 部署公开的 HTTPS 清单服务：<https://ssstore-install-manifest.kkkk0615.chatgpt.site>。61 版从下载详情的“兼容安装”入口使用该服务；只有点击安装才发送上述元数据，先验证返回的 plist 与本机 IPA 一致，再交给系统。此入口不需要根证书。配对安装和证书安装保留各自原有通道。
+
+部署、公开访问配置及本地 XML 测试已通过；当前云端 HTTP 探测收到托管层 `403 / error code: 1010`，因此不能把发布成功等同于所有客户端均可访问。App 预检会直接显示 HTTP 错误并记录提供商错误码，不会把无效清单交给系统。手机实际能否访问、HTTP IPA 在 iOS 27 和用户 VPN 下能否安装，仍需真机验证，不能承诺绕过所有 VPN 对回环连接的接管。
 
 ## 验证
 
@@ -18,4 +20,6 @@ node --test tools/installation-manifest/worker.test.mjs
 
 接口为 `GET /manifest.plist`，参数为 `bundleid`、`name`、`version`、`fetchurl`。`version` 应取 IPA 内的 `CFBundleVersion`，不是商店展示版本。`fetchurl` 仅接受带端口、随机 UUID 文件名的 `127.0.0.1` IPA 地址。
 
-客户端后续接入还需要：专门的本机 HTTP IPA 入口、持续后台任务、服务地址配置、实际清单请求预检，以及真实设备安装验证。不能只替换目前 `itms-services` 的主机名，也不能用网页上的 JavaScript 替代系统读取的 XML 清单。
+客户端实现包括：仅监听回环地址的本机 HTTP IPA 入口、持续后台任务、实际清单预检，以及对 IPA 内 `CFBundleVersion` 的读取。服务地址固定在 `Installer+Compute.swift`，主机由用户拥有的 Sites 项目管理；修改服务时需要同步客户端地址。不能只替换 `itms-services` 的主机名，也不能用网页上的 JavaScript 替代系统读取的 XML 清单。
+
+Sites 项目：`appgprj_6af2e2c46b2c81918d65bde6eeb87b91`，部署源位于 `/workspace/sites/ssstore-install-manifest`。该目录的 `.openai/hosting.json` 为已保存的项目身份；维护时复用该项目，不能重新创建重复服务。这里的 Worker 为可自行部署的等价后端，Sites 版本增加了根路径的纯文本健康响应。Worker 不主动写日志；Sites/Cloudflare 平台可能保留请求 URL 和访问日志。
