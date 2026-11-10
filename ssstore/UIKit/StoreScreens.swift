@@ -452,7 +452,9 @@ final class NativeCertificateInstall: NativePage {
         switch installer.status {
         case .ready: text = awaitingSystem ? (installer.isCompatible ? "等待系统下载本机安装包…" : "等待系统获取安装清单…") : "准备安装"
         case .sendingManifest: text = "正在发送清单…"
-        case .sendingPayload: text = "正在发送安装包…"
+        case .sendingPayload:
+            let percent = installer.payloadSize > 0 ? Int(Double(installer.sentBytes) / Double(installer.payloadSize) * 100) : 0
+            text = "正在发送安装包… \(percent)%"
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
@@ -513,6 +515,7 @@ final class NativeCertificateInstall: NativePage {
                     onReady: { [weak self] in self?.openInstallationPage() },
                     onStop: { [weak self] in
                         guard let self else { return }
+                        if case .completed = self.installer.status { return }
                         self.waitingForBackground = false
                         self.awaitingSystem = false
                         self.installer.status = .broken(NSError(domain: "ssstore.install", code: 4,
@@ -552,13 +555,16 @@ final class NativeCertificateInstall: NativePage {
         switch installer.status {
         case .ready: break
         case .sendingManifest:
-            backgroundExecution.update(completed: 10, name: name, subtitle: "正在发送安装清单…")
+            backgroundExecution.update(completed: 0, name: name, subtitle: "正在发送安装清单…")
         case .sendingPayload:
             let fraction = installer.payloadSize > 0 ? Double(installer.sentBytes) / Double(installer.payloadSize) : 0
-            backgroundExecution.update(completed: 20 + Int64(fraction * 979), name: name, subtitle: "正在发送安装包…")
+            backgroundExecution.update(completed: Int64(fraction * 1000), name: name,
+                subtitle: "正在发送安装包 · \(Int(fraction * 100))%")
         case .completed(let result):
             awaitingSystem = false
-            backgroundExecution.finish(success: (try? result.get()) != nil)
+            if (try? result.get()) != nil {
+                backgroundExecution.completeTransfer(name: name, hasOpenResponses: installer.hasActivePayloadResponses)
+            } else { backgroundExecution.finish(success: false) }
         case .broken:
             awaitingSystem = false
             backgroundExecution.finish(success: false)

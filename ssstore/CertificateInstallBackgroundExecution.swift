@@ -8,6 +8,9 @@ final class CertificateInstallBackgroundExecution {
     private var task: BGTask?
     private var identifier: String?
     private var shortTask: UIBackgroundTaskIdentifier = .invalid
+    private var finishingTransfer = false
+    private var lastTitle = ""
+    private var lastSubtitle = ""
 
     var diagnosticState: String {
         if task != nil { return "continued-task-granted" }
@@ -38,7 +41,7 @@ final class CertificateInstallBackgroundExecution {
                     }
                     self.task = continued
                     continued.progress.totalUnitCount = 1000
-                    continued.progress.completedUnitCount = 1
+                    continued.progress.completedUnitCount = 0
                     continued.expirationHandler = { [weak self] in
                         Task { @MainActor in
                             guard let self, self.identifier == requestID else { return }
@@ -83,12 +86,41 @@ final class CertificateInstallBackgroundExecution {
 
     func update(completed: Int64, name: String, subtitle: String) {
         if #available(iOS 26.0, *), let continued = task as? BGContinuedProcessingTask {
-            continued.progress.completedUnitCount = max(continued.progress.completedUnitCount, min(999, completed))
-            continued.updateTitle(name, subtitle: subtitle)
+            continued.progress.completedUnitCount = max(continued.progress.completedUnitCount, min(999, max(0, completed)))
+            if lastTitle != name || lastSubtitle != subtitle {
+                continued.updateTitle(name, subtitle: subtitle)
+                lastTitle = name; lastSubtitle = subtitle
+            }
         }
     }
 
+    func completeTransfer(name: String, hasOpenResponses: Bool) {
+        if !finishingTransfer {
+            finishingTransfer = true
+            endShortTask()
+        }
+        if hasOpenResponses, shortTask == .invalid {
+            // Let the HTTP end/close cleanup drain after ending the visible
+            // continued task. This grace does not represent installation.
+            shortTask = UIApplication.shared.beginBackgroundTask(withName: "LocalInstallerFlush") { [weak self] in
+                self?.endShortTask()
+            }
+        }
+        if #available(iOS 26.0, *), let continued = task as? BGContinuedProcessingTask {
+            continued.updateTitle(name, subtitle: "安装包已发送")
+        }
+        endContinuedTask(success: true)
+        if !hasOpenResponses { endShortTask() }
+    }
+
     func finish(success: Bool) {
+        endContinuedTask(success: success)
+        endShortTask()
+        finishingTransfer = false
+        lastTitle = ""; lastSubtitle = ""
+    }
+
+    private func endContinuedTask(success: Bool) {
         if #available(iOS 26.0, *), success, let continued = task as? BGContinuedProcessingTask {
             continued.progress.completedUnitCount = continued.progress.totalUnitCount
         }
@@ -97,6 +129,9 @@ final class CertificateInstallBackgroundExecution {
         task = nil
         if let identifier { BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: identifier) }
         identifier = nil
+    }
+
+    private func endShortTask() {
         if shortTask != .invalid {
             UIApplication.shared.endBackgroundTask(shortTask)
             shortTask = .invalid

@@ -2,6 +2,36 @@ import XCTest
 @testable import UpdateCore
 
 final class InstallTransferCoverageTests: XCTestCase {
+    func testReportsProgressDuringOneResponseBeforeAnyCompletionCallback() throws {
+        var transfer = InstallTransferCoverage(totalBytes: 100)
+        let range = try XCTUnwrap(transfer.responseRange(method: "GET", status: 200, contentLength: 100, contentRange: nil))
+        XCTAssertEqual(range, 0..<100)
+        for end in [Int64(20), 40, 60, 80] {
+            transfer.recordWritten(0..<end)
+            XCTAssertEqual(transfer.completedBytes, end)
+            XCTAssertFalse(transfer.isComplete)
+        }
+        transfer.recordWritten(0..<100)
+        XCTAssertTrue(transfer.isComplete)
+    }
+
+    func testInterruptedPrefixAndRetriedRangesAreCombinedWithoutFalseCompletion() throws {
+        var transfer = InstallTransferCoverage(totalBytes: 100)
+        // First request stops after 40 successful bytes; no onCompleted arrives.
+        transfer.recordWritten(0..<40)
+        let retry = try XCTUnwrap(transfer.responseRange(method: "GET", status: 206, contentLength: 80, contentRange: "bytes 20-99/100"))
+        transfer.recordWritten(retry.lowerBound..<60)
+        XCTAssertEqual(transfer.completedBytes, 60)
+        XCTAssertFalse(transfer.isComplete)
+        transfer.recordWritten(retry)
+        XCTAssertEqual(transfer.completedBytes, 100)
+        XCTAssertTrue(transfer.isComplete)
+        XCTAssertNil(transfer.responseRange(method: "HEAD", status: 200, contentLength: 100, contentRange: nil))
+        XCTAssertFalse(transfer.recordWritten(0..<101))
+        XCTAssertFalse(transfer.recordWritten(-1..<20))
+        XCTAssertEqual(transfer.completedBytes, 100)
+    }
+
     func testProbesAndOverlapsDoNotPrematurelyComplete() {
         var transfer = InstallTransferCoverage(totalBytes: 100)
         XCTAssertFalse(transfer.record(method: "HEAD", status: 200, contentLength: 100, contentRange: nil))

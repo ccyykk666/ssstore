@@ -46,9 +46,51 @@ class Installer: Identifiable, @unchecked Sendable {
     @ObservationIgnored @MainActor var onStatusChange: (() -> Void)?
     @ObservationIgnored @MainActor private var coverage: InstallTransferCoverage?
     @MainActor var sentBytes: Int64 = 0
+    @ObservationIgnored @MainActor private var transferGeneration = UUID()
+    @ObservationIgnored @MainActor private var activePayloadResponses: Set<UUID> = []
+    @MainActor var hasActivePayloadResponses: Bool { !activePayloadResponses.isEmpty }
+
+    @MainActor func payloadGeneration() -> UUID { transferGeneration }
+
+    @MainActor
+    func beginPayloadResponse(_ responseID: UUID, generation: UUID) -> Bool {
+        guard generation == transferGeneration else { return false }
+        if case .broken = status { return false }
+        activePayloadResponses.insert(responseID)
+        if coverage?.isComplete != true { status = .sendingPayload }
+        else { onStatusChange?() }
+        return true
+    }
+
+    @MainActor
+    func recordPayloadWrite(_ range: Range<Int64>, generation: UUID) {
+        guard generation == transferGeneration else { return }
+        if case .broken = status { return }
+        var current = coverage ?? InstallTransferCoverage(totalBytes: payloadSize)
+        guard current.recordWritten(range) else { return }
+        coverage = current
+        let changed = sentBytes != current.completedBytes
+        sentBytes = current.completedBytes
+        if current.isComplete {
+            if case .completed = status { return }
+            logger.info("Local install [\(id)]: all payload bytes written, delivered=\(sentBytes)/\(payloadSize)")
+            status = .completed(.success(()))
+        } else if changed { onStatusChange?() }
+    }
+
+    @MainActor
+    func endPayloadResponse(_ responseID: UUID, generation: UUID) {
+        guard generation == transferGeneration else { return }
+        activePayloadResponses.remove(responseID)
+        // Completion can precede an HTTP end/close callback. Release the short
+        // flush grace only after the outstanding response bodies have drained.
+        if case .completed = status { onStatusChange?() }
+    }
 
     @MainActor
     func prepareForAttempt() {
+        transferGeneration = UUID()
+        activePayloadResponses = []
         coverage = nil
         sentBytes = 0
         status = .ready
@@ -122,37 +164,7 @@ class Installer: Identifiable, @unchecked Sendable {
                         "Content-Type": "image/png",
                     ], body: .init(data: displayImageLargeData))
                 case payloadEndpoint.path:
-                    await MainActor.run { self.status = .sendingPayload }
-                    logger.info("starting payload transfer for installer id: \(self.id)")
-
-                    let receipt = InstallerPayloadReceipt()
-                    let response = try await req.fileio.asyncStreamFile(
-                        at: packagePath.path,
-                        chunkSize: 64 * 1024,
-                    ) { result in
-                        await MainActor.run {
-                            switch result {
-                            case .success:
-                                guard let receipt = receipt.snapshot else { return }
-                                var coverage = self.coverage ?? InstallTransferCoverage(totalBytes: self.payloadSize)
-                                coverage.record(method: req.method.rawValue, status: receipt.status,
-                                    contentLength: receipt.length, contentRange: receipt.range)
-                                self.coverage = coverage
-                                self.sentBytes = coverage.completedBytes
-                                // A successful range probe is not a completed IPA transfer.
-                                self.status = coverage.isComplete ? .completed(.success(())) : .sendingPayload
-                                logger.info("Certificate install [\(self.id)]: payload response sent status=\(receipt.status) range=\(receipt.range ?? "full") delivered=\(self.sentBytes)/\(self.payloadSize)")
-                            case .failure(let error):
-                                // Clients can cancel a probe and retry with a different range.
-                                // Keep the server alive until the user leaves or iOS stops it.
-                                logger.error("Certificate install [\(self.id)]: payload stream interrupted: \(DiagnosticLog.errorDetails(error))")
-                            }
-                        }
-                    }
-                    response.headers.replaceOrAdd(name: "Accept-Ranges", value: "bytes")
-                    response.headers.replaceOrAdd(name: "Cache-Control", value: "no-store")
-                    receipt.configure(response)
-                    return response
+                    return try await self.payloadResponse(for: req, path: packagePath)
                 default:
                     // 404
                     logger.warning("unknown request path: \(req.url.path) for installer id: \(self.id)")
@@ -225,21 +237,6 @@ class Installer: Identifiable, @unchecked Sendable {
                 catch { logger.error("Installer shutdown failed: \(error.localizedDescription)") }
             }
         }
-    }
-}
-
-/// FileIO constructs the response before its asynchronous body is consumed.
-/// Snapshot its actual headers rather than interpreting the client's Range twice.
-private final class InstallerPayloadReceipt: @unchecked Sendable {
-    struct Snapshot { let status: Int; let length: Int64; let range: String? }
-    private let lock = NSLock()
-    private var value: Snapshot?
-    var snapshot: Snapshot? { lock.lock(); defer { lock.unlock() }; return value }
-    func configure(_ response: Response) {
-        lock.lock(); defer { lock.unlock() }
-        value = Snapshot(status: Int(response.status.code),
-            length: Int64(response.headers.first(name: "Content-Length") ?? "") ?? -1,
-            range: response.headers.first(name: "Content-Range"))
     }
 }
 
