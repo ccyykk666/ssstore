@@ -107,10 +107,8 @@ final class NativeManifestService: NativePage {
                 self.probeStatus = nil
             } catch {
                 self.credentialState = .unavailable
+                self.probeStatus = error.localizedDescription
                 logger.warning("Manifest credential update failed: \(DiagnosticLog.errorDetails(error))")
-                guard self.viewIfLoaded?.window != nil,
-                      self.navigationController?.topViewController === self else { return }
-                throw error
             }
         }
     }
@@ -119,6 +117,7 @@ final class NativeManifestService: NativePage {
         do {
             let endpoint = try InstallerManifestService.endpoint()
             let hasToken = credentialState == .present
+            let canRemoveToken = hasToken || credentialState == .unavailable
             let editor = UIAlertController(title: "访问令牌", message:
                 "填写私有清单服务器生成的令牌。不要填写 Apple ID 密码或服务器登录密码。", preferredStyle: .alert)
             editor.addTextField { field in
@@ -130,7 +129,7 @@ final class NativeManifestService: NativePage {
             editor.addAction(UIAlertAction(title: "保存", style: .default) { [weak self, weak editor] _ in
                 self?.changeCredential(editor?.textFields?.first?.text ?? "", for: endpoint)
             })
-            if hasToken {
+            if canRemoveToken {
                 editor.addAction(UIAlertAction(title: "移除当前服务令牌", style: .destructive) { [weak self] _ in
                     self?.changeCredential(nil, for: endpoint)
                 })
