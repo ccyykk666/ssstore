@@ -378,7 +378,8 @@ final class NativeInstall: UIViewController, NativeSheetContent {
 @MainActor
 final class NativeCertificateInstall: NativePage {
     let installer: Installer
-    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private let backgroundExecution = CertificateInstallBackgroundExecution()
+    private var waitingForBackground = false
     private var certificateTrusted = false
     private var awaitingSystem = false
     private var trustTask: Task<Void, Never>?
@@ -388,11 +389,12 @@ final class NativeCertificateInstall: NativePage {
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
+        installer.onStatusChange = { [weak self] in self?.updateBackgroundExecution() }
         foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if self.awaitingSystem { logger.info("Certificate install [\(self.installer.id)]: app returned to foreground, stage=\(self.installer.diagnosticStatus)") }
+                if self.awaitingSystem { logger.info("Certificate install [\(self.installer.id)]: app returned to foreground, stage=\(self.installer.diagnosticStatus) background=\(self.backgroundDiagnostic)") }
                 self.refreshCertificateTrust()
             }
         }
@@ -400,7 +402,7 @@ final class NativeCertificateInstall: NativePage {
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.awaitingSystem else { return }
-                logger.info("Certificate install [\(self.installer.id)]: app entered background, stage=\(self.installer.diagnosticStatus)")
+                logger.info("Certificate install [\(self.installer.id)]: app entered background, stage=\(self.installer.diagnosticStatus) background=\(self.backgroundDiagnostic)")
             }
         }
     }
@@ -425,7 +427,12 @@ final class NativeCertificateInstall: NativePage {
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if isMovingFromParent { endBackgroundTask(); installer.destroy() }
+        if isMovingFromParent {
+            logger.info("Certificate install [\(installer.id)]: leaving installation page, stage=\(installer.diagnosticStatus)")
+            installer.onStatusChange = nil
+            backgroundExecution.finish(success: false)
+            installer.destroy()
+        }
     }
     override func rows() -> [NativeSection] {
         let text: String
@@ -436,7 +443,7 @@ final class NativeCertificateInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        var sections = [NativeSection(rows: [NativeRow(title: working ? "正在检查本地连接…" : text,
+        var sections = [NativeSection(rows: [NativeRow(title: working ? "正在检查本地连接…" : (waitingForBackground ? "正在申请后台执行…" : text),
             detail: "通过本机连接安装，无需 Wi-Fi。"), link("安装") { [weak self] in self?.openInstaller() }])]
         if !certificateTrusted {
             sections.insert(NativeSection(title: "首次使用 IP 安装", rows: [
@@ -451,6 +458,7 @@ final class NativeCertificateInstall: NativePage {
         run { try await Installer.openCertificateProfile() }
     }
     private func openInstaller() {
+        guard !waitingForBackground else { return }
         run { [self] in
             let identity = installer.certificateIdentity
             certificateTrusted = await Task.detached { identity.isTrusted }.value
@@ -475,35 +483,62 @@ final class NativeCertificateInstall: NativePage {
                 throw NSError(domain: "ssstore.install", code: error.code, userInfo: [NSLocalizedDescriptionKey: "本机安装服务连接失败（\(error.code)）：\(error.localizedDescription)"])
             }
             guard view.window != nil, navigationController?.topViewController === self else { return }
-            installer.status = .ready
-            if backgroundTask == .invalid {
-                backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "CertificateInstall") { [weak self] in
-                    guard let self else { return }
-                    switch installer.status {
-                    case .completed, .broken: break
-                    default:
-                        installer.status = .broken(NSError(domain: "ssstore.install", code: 4,
-                            userInfo: [NSLocalizedDescriptionKey: "系统已结束本机安装服务的后台执行时间，请返回软件重新点击安装。"]))
-                    }
-                    logger.warning("Local installer background time expired")
-                    endBackgroundTask()
-                }
-            }
-            awaitingSystem = true
-            logger.info("Opening local installation page: \(installer.installPage.absoluteString)")
-            UIApplication.shared.open(installer.installPage) { [weak self] opened in
-                guard let self, !opened else { return }
-                self.awaitingSystem = false
-                self.endBackgroundTask()
-                self.reload()
-                self.alert("无法打开安装页面，请检查网络和本地服务后重试。")
+            installer.prepareForAttempt()
+            waitingForBackground = true
+            do {
+                try backgroundExecution.start(id: installer.id, name: installer.archive.software.name,
+                    onReady: { [weak self] in self?.openInstallationPage() },
+                    onStop: { [weak self] in
+                        guard let self else { return }
+                        self.waitingForBackground = false
+                        self.awaitingSystem = false
+                        self.installer.status = .broken(NSError(domain: "ssstore.install", code: 4,
+                            userInfo: [NSLocalizedDescriptionKey: "系统已停止本机安装服务的后台任务，请返回软件重新点击安装。"]))
+                        self.reload()
+                    })
+            } catch {
+                waitingForBackground = false
+                throw error
             }
         }
     }
-    private func endBackgroundTask() {
-        guard backgroundTask != .invalid else { return }
-        UIApplication.shared.endBackgroundTask(backgroundTask)
-        backgroundTask = .invalid
+    private var backgroundDiagnostic: String {
+        let remaining = UIApplication.shared.backgroundTimeRemaining
+        let budget = remaining > 3600 ? "unlimited" : String(format: "%.1fs", remaining)
+        return "\(backgroundExecution.diagnosticState), UIKit-budget=\(budget)"
+    }
+    private func openInstallationPage() {
+        waitingForBackground = false
+        guard view.window != nil, navigationController?.topViewController === self else {
+            backgroundExecution.finish(success: false)
+            return
+        }
+        awaitingSystem = true
+        logger.info("Certificate install [\(installer.id)]: opening local installation page background=\(backgroundDiagnostic) url=\(installer.installPage.absoluteString)")
+        UIApplication.shared.open(installer.installPage) { [weak self] opened in
+            guard let self, !opened else { return }
+            self.awaitingSystem = false
+            self.backgroundExecution.finish(success: false)
+            self.reload()
+            self.alert("无法打开安装页面，请检查网络和本地服务后重试。")
+        }
+        reload()
+    }
+    private func updateBackgroundExecution() {
+        let name = installer.archive.software.name
+        switch installer.status {
+        case .ready: break
+        case .sendingManifest:
+            backgroundExecution.update(completed: 10, name: name, subtitle: "正在发送安装清单…")
+        case .sendingPayload:
+            let fraction = installer.payloadSize > 0 ? Double(installer.sentBytes) / Double(installer.payloadSize) : 0
+            backgroundExecution.update(completed: 20 + Int64(fraction * 979), name: name, subtitle: "正在发送安装包…")
+        case .completed(let result):
+            awaitingSystem = false
+            backgroundExecution.finish(success: (try? result.get()) != nil)
+        case .broken:
+            awaitingSystem = false
+            backgroundExecution.finish(success: false)
+        }
     }
 }
-

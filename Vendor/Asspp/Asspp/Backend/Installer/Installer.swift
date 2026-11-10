@@ -9,6 +9,7 @@ import ApplePackage
 import Foundation
 import Logging
 import LocalInstallTLS
+import UpdateCore
 #if canImport(UIKit)
     import UIKit
 #endif
@@ -21,6 +22,7 @@ class Installer: Identifiable, @unchecked Sendable {
     @ObservationIgnored private let ipv6App: Application?
     @ObservationIgnored let archive: AppStore.AppPackage
     @ObservationIgnored let certificateIdentity: LocalInstallIdentity
+    @ObservationIgnored let payloadSize: Int64
     @ObservationIgnored let port = Int.random(in: 4000 ... 8000)
     @ObservationIgnored private let shutdownLock = NSLock()
     @ObservationIgnored private var shuttingDown = false
@@ -34,7 +36,18 @@ class Installer: Identifiable, @unchecked Sendable {
     }
 
     @MainActor
-    var status: Status = .ready
+    var status: Status = .ready { didSet { onStatusChange?() } }
+
+    @ObservationIgnored @MainActor var onStatusChange: (() -> Void)?
+    @ObservationIgnored @MainActor private var coverage: InstallTransferCoverage?
+    @MainActor var sentBytes: Int64 = 0
+
+    @MainActor
+    func prepareForAttempt() {
+        coverage = nil
+        sentBytes = 0
+        status = .ready
+    }
 
     @MainActor
     var diagnosticStatus: String {
@@ -51,6 +64,7 @@ class Installer: Identifiable, @unchecked Sendable {
         let id: UUID = .init()
         self.id = id
         self.archive = archive
+        payloadSize = (try FileManager.default.attributesOfItem(atPath: packagePath.path)[.size] as? NSNumber)?.int64Value ?? 0
         certificateIdentity = try await Task.detached { try LocalInstallIdentity.current() }.value
         app = try await Self.setupApp(port: port, identity: certificateIdentity)
         ipv6App = try await Self.setupApp(port: port, identity: certificateIdentity, host: "::1")
@@ -63,25 +77,29 @@ class Installer: Identifiable, @unchecked Sendable {
 
                 switch req.url.path {
                 case "/ping":
-                    return Response(status: .ok, body: .init(string: "pong"))
+                    if let event = try? req.query.get(String.self, at: "event"),
+                       ["page-ready", "install-click", "heartbeat"].contains(event) {
+                        logger.info("Certificate install [\(self.id)]: browser event=\(event)")
+                    }
+                    return Response(status: .ok, headers: ["Cache-Control": "no-store"], body: .init(string: "pong"))
+                case "/favicon.ico":
+                    return Response(status: .noContent)
                 case "/", "/index.html":
                     return Response(status: .ok, version: req.version, headers: [
                         "Content-Type": "text/html; charset=utf-8",
                     ], body: .init(string: indexHtml))
                 case plistEndpoint.path:
-                    await MainActor.run { self.status = .sendingManifest }
+                    await MainActor.run { if case .ready = self.status { self.status = .sendingManifest } }
                     logger.info("sending manifest for installer id: \(self.id)")
                     return Response(status: .ok, version: req.version, headers: [
                         "Content-Type": "text/xml",
                     ], body: .init(data: installManifestData))
                 case displayImageSmallEndpoint.path:
-                    await MainActor.run { self.status = .sendingManifest }
                     logger.info("sending small display image for installer id: \(self.id)")
                     return Response(status: .ok, version: req.version, headers: [
                         "Content-Type": "image/png",
                     ], body: .init(data: displayImageSmallData))
                 case displayImageLargeEndpoint.path:
-                    await MainActor.run { self.status = .sendingManifest }
                     logger.info("sending large display image for installer id: \(self.id)")
                     return Response(status: .ok, version: req.version, headers: [
                         "Content-Type": "image/png",
@@ -90,19 +108,32 @@ class Installer: Identifiable, @unchecked Sendable {
                     await MainActor.run { self.status = .sendingPayload }
                     logger.info("starting payload transfer for installer id: \(self.id)")
 
-                    return try await req.fileio.asyncStreamFile(
+                    let receipt = InstallerPayloadReceipt()
+                    let response = try await req.fileio.asyncStreamFile(
                         at: packagePath.path,
                         chunkSize: 64 * 1024,
                     ) { result in
                         await MainActor.run {
-                            self.status = .completed(result)
-                            if case .success = result {
-                                logger.info("payload transfer completed for installer id: \(self.id)")
-                            } else {
-                                logger.error("payload transfer failed for installer id: \(self.id)")
+                            switch result {
+                            case .success:
+                                guard let receipt = receipt.snapshot else { return }
+                                var coverage = self.coverage ?? InstallTransferCoverage(totalBytes: self.payloadSize)
+                                coverage.record(method: req.method.rawValue, status: receipt.status,
+                                    contentLength: receipt.length, contentRange: receipt.range)
+                                self.coverage = coverage
+                                self.sentBytes = coverage.completedBytes
+                                // A successful range probe is not a completed IPA transfer.
+                                self.status = coverage.isComplete ? .completed(.success(())) : .sendingPayload
+                                logger.info("Certificate install [\(self.id)]: payload response sent status=\(receipt.status) range=\(receipt.range ?? "full") delivered=\(self.sentBytes)/\(self.payloadSize)")
+                            case .failure(let error):
+                                // Clients can cancel a probe and retry with a different range.
+                                // Keep the server alive until the user leaves or iOS stops it.
+                                logger.error("Certificate install [\(self.id)]: payload stream interrupted: \(DiagnosticLog.errorDetails(error))")
                             }
                         }
                     }
+                    receipt.configure(response)
+                    return response
                 default:
                     // 404
                     logger.warning("unknown request path: \(req.url.path) for installer id: \(self.id)")
@@ -121,6 +152,7 @@ class Installer: Identifiable, @unchecked Sendable {
         let id: UUID = .init()
         self.id = id
         self.certificateIdentity = certificateIdentity
+        payloadSize = 0
         ipv6App = nil
         archive = .init(software: .init(
             id: .random(),
@@ -172,6 +204,21 @@ class Installer: Identifiable, @unchecked Sendable {
                 catch { logger.error("Installer shutdown failed: \(error.localizedDescription)") }
             }
         }
+    }
+}
+
+/// FileIO constructs the response before its asynchronous body is consumed.
+/// Snapshot its actual headers rather than interpreting the client's Range twice.
+private final class InstallerPayloadReceipt: @unchecked Sendable {
+    struct Snapshot { let status: Int; let length: Int64; let range: String? }
+    private let lock = NSLock()
+    private var value: Snapshot?
+    var snapshot: Snapshot? { lock.lock(); defer { lock.unlock() }; return value }
+    func configure(_ response: Response) {
+        lock.lock(); defer { lock.unlock() }
+        value = Snapshot(status: Int(response.status.code),
+            length: Int64(response.headers.first(name: "Content-Length") ?? "") ?? -1,
+            range: response.headers.first(name: "Content-Range"))
     }
 }
 
