@@ -10,11 +10,25 @@ import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
+PHASE = "preparing"
+
+
+def phase(name):
+    global PHASE
+    PHASE = name
+    print("Native sheet probe: " + name, flush=True)
 
 
 def run(*args, timeout=180, capture=False):
-    return subprocess.run(list(map(str, args)), check=True, timeout=timeout,
-                          text=True, capture_output=capture)
+    result = subprocess.run(list(map(str, args)), timeout=timeout, text=True, capture_output=True)
+    if not capture:
+        print(result.stdout, end="", flush=True)
+        print(result.stderr, end="", flush=True)
+    if result.returncode:
+        errors = [line.strip() for line in (result.stdout + result.stderr).splitlines() if "error:" in line.lower()]
+        reason = " | ".join(errors[:3]) or result.stderr.strip()[-1000:] or f"exit {result.returncode}"
+        raise RuntimeError(f"{args[0]} failed: {reason}")
+    return result
 
 
 def source(revision):
@@ -52,11 +66,14 @@ def main():
                 "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"]}}}}}
     spec = stage / "project.json"
     spec.write_text(json.dumps(config))
+    phase("generating simulator fixture")
     run("xcodegen", "generate", "--spec", spec)
     derived = stage / "DerivedData"
+    phase("building simulator fixture")
     run("xcodebuild", "-quiet", "-project", stage / "NativeSheetProbe.xcodeproj", "-scheme", "NativeSheetProbe",
         "-configuration", "Debug", "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator",
         "-derivedDataPath", derived, "CODE_SIGNING_ALLOWED=NO", "build", timeout=300)
+    phase("locating simulator runtime")
     runtimes = json.loads(run("xcrun", "simctl", "list", "runtimes", "--json", capture=True).stdout)["runtimes"]
     available = [r for r in runtimes if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
     if not available:
@@ -72,13 +89,17 @@ def main():
     report = None
     pid = None
     try:
+        phase("booting " + runtime["name"])
         run("xcrun", "simctl", "boot", device)
         run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
+        phase("installing simulator fixture")
         run("xcrun", "simctl", "install", device, derived / "Build/Products/Debug-iphonesimulator/NativeSheetProbe.app")
         container = Path(run("xcrun", "simctl", "get_app_container", device, bundle, "data", capture=True).stdout.strip())
+        phase("launching simulator fixture")
         launched = run("xcrun", "simctl", "launch", device, bundle, capture=True).stdout.strip()
         print(launched, flush=True)
         pid = re.search(r": (\d+)$", launched).group(1)
+        phase("interacting with sheet")
         deadline = time.monotonic() + 35
         while time.monotonic() < deadline:
             try:
@@ -94,7 +115,8 @@ def main():
         subprocess.run(["xcrun", "simctl", "io", device, "screenshot", str(output / "screen.png")], capture_output=True, timeout=15)
         print(json.dumps(report, ensure_ascii=False), flush=True)
         if not report or report["status"] != "passed":
-            raise RuntimeError("Sheet UI probe failed or its main thread stopped responding")
+            state = {key: report.get(key) for key in ["status", "phase", "measurements", "system"]} if report else {"status": "no-report"}
+            raise RuntimeError("Sheet UI probe failed or stopped responding: " + json.dumps(state))
         print("Native sheet UI probe passed on " + runtime["name"], flush=True)
     finally:
         subprocess.run(["xcrun", "simctl", "terminate", device, bundle], capture_output=True, timeout=15)
@@ -103,4 +125,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        # Normal CI failure annotations identify the *new run's* failing stage
+        # without requiring a log or artifact download to interpret its status.
+        message = f"Native sheet probe failed while {PHASE}: {error}"
+        escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print("::error title=Native sheet probe::" + escaped, flush=True)
+        raise
