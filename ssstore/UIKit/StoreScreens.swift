@@ -383,13 +383,25 @@ final class NativeCertificateInstall: NativePage {
     private var awaitingSystem = false
     private var trustTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
+    private var backgroundObserver: NSObjectProtocol?
     init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: "证书安装") }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
         foregroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification,
             object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refreshCertificateTrust() }
+            Task { @MainActor in
+                guard let self else { return }
+                if awaitingSystem { logger.info("Certificate install [\(installer.id)]: app returned to foreground, stage=\(installer.diagnosticStatus)") }
+                refreshCertificateTrust()
+            }
+        }
+        backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, awaitingSystem else { return }
+                logger.info("Certificate install [\(installer.id)]: app entered background, stage=\(installer.diagnosticStatus)")
+            }
         }
     }
     override func viewWillAppear(_ animated: Bool) {
@@ -399,6 +411,7 @@ final class NativeCertificateInstall: NativePage {
     deinit {
         trustTask?.cancel()
         if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
+        if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
     }
     private func refreshCertificateTrust() {
         trustTask?.cancel()
@@ -441,6 +454,7 @@ final class NativeCertificateInstall: NativePage {
         run { [self] in
             let identity = installer.certificateIdentity
             certificateTrusted = await Task.detached { identity.isTrusted }.value
+            logger.info("Certificate install [\(installer.id)]: system trust=\(certificateTrusted) root=\(identity.rootName)")
             guard certificateTrusted else {
                 throw NSError(domain: "ssstore.install", code: 2, userInfo: [NSLocalizedDescriptionKey:
                     "请先安装本机证书，并在系统的证书信任设置中启用 \(identity.rootName) 的完整信任，然后返回重试。"])
@@ -453,7 +467,9 @@ final class NativeCertificateInstall: NativePage {
                 guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                     throw NSError(domain: "ssstore.install", code: 1, userInfo: [NSLocalizedDescriptionKey: "本机安装服务未正常响应。"])
                 }
+                logger.info("Certificate install [\(installer.id)]: HTTPS preflight succeeded, manifest=\(installer.plistEndpoint.absoluteString)")
             } catch {
+                logger.error("Certificate install [\(installer.id)]: HTTPS preflight failed: \(DiagnosticLog.errorDetails(error))")
                 guard view.window != nil, navigationController?.topViewController === self else { return }
                 let error = error as NSError
                 throw NSError(domain: "ssstore.install", code: error.code, userInfo: [NSLocalizedDescriptionKey: "本机安装服务连接失败（\(error.code)）：\(error.localizedDescription)"])

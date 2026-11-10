@@ -257,7 +257,7 @@ struct NativeSection {
     var rows: [NativeRow]
 }
 
-/// All active screens use UIKit tables and native navigation; no hosting controllers.
+/// Native scrollable content shares the adaptive UIKit sheet container.
 @MainActor
 protocol NativeSheetContent: AnyObject {
     var sheetScrollView: UIScrollView { get }

@@ -101,11 +101,107 @@ class NativeText: NativePage {
     override func rows() -> [NativeSection] { [NativeSection(rows: [NativeRow(title: text, action: { [weak self] in UIPasteboard.general.string = self?.text })])] }
 }
 @MainActor
-final class NativeLogs: NativePage {
-    init(_ model: AppModel) { super.init(model, title: "日志") }
+final class NativeLogs: UIViewController, NativeSheetContent, UITextViewDelegate {
+    private let textView = UITextView()
+    private var observer: NSObjectProtocol?
+    private var updateTask: Task<Void, Never>?
+    private var feedbackTask: Task<Void, Never>?
+    private var renderedRevision: UInt64?
+    private var didScrollToLatest = false
+    var sheetScrollView: UIScrollView { textView }
+    var sheetContentHeight: CGFloat { textView.contentSize.height }
+    init(_ model: AppModel) { super.init(nibName: nil, bundle: nil); title = "日志" }
     required init?(coder: NSCoder) { fatalError() }
-    override func viewDidLoad() { super.viewDidLoad(); navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .refresh, primaryAction: UIAction { [weak self] _ in self?.reload() }) }
-    override func rows() -> [NativeSection] { LogManager.shared.getMessages().map { message in NativeSection(rows: [NativeRow(title: message, action: { UIPasteboard.general.string = message })]) } }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .systemGroupedBackground
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.delegate = self
+        textView.font = UIFontMetrics(forTextStyle: .footnote).scaledFont(for: .monospacedSystemFont(ofSize: 13, weight: .regular))
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textColor = .label
+        textView.textContainer.lineFragmentPadding = 0
+        textView.textContainerInset = UIEdgeInsets(top: 16, left: 20, bottom: 20, right: 20)
+        textView.alwaysBounceVertical = true
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(textView)
+        NSLayoutConstraint.activate([
+            textView.topAnchor.constraint(equalTo: view.topAnchor), textView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            textView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+        ])
+        let copy = UIBarButtonItem(image: UIImage(systemName: "doc.on.doc"), primaryAction: UIAction(title: "复制全部日志") { [weak self] _ in self?.copyLogs() })
+        copy.accessibilityLabel = "复制全部日志"
+        navigationItem.rightBarButtonItem = copy
+        observer = NotificationCenter.default.addObserver(forName: LogManager.didChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.scheduleRefresh() }
+        }
+    }
+    override func viewWillAppear(_ animated: Bool) { super.viewWillAppear(animated); refresh() }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if !didScrollToLatest {
+            didScrollToLatest = true
+            textView.scrollRangeToVisible(NSRange(location: (textView.text as NSString).length, length: 0))
+        }
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        (navigationController as? NativeFittingNavigation)?.updateContentSize()
+    }
+    deinit {
+        updateTask?.cancel(); feedbackTask?.cancel()
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+    }
+    private func scheduleRefresh() {
+        guard viewIfLoaded?.window != nil, updateTask == nil else { return }
+        updateTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            self?.updateTask = nil
+            self?.refresh()
+        }
+    }
+    private func report(_ messages: [String]) -> String {
+        DiagnosticLog.report(messages: messages,
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?",
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?",
+            system: "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)",
+            device: UIDevice.current.model, capacity: LogManager.maxMessages)
+    }
+    private func refresh() {
+        guard isViewLoaded, textView.selectedRange.length == 0 else { return }
+        let snapshot = LogManager.shared.snapshot()
+        guard renderedRevision != snapshot.revision else { return }
+        let oldOffset = textView.contentOffset
+        let nearBottom = oldOffset.y + textView.bounds.height >= textView.contentSize.height + textView.adjustedContentInset.bottom - 24
+        let firstRender = renderedRevision == nil
+        renderedRevision = snapshot.revision
+        textView.text = report(snapshot.messages)
+        textView.layoutIfNeeded()
+        if firstRender || nearBottom {
+            textView.scrollRangeToVisible(NSRange(location: (textView.text as NSString).length, length: 0))
+        } else { textView.setContentOffset(oldOffset, animated: false) }
+        (navigationController as? NativeFittingNavigation)?.updateContentSize()
+    }
+    func textViewDidChangeSelection(_ textView: UITextView) {
+        if textView.selectedRange.length == 0 { scheduleRefresh() }
+    }
+    private func copyLogs() {
+        // Always take a new snapshot, even while the user is selecting older text.
+        UIPasteboard.general.string = report(LogManager.shared.getMessages())
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        UIAccessibility.post(notification: .announcement, argument: "已复制全部日志")
+        navigationItem.rightBarButtonItem?.image = UIImage(systemName: "checkmark")
+        feedbackTask?.cancel()
+        feedbackTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            self?.navigationItem.rightBarButtonItem?.image = UIImage(systemName: "doc.on.doc")
+        }
+    }
 }
 
 @MainActor

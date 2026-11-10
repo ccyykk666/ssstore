@@ -36,6 +36,17 @@ class Installer: Identifiable, @unchecked Sendable {
     @MainActor
     var status: Status = .ready
 
+    @MainActor
+    var diagnosticStatus: String {
+        switch status {
+        case .ready: "waiting-for-manifest"
+        case .sendingManifest: "manifest-or-icon-requested"
+        case .sendingPayload: "payload-requested"
+        case .completed(let result): (try? result.get()) != nil ? "payload-sent" : "payload-transfer-failed"
+        case .broken: "failed"
+        }
+    }
+
     init(archive: AppStore.AppPackage, path packagePath: URL) async throws {
         let id: UUID = .init()
         self.id = id
@@ -48,7 +59,7 @@ class Installer: Identifiable, @unchecked Sendable {
         for server in [app, ipv6App].compactMap({ $0 }) {
             server.get("*") { [weak self] req in
                 guard let self else { return Response(status: .badGateway) }
-                logger.info("local installer request id=\(self.id) method=\(req.method) path=\(req.url.path) userAgent=\(req.headers.first(name: "User-Agent") ?? "unknown")")
+                logger.info("local installer request id=\(self.id) method=\(req.method) host=\(req.headers.first(name: "Host") ?? "unknown") path=\(req.url.path) userAgent=\(req.headers.first(name: "User-Agent") ?? "unknown")")
 
                 switch req.url.path {
                 case "/ping":
