@@ -4,13 +4,25 @@ import hashlib
 import json
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import subprocess
 import zipfile
 
 
 def gh(*args):
-    return subprocess.check_output(["gh", *map(str, args)], text=True)
+    command = ["gh", *map(str, args)]
+    result = subprocess.run(command, text=True, capture_output=True)
+    if result.returncode:
+        # GitHub CLI errors can contain signed artifact URLs. Keep the failing
+        # operation and HTTP reason, never its temporary download credentials.
+        reason = safe_error(result.stderr or result.stdout)
+        raise RuntimeError(f"GitHub {' '.join(map(str, args[:2]))} failed: {reason}")
+    return result.stdout
+
+
+def safe_error(message):
+    return re.sub(r"https?://\S+", "<URL redacted>", message).strip()[:2000]
 
 
 def select_run(runs, repository):
@@ -103,4 +115,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        message = safe_error(str(error)).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print("::error title=IPA publication::" + message, flush=True)
+        raise

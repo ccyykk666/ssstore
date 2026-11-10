@@ -11,6 +11,11 @@ spec.loader.exec_module(publication)
 
 
 class PublicationTests(unittest.TestCase):
+    def test_error_diagnostics_remove_signed_download_credentials(self):
+        message = publication.safe_error('Get "https://example.invalid/artifact.zip?sig=private-download-token": Forbidden')
+        self.assertNotIn("private-download-token", message)
+        self.assertIn("Forbidden", message)
+
     def run_data(self, number=55, **overrides):
         run = dict(conclusion="success", status="completed", head_branch="main", event="push",
                    path=".github/workflows/build-ios.yml", head_repository={"full_name": "owner/repo"},
