@@ -70,6 +70,11 @@ jobs:
       - name: Test UpdateCore
         if: steps.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore
+      - name: Check manifest credential responsiveness
+        if: steps.checks.outputs.manifest_credentials == 'true'
+        run: |
+          swiftc -parse-as-library ssstore/ManifestAPICredentials.swift scripts/tests/ManifestCredentialChecks.swift -o "$RUNNER_TEMP/manifest-credential-checks"
+          "$RUNNER_TEMP/manifest-credential-checks"
       - name: Check local installation certificates
         if: steps.checks.outputs.installation == 'true'
         run: swift test --package-path Packages/LocalInstallTLS

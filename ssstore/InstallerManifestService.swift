@@ -36,7 +36,11 @@ enum InstallerManifestService {
     static func prepare(endpoint: URL, metadata: InstallationManifest.Metadata, payload: URL, logID: String) async throws -> URL {
         // Validate before disclosing any metadata, including in the private flow.
         let publicURL = try InstallationManifest.serviceURL(endpoint: endpoint, metadata: metadata, payload: payload)
-        let token = try ManifestAPICredentials.load(for: endpoint)
+        let token: String?
+        // Our existing public endpoint never requires a credential. Avoid
+        // querying the Keychain at all for the default installation flow.
+        if endpoint == defaultEndpoint { token = nil }
+        else { token = try await ManifestAPICredentials.load(for: endpoint) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.urlCredentialStorage = nil

@@ -10,6 +10,12 @@ import urllib.request
 
 STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
+    "manifest_credentials": (
+        "ssstore/ManifestAPICredentials.swift",
+        "ssstore/InstallerManifestService.swift",
+        "ssstore/UIKit/ManifestServiceScreen.swift",
+        "scripts/tests/ManifestCredentialChecks.swift",
+    ),
     "core": ("Packages/UpdateCore/",),
     "installation": (
         "Packages/LocalInstallTLS/",
