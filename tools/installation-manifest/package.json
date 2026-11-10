@@ -1,0 +1,14 @@
+{
+  "name": "ssstore-manifest-private",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.16.0" },
+  "scripts": {
+    "build": "node --check cloudflare-private.mjs",
+    "deploy": "wrangler deploy",
+    "test": "node --test worker.test.mjs server.test.mjs cloudflare-private.test.mjs",
+    "test:runtime": "node --test cloudflare-runtime.test.mjs"
+  },
+  "devDependencies": { "wrangler": "4.160.0" }
+}

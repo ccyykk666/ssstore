@@ -1,0 +1,2 @@
+# Generate a private random 64-character alphanumeric token. Never commit it.
+MANIFEST_API_TOKEN=""

@@ -2,6 +2,12 @@
 
 公网 HTTPS 服务生成安装清单，IPA 由手机自身的 HTTP 回环服务发送给系统安装器。它适用于无法在 VPN 开启时使用本机 HTTPS 清单的情况；用户已在 61 版确认安装成功。服务不接收 IPA、Apple ID 或配对文件。
 
+## Cloudflare 私有部署
+
+控制台操作说明见 [CLOUDFLARE.md](CLOUDFLARE.md)。默认 Wrangler 配置现在部署私有 Worker，使用 D1 保存短期票据并自动清理；首次部署自动创建数据库。App 64 版及以后可直接配置地址和令牌，建议使用 67 版或更新版本。
+
+原有公开 Worker 配置保留在 `wrangler.public.toml`，已有 Sites 公开服务不受影响。
+
 ## 私有 VPS 部署（64 版起）
 
 按 [DEPLOY.md](DEPLOY.md) 部署。Node.js 后端需要强随机令牌才能启动；签发接口使用鉴权 POST，系统通过不含长期令牌或应用信息的短期随机票据 URL 读取清单。没有令牌的调用不会生成清单。容器仅暴露本机端口，以非 root 用户和只读文件系统运行。

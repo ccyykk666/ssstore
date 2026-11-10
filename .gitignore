@@ -12,6 +12,11 @@ xcuserdata/
 *.mobileprovision
 pairing*.plist
 tools/installation-manifest/secrets/
+tools/installation-manifest/node_modules/
+tools/installation-manifest/.wrangler/
+tools/installation-manifest/.dev.vars
+tools/installation-manifest/.dev.vars.*
+!tools/installation-manifest/.dev.vars.example
 Packages/DeviceKit/IDevice.xcframework/
 ssstore.xcodeproj/
 /README.md

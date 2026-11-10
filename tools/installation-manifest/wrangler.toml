@@ -1,7 +1,22 @@
-name = "ssstore-install-manifest"
-main = "worker.mjs"
+name = "ssstore-manifest-private"
+main = "cloudflare-private.mjs"
 compatibility_date = "2026-11-10"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+preview_urls = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ssstore-manifest-private"
+# Wrangler provisions and binds this database on the first deployment.
+
+[[ratelimits]]
+name = "PUBLIC_LIMITER"
+namespace_id = "670611"
+simple = { limit = 120, period = 60 }
+
+[triggers]
+crons = ["* * * * *"]
 
 [observability]
 enabled = false
