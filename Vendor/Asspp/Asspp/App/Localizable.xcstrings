@@ -1,6 +1,23 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Apple requires additional device verification before downloading. Please try again later." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple requires additional device verification before downloading. Please try again later."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "苹果要求额外的设备验证，当前暂时无法下载。请稍后重试。"
+          }
+        }
+      }
+    },
     "Apple rejected the %@ request (HTTP %lld)." : {
       "extractionState" : "manual",
       "localizations" : {

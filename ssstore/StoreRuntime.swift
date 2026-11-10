@@ -24,7 +24,6 @@ enum StoreRuntime {
         prepared = true
         LoggingSystem.bootstrap { LogManagerHandler(label: $0) }
         APLogger.verbose = false
-        ApplePackage.Configuration.userAgent = StoreProtocol.userAgent
         APLogger.logger = Logger(label: "dev.personal.ssstore.applepackage")
         _ = documentsDirectory
         _ = temporaryDirectory

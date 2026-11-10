@@ -111,6 +111,15 @@ enum StoreDownloadService {
                 return metadata.externalVersionID
 
             }
+            func compatibilityResponse(account compatibilityAccount: inout Account) async throws -> [String: Any] {
+                try await StoreDownloadProtocol.fetchWithFallback(version: effectiveVersion) { endpoint, requestedVersion in
+                    effectiveVersion = requestedVersion
+                    return try await fetch(session: session, endpoint: endpoint, account: &compatibilityAccount,
+                        appID: app.id, version: requestedVersion, trace: trace)
+                } resolveVersion: { try await resolveVersion() } onFallback: { reason in
+                    logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
+                }
+            }
             let guid = Configuration.deviceIdentifier
             let response: [String: Any]
             if let endpoint = try await preferredEndpoint(session: session, guid: guid, trace: trace) {
@@ -131,27 +140,26 @@ enum StoreDownloadService {
                 if let version { pinned = version }
                 else { pinned = try await resolveVersion() }
                 effectiveVersion = pinned
-                response = try await StoreDownloadProtocol.preferredDownload(cached: cached) {
-                    if let generationTask { return try await generationTask.value }
-                    return try await generateBlob()
-                } invalidate: { blob in
-                    await KBSyncStore.shared.invalidate(guid: guid, dsid: dsid, expected: blob)
-                } fetch: { blob in
-                    let result = try await fetchPreferred(session: session, endpoint: endpoint, account: &account,
-                        appID: app.id, guid: guid, version: pinned, blob: blob, trace: trace)
-                    if StoreDownloadProtocol.failureCode(result).isEmpty {
-                        try StoreDownloadProtocol.validateEntResponse(result, appID: app.id, bundleID: app.bundleID, version: pinned)
+                response = try await StoreDownloadProtocol.preferredOrCompatibility {
+                    try await StoreDownloadProtocol.preferredDownload(cached: cached) {
+                        if let generationTask { return try await generationTask.value }
+                        return try await generateBlob()
+                    } invalidate: { blob in
+                        await KBSyncStore.shared.invalidate(guid: guid, dsid: dsid, expected: blob)
+                    } fetch: { blob in
+                        let result = try await fetchPreferred(session: session, endpoint: endpoint, account: &account,
+                            appID: app.id, guid: guid, version: pinned, blob: blob, trace: trace)
+                        if StoreDownloadProtocol.failureCode(result).isEmpty {
+                            try StoreDownloadProtocol.validateEntResponse(result, appID: app.id, bundleID: app.bundleID, version: pinned)
+                        }
+                        return result
                     }
-                    return result
+                } compatibility: {
+                    logger.info("Store download [\(trace)]: machine provisioning requested; using compatibility endpoints")
+                    return try await compatibilityResponse(account: &account)
                 }
             } else {
-                response = try await StoreDownloadProtocol.fetchWithFallback(version: version) { endpoint, requestedVersion in
-                    effectiveVersion = requestedVersion
-                    return try await fetch(session: session, endpoint: endpoint, account: &account,
-                        appID: app.id, version: requestedVersion, trace: trace)
-                } resolveVersion: { try await resolveVersion() } onFallback: { reason in
-                    logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
-                }
+                response = try await compatibilityResponse(account: &account)
             }
             // Let the download caller handle missing licenses.
             if StoreDownloadProtocol.failureCode(response) == "9610" {
@@ -215,6 +223,11 @@ enum StoreDownloadService {
         if let plist, !StoreDownloadProtocol.failureCode(plist).isEmpty {
             logger.info("Store download [\(trace)]: \(StoreDownloadProtocol.summary(plist))")
             return plist
+        }
+        if StoreDownloadProtocol.requiresDeviceVerification(plist ?? [:],
+            actionHeader: response.value(forHTTPHeaderField: "X-Apple-AMD-Action")) {
+            logger.info("Store download [\(trace)]: endpoint=ent/download requires machine provisioning")
+            throw StoreDownloadError.deviceVerificationRequired
         }
         guard response.statusCode == 200, let plist else {
             throw StoreDownloadError.serviceResponse(response.statusCode, "ent/download")
@@ -301,6 +314,12 @@ enum StoreDownloadService {
             let plist = StoreProtocol.plist(data)
             if let plist {
                 logger.info("Store download [\(trace)]: \(StoreDownloadProtocol.summary(plist))")
+                if !StoreDownloadProtocol.failureCode(plist).isEmpty { return plist }
+            }
+            if StoreDownloadProtocol.requiresDeviceVerification(plist ?? [:],
+                actionHeader: response.value(forHTTPHeaderField: "X-Apple-AMD-Action")) {
+                logger.info("Store download [\(trace)]: endpoint=\(endpoint.rawValue) requires machine provisioning")
+                throw StoreDownloadError.deviceVerificationRequired
             }
             guard response.statusCode == 200, let plist else {
                 if response.statusCode == 403 {

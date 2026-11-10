@@ -3,6 +3,7 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        try await machineProvisioningChecks()
         precondition(StoreProtocol.storefrontIdentifier(" 143441-1,34 ") == "143441")
         precondition(StoreProtocol.storefrontIdentifier("143443,34") == "143443")
         precondition(StoreProtocol.dialogMessage(["dialog": ["message": "Account action required", "explanation": "Review your account"]]) == "Account action required\nReview your account")
@@ -52,6 +53,7 @@ struct DownloadProtocolChecks {
             version: "historical-id", blob: "synthetic-blob")
         precondition(preferred.value(forHTTPHeaderField: "X-Token") == "synthetic-token")
         precondition(preferred.value(forHTTPHeaderField: "User-Agent") == StoreProtocol.userAgent)
+        precondition(preferred.value(forHTTPHeaderField: "User-Agent")?.hasPrefix("Configurator/2.18 ") == true)
         precondition(preferred.value(forHTTPHeaderField: "X-Apple-Store-Front") == "143465-1")
         let payload = StoreProtocol.plist(preferred.httpBody!)!
         precondition(payload["externalVersionId"] as? String == "historical-id" && payload["appExtVrsId"] == nil)
@@ -342,6 +344,87 @@ struct DownloadProtocolChecks {
         let error = NSError(domain: secret, code: 403, userInfo: [NSLocalizedDescriptionKey: secret, NSURLErrorKey: secret])
         precondition(!StoreDiagnostics.errorSummary(error).contains(secret))
         print("Download protocol regression checks passed.")
+    }
+
+    static func machineProvisioningChecks() async throws {
+        let challenge: [String: Any] = ["customerMessage": "AMD-Action:ent/download:SP"]
+        for response in [challenge, ["failureType": 0, "customerMessage": "AMD-Action:ent/download:SP"],
+                         ["dialog": ["message": "AMD-Action:ent/download:SP"]],
+                         ["customerMessage": "AMD-Action:downloadProduct:RP"]] {
+            precondition(StoreDownloadProtocol.requiresDeviceVerification(response))
+            do {
+                _ = try StoreDownloadProtocol.packageItem(response, bundleID: "example.app")
+                fatalError("A provisioning instruction cannot be a package")
+            } catch StoreDownloadError.deviceVerificationRequired {}
+        }
+        precondition(StoreDownloadProtocol.requiresDeviceVerification([:], actionHeader: " SP "))
+        precondition(!StoreDownloadProtocol.requiresDeviceVerification([:], actionHeader: "unknown"))
+        precondition(!StoreDownloadProtocol.requiresDeviceVerification(["customerMessage": "Please complete account verification"]))
+        precondition(!StoreDownloadProtocol.isExpiredSession(StoreDownloadError.deviceVerificationRequired))
+        precondition(!StoreDownloadError.rejected("", "AMD-Action:ent/download:SP").localizedDescription.contains("AMD-Action"))
+        for code in ["9610", "2034", "2042"] {
+            let response: [String: Any] = ["failureType": code, "customerMessage": "AMD-Action:ent/download:SP"]
+            precondition(!StoreDownloadProtocol.requiresDeviceVerification(response, actionHeader: "SP"))
+            precondition(StoreDownloadProtocol.fallbackReason(response) == nil)
+            _ = try await StoreDownloadProtocol.preferredOrCompatibility { response }
+                compatibility: { fatalError("An account/license verdict must not try another transport") }
+            do {
+                _ = try StoreDownloadProtocol.packageItem(response, bundleID: "example.app")
+                fatalError("Lost explicit account/license verdict")
+            } catch StoreDownloadError.rejected(let received, _) { precondition(received == code) }
+        }
+
+        var compatibilityCalls = 0
+        _ = try await StoreDownloadProtocol.preferredOrCompatibility {
+            try await StoreDownloadProtocol.preferredDownload(cached: "existing-blob") {
+                fatalError("SP does not invalidate the account's kbsync")
+            } invalidate: { _ in fatalError("SP is not a cached-blob rejection") }
+                fetch: { _ in throw StoreDownloadError.deviceVerificationRequired }
+        } compatibility: {
+            compatibilityCalls += 1
+            return ["marker": "ok"]
+        }
+        precondition(compatibilityCalls == 1)
+
+        compatibilityCalls = 0
+        let repeated = try await StoreDownloadProtocol.preferredOrCompatibility { challenge }
+            compatibility: { compatibilityCalls += 1; return challenge }
+        precondition(compatibilityCalls == 1)
+        do {
+            _ = try StoreDownloadProtocol.packageItem(repeated, bundleID: "example.app")
+            fatalError("A repeated challenge must stop rather than loop")
+        } catch StoreDownloadError.deviceVerificationRequired {}
+        compatibilityCalls = 0
+        do {
+            _ = try await StoreDownloadProtocol.preferredOrCompatibility {
+                throw StoreDownloadError.deviceVerificationRequired
+            } compatibility: {
+                compatibilityCalls += 1
+                throw StoreDownloadError.deviceVerificationRequired
+            }
+            fatalError("Lost final provisioning error")
+        } catch StoreDownloadError.deviceVerificationRequired {}
+        precondition(compatibilityCalls == 1)
+
+        for headerOnly in [false, true] {
+            var requests: [(StoreDownloadProtocol.Endpoint, String?)] = []
+            let result = try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id") { endpoint, version in
+                requests.append((endpoint, version))
+                if endpoint == .volumeStore && headerOnly { throw StoreDownloadError.deviceVerificationRequired }
+                return challenge
+            } resolveVersion: { fatalError("A fallback must preserve the pinned historical version") }
+                onFallback: { precondition($0 == "device-verification") }
+            precondition(requests.count == 2 && requests[0].0 == .volumeStore && requests[1].0 == .redownload)
+            precondition(requests.allSatisfy { $0.1 == "historical-id" })
+            precondition(StoreDownloadProtocol.requiresDeviceVerification(result))
+        }
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await StoreDownloadProtocol.preferredOrCompatibility { challenge }
+                compatibility: { fatalError("A cancelled request must not fall back") }
+        }
+        do { _ = try await cancelled.value; fatalError("Lost cancellation") } catch is CancellationError {}
+        print("Machine provisioning classification and bounded compatibility checks passed.")
     }
 }
 

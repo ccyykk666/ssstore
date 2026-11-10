@@ -8,7 +8,7 @@
 
 已移植：
 
-1. [`72c47d538b`](https://github.com/majd/ipatool/commit/72c47d538b)：使用 Configurator 2.21 请求 User-Agent，统一 ApplePackage 和本地下载请求。
+1. [`72c47d538b`](https://github.com/majd/ipatool/commit/72c47d538b)：55 版曾使用 Configurator 2.21 请求 User-Agent，统一 ApplePackage 和本地下载请求。**58 版已撤回这一项**：后续检查发现 ipatool 同时为请求生成端点绑定的 AMD 证明，本项目未移植对应运行时，单独更换客户端标识是不完整适配；详情见 `docs/DOWNLOAD_AMD_VERIFICATION.md`。
 2. [`001d889896`](https://github.com/majd/ipatool/commit/001d889896)：规范化 storefront 的逗号和连字符后缀，用于区域匹配与下载请求头。
 3. [`856323251a`](https://github.com/majd/ipatool/commit/856323251a)：借鉴服务端 dialog 处理，在本地下载/历史版本响应中保留 message 和 explanation，不自动打开服务端 URL。
 

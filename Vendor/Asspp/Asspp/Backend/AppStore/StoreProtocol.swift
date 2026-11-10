@@ -2,8 +2,15 @@ import Foundation
 
 /// Serialization and cookie conventions shared by store authentication and product requests.
 enum StoreProtocol {
-    // ipatool 72c47d538b / 001d889896: keep store requests on the current client profile.
-    static let userAgent = "Configurator/2.21 (Macintosh; OS X 27.0.1; 26A434) AppleWebKit/0625.2.5.11.6"
+    // Matches the existing CoreFP/kbsync transport. Configurator 2.21 also needs
+    // endpoint-bound AMD proofs; copying its User-Agent alone is incomplete.
+    static let userAgent = "Configurator/2.18 (Macintosh; OS X 15.3.2; 24D81) AppleWebKit/0620.2.4.11.6"
+
+    static func machineAction(in message: String) -> String? {
+        let parts = message.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: ":")
+        guard parts.count == 3, parts[0] == "AMD-Action", ["SP", "RP"].contains(parts[2]) else { return nil }
+        return parts[2]
+    }
 
     static func storefrontIdentifier(_ value: String) -> String {
         String(value.trimmingCharacters(in: .whitespacesAndNewlines).prefix { $0 != "," && $0 != "-" })
@@ -17,7 +24,7 @@ enum StoreProtocol {
         var parts: [String] = []
         for value in [message, string(dialog["explanation"])] {
             let text = string(value).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !text.isEmpty && !parts.contains(text) { parts.append(text) }
+            if !text.isEmpty && machineAction(in: text) == nil && !parts.contains(text) { parts.append(text) }
         }
         return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }

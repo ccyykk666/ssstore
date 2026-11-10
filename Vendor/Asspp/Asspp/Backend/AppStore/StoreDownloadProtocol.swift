@@ -9,6 +9,7 @@ enum StoreDownloadError: LocalizedError {
     case empty
     case catalogUnavailable
     case actionRequired
+    case deviceVerificationRequired
     case noVersions
     case rejected(String, String)
 
@@ -28,16 +29,45 @@ enum StoreDownloadError: LocalizedError {
             String(localized: "Unable to determine the current version for this platform. Try again later or select a specific historical version.")
         case .actionRequired:
             String(localized: "Apple requires an account confirmation. Open the App Store with this account, complete any prompts, then try again.")
+        case .deviceVerificationRequired:
+            String(localized: "Apple requires additional device verification before downloading. Please try again later.")
         case .noVersions:
             String(localized: "Apple returned no version history for this app and platform.")
         case let .rejected(code, message):
-            message.isEmpty ? String(localized: "Apple rejected the download (code: \(code)).") : message
+            if StoreProtocol.machineAction(in: message) != nil {
+                String(localized: "Apple requires additional device verification before downloading. Please try again later.")
+            } else {
+                message.isEmpty ? String(localized: "Apple rejected the download (code: \(code)).") : message
+            }
         }
     }
 }
 
 /// Response classification and request rules without credentials or networking.
 enum StoreDownloadProtocol {
+    /// SP/RP are machine provisioning instructions, not ordinary account messages
+    /// or proof that the cached account-specific kbsync blob is invalid.
+    static func requiresDeviceVerification(_ response: [String: Any], actionHeader: String? = nil) -> Bool {
+        // Preserve explicit license/account/session verdicts before considering a retry.
+        guard failureCode(response).isEmpty else { return false }
+        if let actionHeader, ["SP", "RP"].contains(actionHeader.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()) { return true }
+        let dialog = response["dialog"] as? [String: Any]
+        return [response["customerMessage"], dialog?["message"], dialog?["explanation"]].contains {
+            StoreProtocol.machineAction(in: StoreProtocol.string($0)) != nil
+        }
+    }
+
+    static func preferredOrCompatibility(preferred: () async throws -> [String: Any],
+                                         compatibility: () async throws -> [String: Any]) async throws -> [String: Any] {
+        do {
+            let response = try await preferred()
+            if requiresDeviceVerification(response) { throw StoreDownloadError.deviceVerificationRequired }
+            return response
+        } catch StoreDownloadError.deviceVerificationRequired {
+            try Task.checkCancellation()
+            return try await compatibility()
+        }
+    }
     static func isExpiredSession(_ error: Error) -> Bool {
         if case StoreDownloadError.rejected("2034", _) = error { return true }
         // ApplePackage's purchase API exposes this verdict as a localized NSError.
@@ -218,7 +248,7 @@ enum StoreDownloadProtocol {
 
     static func failureCode(_ response: [String: Any]) -> String {
         let failure = StoreProtocol.string(response["failureType"])
-        if !failure.isEmpty {
+        if !failure.isEmpty, failure != "0" {
             return failure
         }
         let metrics = response["metrics"] as? [String: Any]
@@ -231,6 +261,7 @@ enum StoreDownloadProtocol {
         if failure == "5002" {
             return "failure-5002"
         }
+        if requiresDeviceVerification(response) { return "device-verification" }
         guard failure.isEmpty,
               StoreProtocol.string(response["customerMessage"]).isEmpty,
               response["dialog"] == nil, response["action"] == nil
@@ -251,8 +282,14 @@ enum StoreDownloadProtocol {
         resolveVersion: () async throws -> String,
         onFallback: (String) -> Void,
     ) async throws -> [String: Any] {
-        let primary = try await fetch(.volumeStore, version)
-        guard let reason = fallbackReason(primary) else { return primary }
+        let reason: String
+        do {
+            let primary = try await fetch(.volumeStore, version)
+            guard let cause = fallbackReason(primary) else { return primary }
+            reason = cause
+        } catch StoreDownloadError.deviceVerificationRequired {
+            reason = "device-verification"
+        }
         onFallback(reason)
         let resolved: String = if let version, !version.isEmpty {
             version
@@ -284,16 +321,17 @@ enum StoreDownloadProtocol {
             response["songList"] == nil ? "missing" : "invalid"
         }
         let message = !StoreProtocol.string(response["customerMessage"]).isEmpty
-        return "songList=\(items) failure=\(numeric(failureCode(response))) status=\(numeric(response["status"])) customerMessage=\(message) dialog=\(response["dialog"] != nil) action=\(response["action"] != nil)"
+        return "songList=\(items) failure=\(numeric(failureCode(response))) status=\(numeric(response["status"])) customerMessage=\(message) dialog=\(response["dialog"] != nil) action=\(response["action"] != nil) machineVerification=\(requiresDeviceVerification(response))"
     }
 
     static func packageItem(_ response: [String: Any], bundleID: String, version: String? = nil) throws -> [String: Any] {
         let code = failureCode(response)
         let message = StoreProtocol.string(response["customerMessage"])
-        if let dialog = StoreProtocol.dialogMessage(response) { throw StoreDownloadError.rejected(code, dialog) }
         if !code.isEmpty {
-            throw StoreDownloadError.rejected(code, message)
+            throw StoreDownloadError.rejected(code, StoreProtocol.dialogMessage(response) ?? message)
         }
+        if requiresDeviceVerification(response) { throw StoreDownloadError.deviceVerificationRequired }
+        if let dialog = StoreProtocol.dialogMessage(response) { throw StoreDownloadError.rejected(code, dialog) }
         guard let items = response["songList"] as? [[String: Any]], !items.isEmpty else {
             if !message.isEmpty {
                 throw StoreDownloadError.rejected("", message)
