@@ -104,6 +104,15 @@ jobs:
         run: bash scripts/check-kbsync.sh
       - name: Build IPA
         run: bash scripts/build-ipa.sh
+      - name: Preserve release crash symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: ssstore-symbols
+          path: |
+            build/DerivedData/Build/Products/Release-iphoneos/ssstore.app.dSYM
+            build/DerivedData/Build/Products/Release-iphoneos/ShareExtension.appex.dSYM
+          if-no-files-found: error
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         with:
           name: ssstore-unsigned
