@@ -37,6 +37,7 @@ final class SheetPage: UITableViewController, NativeSheetContent {
     let sections: [Section]
     var openManifest: (() -> Void)?
     private(set) var measuredCount = 0
+    private(set) var appearances = 0
     var sheetScrollView: UIScrollView { tableView }
     var sheetContentHeight: CGFloat {
         measuredCount += 1
@@ -60,6 +61,10 @@ final class SheetPage: UITableViewController, NativeSheetContent {
         super.viewDidLayoutSubviews()
         // Same notification path as the production NativePage.
         (navigationController as? NativeFittingNavigation)?.updateContentSize()
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        appearances += 1
     }
     override func numberOfSections(in tableView: UITableView) -> Int { sections.count }
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { sections[section].rows.count }
@@ -104,7 +109,23 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
         Task { await exercise(root) }
     }
 
-    private func pause() async { try? await Task.sleep(for: .milliseconds(700)) }
+    private func until(_ condition: () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(8))
+        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(50)) }
+        return condition()
+    }
+
+    private func present(_ page: UIViewController, from parent: UIViewController) async {
+        await withCheckedContinuation { continuation in
+            parent.present(page, animated: true) { continuation.resume() }
+        }
+    }
+
+    private func dismiss(_ page: UIViewController) async {
+        await withCheckedContinuation { continuation in
+            page.dismiss(animated: true) { continuation.resume() }
+        }
+    }
 
     private func exercise(_ root: UIViewController) async {
         let address = "https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist"
@@ -128,49 +149,44 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
             nav?.pushViewController(manifest, animated: true)
         }
         SheetTrace.shared.mark("present-settings")
-        root.present(nav, animated: true)
-        await pause()
+        await present(nav, from: root)
         for iteration in 0..<3 {
             let index = IndexPath(row: 0, section: 3)
             settings.tableView.scrollToRow(at: index, at: .middle, animated: false)
-            await pause()
+            await Task.yield()
             SheetTrace.shared.mark("tap-manifest-\(iteration)")
             settings.tableView(settings.tableView, didSelectRowAt: index)
-            await pause()
-            guard let manifest = pushed, nav.topViewController === manifest, nav.transitionCoordinator == nil else {
+            guard let manifest = pushed, await until({ nav.topViewController === manifest && manifest.appearances > 0 }) else {
                 SheetTrace.shared.mark("navigation-incomplete", status: "failed"); return
             }
             SheetTrace.shared.mark("manifest-visible-\(iteration)")
             let editor = UIAlertController(title: "清单服务地址", message: nil, preferredStyle: .alert)
             editor.addTextField { $0.text = address }
             editor.addAction(UIAlertAction(title: "取消", style: .cancel))
-            manifest.present(editor, animated: true)
-            await pause(); editor.dismiss(animated: true); await pause()
+            await present(editor, from: manifest)
+            await dismiss(editor)
             SheetTrace.shared.mark("back-to-settings-\(iteration)")
+            let beforeReturn = settings.appearances
             nav.popViewController(animated: true)
-            await pause()
-            guard nav.topViewController === settings, nav.transitionCoordinator == nil else {
+            guard await until({ nav.topViewController === settings && settings.appearances > beforeReturn }) else {
                 SheetTrace.shared.mark("return-incomplete", status: "failed"); return
             }
             if iteration == 0 { nav.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge }
             if iteration == 1 { nav.overrideUserInterfaceStyle = .dark }
-            await pause()
+            await Task.yield()
         }
         SheetTrace.shared.mark("dismiss-settings")
-        nav.dismiss(animated: true)
-        await pause()
+        await dismiss(nav)
         guard root.presentedViewController == nil else { SheetTrace.shared.mark("dismiss-incomplete", status: "failed"); return }
         // Standalone previews/progress sheets still use content fitting. Check
         // that those can measure and close without recursive layout as well.
         SheetTrace.shared.mark("present-single-fitting-sheet")
         let preview = SheetPage("预览", sections: [.init(title: "", rows: [("预览内容", "按内容适配")])])
         let fitting = NativeFittingNavigation(root: preview)
-        root.present(fitting, animated: true)
-        await pause()
-        guard preview.measuredCount > 0 else { SheetTrace.shared.mark("fitting-not-measured", status: "failed"); return }
+        await present(fitting, from: root)
+        guard await until({ preview.measuredCount > 0 }) else { SheetTrace.shared.mark("fitting-not-measured", status: "failed"); return }
         SheetTrace.shared.mark("dismiss-single-fitting-sheet")
-        fitting.dismiss(animated: true)
-        await pause()
+        await dismiss(fitting)
         guard root.presentedViewController == nil else { SheetTrace.shared.mark("fitting-dismiss-incomplete", status: "failed"); return }
         SheetTrace.shared.mark("finished", status: "passed")
     }

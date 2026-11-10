@@ -72,7 +72,7 @@ def main():
     config = {"name": "NativeSheetProbe", "options": {"deploymentTarget": {"iOS": "17.0"}}, "targets": {
         "NativeSheetProbe": {"type": "application", "platform": "iOS", "sources": ["Probe.swift", "NativeFittingNavigation.swift"],
             "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": "dev.personal.ssstore.NativeSheetProbe", "SWIFT_VERSION": "5.9", "TARGETED_DEVICE_FAMILY": "1"}},
-            "info": {"path": "Info.plist", "properties": {"UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
+            "info": {"path": "Info.plist", "properties": {"UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False, "UISceneConfigurations": {}},
                 "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"]}}}}}
     spec = stage / "project.json"
     spec.write_text(json.dumps(config))
@@ -125,7 +125,7 @@ def main():
         print(launched, flush=True)
         pid = re.search(r": (\d+)$", launched).group(1)
         phase("interacting with sheet")
-        deadline = time.monotonic() + 35
+        deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             try:
                 report = json.loads((container / "Documents/probe.json").read_text())
