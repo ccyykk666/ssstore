@@ -257,46 +257,6 @@ struct NativeSection {
     var rows: [NativeRow]
 }
 
-/// Native scrollable content shares the adaptive UIKit sheet container.
-@MainActor
-protocol NativeSheetContent: AnyObject {
-    var sheetScrollView: UIScrollView { get }
-    var sheetContentHeight: CGFloat { get }
-}
-
-@MainActor
-final class NativeFittingNavigation: UINavigationController {
-    init(root: UIViewController & NativeSheetContent) {
-        super.init(rootViewController: root)
-        modalPresentationStyle = .pageSheet
-        sheetPresentationController?.detents = [.custom(identifier: .init("content")) { [weak self] context in
-            guard let height = self?.preferredContentSize.height, height > 0 else { return context.maximumDetentValue }
-            return min(height, context.maximumDetentValue)
-        }]
-        sheetPresentationController?.prefersGrabberVisible = true
-        sheetPresentationController?.prefersEdgeAttachedInCompactHeight = true
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        topViewController?.view.layoutIfNeeded()
-        updateContentSize()
-    }
-    func updateContentSize() {
-        guard let content = topViewController as? (UIViewController & NativeSheetContent), content.isViewLoaded else { return }
-        let scroll = content.sheetScrollView
-        guard scroll.bounds.width > 0, scroll.bounds.height > 0 else { return }
-        let chrome = view.bounds.height - scroll.bounds.height
-            + scroll.adjustedContentInset.top + scroll.adjustedContentInset.bottom - view.safeAreaInsets.bottom
-        let height = ceil(content.sheetContentHeight + chrome)
-        if preferredContentSize.height != height {
-            preferredContentSize.height = height
-            sheetPresentationController?.invalidateDetents()
-            sheetPresentationController?.selectedDetentIdentifier = .init("content")
-        }
-    }
-}
-
 @MainActor
 class NativePage: UITableViewController, NativeSheetContent {
     var sheetScrollView: UIScrollView { tableView }

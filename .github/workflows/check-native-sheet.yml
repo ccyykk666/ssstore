@@ -6,10 +6,6 @@ on:
         description: Optional full commit SHA whose production navigation container should be tested
         required: false
         default: ''
-  push:
-    paths:
-      - 'tests/native-sheet/**'
-      - '.github/workflows/check-native-sheet.yml'
 permissions:
   contents: read
 jobs:

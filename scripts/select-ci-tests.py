@@ -10,6 +10,11 @@ import urllib.request
 
 STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
+    "native_sheet": (
+        "ssstore/UIKit/NativeInterface.swift",
+        "ssstore/UIKit/NativeFittingNavigation.swift",
+        "tests/native-sheet/",
+    ),
     "manifest_credentials": (
         "ssstore/ManifestAPICredentials.swift",
         "ssstore/InstallerManifestService.swift",

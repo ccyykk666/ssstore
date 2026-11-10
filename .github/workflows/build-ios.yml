@@ -12,6 +12,7 @@ on:
       - 'scripts/*kbsync*'
       - 'scripts/select-ci-tests.py'
       - 'scripts/tests/**'
+      - 'tests/native-sheet/**'
       - '.github/workflows/build-ios.yml'
   pull_request:
 permissions:
@@ -70,6 +71,19 @@ jobs:
       - name: Test UpdateCore
         if: steps.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore
+      - name: Check native sheet navigation in the iOS simulator
+        if: steps.checks.outputs.native_sheet == 'true'
+        run: python3 tests/native-sheet/run.py
+      - name: Upload native sheet diagnostics
+        if: always() && steps.checks.outputs.native_sheet == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sheet-diagnostics
+          path: |
+            build/native-sheet-results/probe.json
+            build/native-sheet-results/main-thread-sample.txt
+            build/native-sheet-results/screen.png
+          if-no-files-found: warn
       - name: Check manifest credential responsiveness
         if: steps.checks.outputs.manifest_credentials == 'true'
         run: |

@@ -22,6 +22,9 @@ class SelectionTests(unittest.TestCase):
     def test_each_check_tracks_its_actual_inputs(self):
         cases = {
             "Packages/UpdateCore/Sources/UpdateCore/Models.swift": {"core"},
+            "ssstore/UIKit/NativeInterface.swift": {"native_sheet"},
+            "ssstore/UIKit/NativeFittingNavigation.swift": {"native_sheet"},
+            "tests/native-sheet/Probe.swift": {"native_sheet"},
             "Packages/UpdateCore/Package.swift": {"core"},
             "Packages/UpdateCore/Tests/UpdateCoreTests/CatalogTests.swift": {"core"},
             "Packages/LocalInstallTLS/Sources/LocalInstallTLS/LocalInstallIdentity.swift": {"installation"},
