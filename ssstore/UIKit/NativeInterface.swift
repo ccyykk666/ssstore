@@ -418,7 +418,8 @@ class NativePage: UITableViewController, NativeSheetContent {
     func push(_ page: UIViewController) { navigationController?.pushViewController(page, animated: true) }
     func sheet(_ page: UIViewController) {
         let nav: UINavigationController
-        if let content = page as? (UIViewController & NativeSheetContent) { nav = NativeFittingNavigation(root: content) }
+        if let settings = page as? NativeSettings { nav = NativeSheetNavigation.settings(root: settings) }
+        else if let content = page as? (UIViewController & NativeSheetContent) { nav = NativeFittingNavigation(root: content) }
         else { nav = UINavigationController(rootViewController: page) }
         page.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak page] _ in page?.dismiss(animated: true) })
         present(nav, animated: true)

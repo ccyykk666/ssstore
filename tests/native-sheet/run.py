@@ -44,7 +44,17 @@ def source(revision):
     text = read("ssstore/UIKit/NativeInterface.swift")
     start = text.index("/// Native scrollable content shares the adaptive UIKit sheet container.")
     end = text.index("@MainActor\nclass NativePage:", start)
-    return "import UIKit\n\n" + text[start:end]
+    # The legacy settings entry used the content-fitting container. Adapt its
+    # old factory shape so the same UI scenario can compare a historical SHA.
+    legacy_factory = """
+@MainActor
+enum NativeSheetNavigation {
+    static func settings(root: UIViewController & NativeSheetContent) -> UINavigationController {
+        NativeFittingNavigation(root: root)
+    }
+}
+"""
+    return "import UIKit\n\n" + text[start:end] + legacy_factory
 
 
 def main():
@@ -134,9 +144,14 @@ def main():
             raise RuntimeError("Sheet UI probe failed or stopped responding: " + json.dumps(state))
         print("Native sheet UI probe passed on " + runtime["name"], flush=True)
     finally:
-        subprocess.run(["xcrun", "simctl", "terminate", device, bundle], capture_output=True, timeout=15)
-        subprocess.run(["xcrun", "simctl", "shutdown", device], capture_output=True, timeout=30)
-        subprocess.run(["xcrun", "simctl", "delete", device], capture_output=True, timeout=30)
+        for command, timeout in [("terminate", 15), ("shutdown", 30), ("delete", 30)]:
+            try:
+                extra = [bundle] if command == "terminate" else []
+                subprocess.run(["xcrun", "simctl", command, device, *extra], capture_output=True, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                # Preserve the actual test/setup failure when Simulator itself
+                # is unresponsive during best-effort cleanup of our own device.
+                print("Simulator cleanup timed out: " + command, flush=True)
 
 
 if __name__ == "__main__":

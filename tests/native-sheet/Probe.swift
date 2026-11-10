@@ -36,8 +36,10 @@ final class SheetPage: UITableViewController, NativeSheetContent {
     struct Section { let title: String; let rows: [(String, String)] }
     let sections: [Section]
     var openManifest: (() -> Void)?
+    private(set) var measuredCount = 0
     var sheetScrollView: UIScrollView { tableView }
     var sheetContentHeight: CGFloat {
+        measuredCount += 1
         SheetTrace.shared.measured()
         return tableView.contentSize.height
     }
@@ -114,7 +116,7 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
             .init(title: "下载管理", rows: [("删除全部下载", ""), ("重置商店数据", ""), ("日志", "")]),
             .init(title: "", rows: [("ssstore", "0.6.0")]),
         ])
-        let nav = NativeFittingNavigation(root: settings)
+        let nav = NativeSheetNavigation.settings(root: settings)
         settings.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { _ in nav.dismiss(animated: true) })
         var pushed: SheetPage?
         settings.openManifest = { [weak nav] in
@@ -158,6 +160,18 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
         nav.dismiss(animated: true)
         await pause()
         guard root.presentedViewController == nil else { SheetTrace.shared.mark("dismiss-incomplete", status: "failed"); return }
+        // Standalone previews/progress sheets still use content fitting. Check
+        // that those can measure and close without recursive layout as well.
+        SheetTrace.shared.mark("present-single-fitting-sheet")
+        let preview = SheetPage("预览", sections: [.init(title: "", rows: [("预览内容", "按内容适配")])])
+        let fitting = NativeFittingNavigation(root: preview)
+        root.present(fitting, animated: true)
+        await pause()
+        guard preview.measuredCount > 0 else { SheetTrace.shared.mark("fitting-not-measured", status: "failed"); return }
+        SheetTrace.shared.mark("dismiss-single-fitting-sheet")
+        fitting.dismiss(animated: true)
+        await pause()
+        guard root.presentedViewController == nil else { SheetTrace.shared.mark("fitting-dismiss-incomplete", status: "failed"); return }
         SheetTrace.shared.mark("finished", status: "passed")
     }
 }

@@ -8,6 +8,18 @@ protocol NativeSheetContent: AnyObject {
 }
 
 @MainActor
+enum NativeSheetNavigation {
+    /// Settings is a navigation flow, with pages of different lengths. Let
+    /// UIKit manage its presentation throughout pushes and interactive pops.
+    static func settings(root: UIViewController & NativeSheetContent) -> UINavigationController {
+        let navigation = UINavigationController(rootViewController: root)
+        navigation.modalPresentationStyle = .pageSheet
+        navigation.sheetPresentationController?.prefersGrabberVisible = true
+        return navigation
+    }
+}
+
+@MainActor
 final class NativeFittingNavigation: UINavigationController, UINavigationControllerDelegate {
     private var fittedHeight: CGFloat = 0
     private var updateQueued = false
