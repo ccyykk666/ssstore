@@ -21,10 +21,11 @@ CHECK_INPUTS = {
         "ssstore/UIKit/ManifestServiceScreen.swift",
         "scripts/tests/ManifestCredentialChecks.swift",
     ),
-    "core": ("Packages/UpdateCore/",),
-    "installation": (
-        "Packages/LocalInstallTLS/",
+    "core": (
+        "Packages/UpdateCore/",
         STORE + "Asspp/Backend/Installer/",
+        "ssstore/CompatibleInstallBackgroundExecution.swift",
+        "ssstore/UIKit/StoreScreens.swift",
     ),
     "downloads": (
         STORE + "Asspp/Backend/AppStore/AppStore.swift",

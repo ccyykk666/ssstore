@@ -1,6 +1,25 @@
 import Foundation
 
 public enum InstallationManifest {
+    /// Encode the complete HTTPS manifest URL as the system installer's nested
+    /// URL, including the port and query used by public manifest services.
+    public static func installationLink(manifestURL: URL) throws -> URL {
+        guard manifestURL.scheme == "https", manifestURL.host?.isEmpty == false,
+              manifestURL.user == nil, manifestURL.password == nil, manifestURL.fragment == nil else {
+            throw ManifestError.invalidEndpoint
+        }
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard let encoded = manifestURL.absoluteString.addingPercentEncoding(withAllowedCharacters: unreserved) else {
+            throw ManifestError.invalidEndpoint
+        }
+        var components = URLComponents()
+        components.scheme = "itms-services"
+        components.host = ""
+        components.percentEncodedQuery = "action=download-manifest&url=" + encoded
+        guard let url = components.url else { throw ManifestError.invalidEndpoint }
+        return url
+    }
+
     /// Accept an HTTPS origin or an explicit endpoint behind a reverse proxy.
     public static func endpoint(from input: String) throws -> URL {
         let value = input.trimmingCharacters(in: .whitespacesAndNewlines)

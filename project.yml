@@ -8,8 +8,6 @@ packages:
     path: Packages/UpdateCore
   DeviceKit:
     path: Packages/DeviceKit
-  LocalInstallTLS:
-    path: Packages/LocalInstallTLS
   ApplePackage:
     url: https://github.com/Lakr233/ApplePackage
     exactVersion: "2.0.3"
@@ -19,9 +17,6 @@ packages:
   SwiftNIO:
     url: https://github.com/apple/swift-nio.git
     exactVersion: "2.95.0"
-  SwiftNIOSSL:
-    url: https://github.com/apple/swift-nio-ssl.git
-    exactVersion: "2.36.0"
   Kingfisher:
     url: https://github.com/onevcat/Kingfisher
     exactVersion: "7.12.0"
@@ -46,7 +41,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "69"
+    CURRENT_PROJECT_VERSION: "70"
   configs:
     Release:
       # Keep crash symbols in a separate dSYM instead of shipping the executable's
@@ -106,7 +101,6 @@ targets:
       - target: ShareExtension
         embed: true
       - package: UpdateCore
-      - package: LocalInstallTLS
       - package: DeviceKit
         product: IDevice
       - package: ApplePackage
@@ -117,10 +111,6 @@ targets:
         product: NIO
       - package: SwiftNIO
         product: NIOHTTP1
-      - package: SwiftNIO
-        product: NIOTLS
-      - package: SwiftNIOSSL
-        product: NIOSSL
       - package: Kingfisher
         product: Kingfisher
       - package: AnyCodable

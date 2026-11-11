@@ -78,6 +78,10 @@ The bottom toolbar provides **读取应用** and **查询版本**. The More menu
 - [CoreDevice file domains](https://github.com/jkcoxson/idevice/blob/v0.1.68/ffi/src/core_device/file_service.rs)
 
 
+## Current installation routes (0.6.0 build 70)
+
+Completed packages offer pairing installation and compatible installation. The legacy certificate installation action, profile download action, local HTTPS listener and LocalInstallTLS package have been removed. Compatible installation retains a public HTTPS manifest service and a loopback-only HTTP IPA server; it requires no user-installed root CA or Wi-Fi. The system link is constructed only from a prepared HTTPS manifest URL. Continued background execution, byte-range transfer accounting and signature validation by the system remain in place. Existing system profiles are not removed by an App update. The versioned sections below describe earlier integrations.
+
 ## Store module integration (0.5.0)
 
 Asspp 4.2.2 at `6682eb8f831a7b5c62dc14ea97088769c6adba48` is vendored with its MIT license and current dependency pins. The matching user fork has been fast-forwarded to the same upstream revision. ApplePackage is pinned to 2.0.3. The store module provides account authentication, region/platform search, explicit license acquisition, current/historical downloads, pause/resume, IPA inspection/sharing and local OTA installation. Authentication and downloads require the user's own account; existing installed-app version comparisons still use the original login-free Catalog path. No account action executes merely because the app scans installed applications.

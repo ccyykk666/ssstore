@@ -2,6 +2,29 @@ import XCTest
 @testable import UpdateCore
 
 final class InstallationManifestTests: XCTestCase {
+    func testInstallationLinkPreservesCompleteHTTPSManifestURL() throws {
+        for address in [
+            "https://install.example:5678/manifest.plist?version=1&label=a%2Bb",
+            "https://install.example/tickets/" + String(repeating: "a", count: 64) + ".plist",
+        ] {
+            let manifest = try XCTUnwrap(URL(string: address))
+            let link = try InstallationManifest.installationLink(manifestURL: manifest)
+            let components = try XCTUnwrap(URLComponents(url: link, resolvingAgainstBaseURL: false))
+            XCTAssertEqual(components.scheme, "itms-services")
+            XCTAssertNil(components.port)
+            XCTAssertEqual(components.queryItems?.first { $0.name == "action" }?.value, "download-manifest")
+            XCTAssertEqual(components.queryItems?.first { $0.name == "url" }?.value, manifest.absoluteString)
+            XCTAssertTrue(components.percentEncodedQuery?.contains("https%3A%2F%2F") == true)
+        }
+    }
+
+    func testInstallationLinkRejectsLocalHTTPAndEmbeddedCredentials() throws {
+        for address in ["http://127.0.0.1:5678/app.plist", "file:///app.plist",
+                        "https://user:secret@install.example/app.plist", "https://install.example/app.plist#fragment"] {
+            XCTAssertThrowsError(try InstallationManifest.installationLink(manifestURL: XCTUnwrap(URL(string: address))))
+        }
+    }
+
     func testPrivateTicketCannotChangeOriginOrInjectPathOrQuery() throws {
         let endpoint = URL(string: "https://install.example:8443/prefix/manifest.plist")!
         let path = "tickets/" + String(repeating: "a", count: 64) + ".plist"

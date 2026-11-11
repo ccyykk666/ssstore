@@ -4,7 +4,7 @@ import UIKit
 /// Keep the local server runnable while Safari and the system installer fetch it.
 /// Opening Safari must wait for the continued task's launch callback, not submit().
 @MainActor
-final class CertificateInstallBackgroundExecution {
+final class CompatibleInstallBackgroundExecution {
     private var task: BGTask?
     private var identifier: String?
     private var shortTask: UIBackgroundTaskIdentifier = .invalid
@@ -18,7 +18,7 @@ final class CertificateInstallBackgroundExecution {
         return identifier == nil ? "none" : "waiting-for-grant"
     }
 
-    func start(id: UUID, name: String, subtitle: String = "等待系统获取安装清单…", onReady: @escaping () -> Void,
+    func start(id: UUID, name: String, subtitle: String = "等待系统下载本机安装包…", onReady: @escaping () -> Void,
                onStop: @escaping () -> Void) throws {
         finish(success: false)
         guard UIApplication.shared.applicationState == .active else {
@@ -45,12 +45,12 @@ final class CertificateInstallBackgroundExecution {
                     continued.expirationHandler = { [weak self] in
                         Task { @MainActor in
                             guard let self, self.identifier == requestID else { return }
-                            logger.warning("Certificate install [\(id)]: continued task expired or stopped by user")
+                            logger.warning("Compatible install [\(id)]: continued task expired or stopped by user")
                             self.finish(success: false)
                             onStop()
                         }
                     }
-                    logger.info("Certificate install [\(id)]: continued task granted; opening browser is now allowed")
+                    logger.info("Compatible install [\(id)]: continued task granted; opening browser is now allowed")
                     onReady()
                 }
             }
@@ -63,23 +63,23 @@ final class CertificateInstallBackgroundExecution {
             request.strategy = .fail
             do {
                 try BGTaskScheduler.shared.submit(request)
-                logger.info("Certificate install [\(id)]: continued task submitted; waiting for grant")
+                logger.info("Compatible install [\(id)]: continued task submitted; waiting for grant")
             } catch {
-                logger.error("Certificate install [\(id)]: continued task rejected: \(error.localizedDescription)")
+                logger.error("Compatible install [\(id)]: continued task rejected: \(error.localizedDescription)")
                 finish(success: false)
                 throw InstallBackgroundError.message("系统未允许本机安装服务在后台运行：\(error.localizedDescription)。请检查“后台 App 刷新”后重试。")
             }
         } else {
-            shortTask = UIApplication.shared.beginBackgroundTask(withName: "CertificateInstall") { [weak self] in
+            shortTask = UIApplication.shared.beginBackgroundTask(withName: "CompatibleInstall") { [weak self] in
                 guard let self else { return }
-                logger.warning("Certificate install [\(id)]: short background task expired")
+                logger.warning("Compatible install [\(id)]: short background task expired")
                 self.finish(success: false)
                 onStop()
             }
             guard shortTask != .invalid else {
                 throw InstallBackgroundError.message("系统未允许本机安装服务在后台运行，请返回软件重试。")
             }
-            logger.info("Certificate install [\(id)]: short background task granted (iOS before 26)")
+            logger.info("Compatible install [\(id)]: short background task granted (iOS before 26)")
             onReady()
         }
     }

@@ -10,7 +10,7 @@
 
 57 版按用户要求恢复下载入口的 `arrow.down.circle` 图标。针对 56 版“立即报无法连接、状态仍为准备安装”的反馈，证书安装改用 HTTPS `localhost` 作为兼容入口，同时监听 IPv4/IPv6 回环；服务器证书覆盖 `localhost`、`127.0.0.1` 和 `::1`，沿用已保存在钥匙串中的 CA，旧版 IP 证书自动换发服务器证书。记录本机安装请求的方法、路径和 User-Agent；区分等待系统清单请求与后台时间结束。这个改动不能视为已在真机确认修复系统安装器的错误。
 
-56 版将证书安装完整链路改为 `127.0.0.1`，服务器只监听回环地址，不依赖 Wi-Fi、配对记录或域名解析。`Packages/LocalInstallTLS` 使用现有固定版本的 Swift Certificates / Crypto / ASN.1 在本机生成 IP SAN 证书，每设备独立 CA，私钥保存在仅本设备钥匙串，配置描述文件只包含公开根证书。首次使用要安装并信任新的 `ssstore Loopback CA <编号>`，页面会检查系统实际信任，保留 TLS 校验；接近到期时更新服务器证书并保留 CA。它用于尝试规避 VPN 的域名处理，不能保证所有 VPN 对回环 IP 的处理；真机步骤见 `docs/INSTALLATION_VPN.md`。
+70 版移除旧证书安装及“安装证书”设置，只保留配对安装和兼容安装。兼容安装通过公网 HTTPS 获取清单，通过 `127.0.0.1` HTTP 在本机传输 IPA，不再生成或使用本机根证书；私有清单服务需要对应地址的令牌。LocalInstallTLS 专用包已移除，后台持续任务与传输进度保留。早期证书方案的排查历史和当前安装流程见 `docs/INSTALLATION_VPN.md`。
 
 55 版为安装网页声明 UTF-8 响应头与 HTML 字符集，下载入口使用系统 `tray.and.arrow.down` 图标。VPN 直连配置见 `docs/INSTALLATION_VPN.md`；上游检查和适用协议修复见 `docs/UPSTREAM_REVIEW_2026-11-09.md`。外部浏览器和系统安装进程的 VPN 路由不受 App 内代理设置控制。
 

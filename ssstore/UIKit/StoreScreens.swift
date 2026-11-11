@@ -7,7 +7,6 @@ import Kingfisher
 import QuickLook
 import UniformTypeIdentifiers
 import ZIPFoundation
-import LocalInstallTLS
 
 @MainActor
 final class NativeProductHeaderCell: UITableViewCell {
@@ -295,8 +294,7 @@ final class NativePackage: NativePage {
         if package.completed {
             controls = [
                 link("配对安装") { [weak self] in guard let self else { return }; let page = NativeInstall(model, package: package); page.present(from: self); page.start() },
-                link("证书安装") { [weak self] in self?.openInstaller(mode: .certificate) },
-                link("兼容安装") { [weak self] in self?.openInstaller(mode: .compatible) },
+                link("兼容安装") { [weak self] in self?.openInstaller() },
                 link("导出安装包 / AirDrop") { [weak self] in guard let self else { return }; share(package.targetLocation) },
                 link("查看安装包内容") { [weak self] in guard let self else { return }; push(NativeArchiveFiles(model, file: package.targetLocation)) },
             ]
@@ -307,11 +305,11 @@ final class NativePackage: NativePage {
         let size = bytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? (package.completed ? "未知" : "下载完成后可查看")
         return [NativeSection(rows: [NativeRow(title: app.name, icon: URL(string: app.artworkUrl), badge: app.version, isDownload: true), NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "大小", detail: size), NativeRow(title: package.state.error ?? package.state.status.title, detail: package.state.percent < 1 ? "\(Int(package.state.percent * 100))%" : "", progress: [.pending, .downloading, .paused].contains(package.state.status) ? package.state.percent : nil)]), NativeSection(rows: controls), NativeSection(title: "账户", rows: [NativeRow(title: package.account.account.email)]), NativeSection(rows: [NativeRow(title: "删除安装包", color: .systemRed, action: { [weak self] in guard let self else { return }; Downloads.this.delete(request: package); navigationController?.popViewController(animated: true) })])]
     }
-    private func openInstaller(mode: Installer.Mode) {
+    private func openInstaller() {
         run { [self] in
-            let installer = try await Installer(archive: package.package, path: package.targetLocation, mode: mode)
+            let installer = try await Installer(archive: package.package, path: package.targetLocation)
             guard view.window != nil, navigationController?.topViewController === self else { installer.destroy(); return }
-            push(NativeCertificateInstall(model, installer: installer))
+            push(NativeCompatibleInstall(model, installer: installer))
         }
     }
 }
@@ -389,16 +387,14 @@ final class NativeInstall: UIViewController, NativeSheetContent {
 }
 
 @MainActor
-final class NativeCertificateInstall: NativePage {
+final class NativeCompatibleInstall: NativePage {
     let installer: Installer
-    private let backgroundExecution = CertificateInstallBackgroundExecution()
+    private let backgroundExecution = CompatibleInstallBackgroundExecution()
     private var waitingForBackground = false
-    private var certificateTrusted = false
     private var awaitingSystem = false
-    private var trustTask: Task<Void, Never>?
     private var foregroundObserver: NSObjectProtocol?
     private var backgroundObserver: NSObjectProtocol?
-    init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: installer.isCompatible ? "兼容安装" : "证书安装") }
+    init(_ model: AppModel, installer: Installer) { self.installer = installer; super.init(model, title: "兼容安装") }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -407,41 +403,25 @@ final class NativeCertificateInstall: NativePage {
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if self.awaitingSystem { logger.info("Certificate install [\(self.installer.id)]: app returned to foreground, stage=\(self.installer.diagnosticStatus) background=\(self.backgroundDiagnostic)") }
-                self.refreshCertificateTrust()
+                if self.awaitingSystem { logger.info("Compatible install [\(self.installer.id)]: app returned to foreground, stage=\(self.installer.diagnosticStatus) background=\(self.backgroundDiagnostic)") }
             }
         }
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.awaitingSystem else { return }
-                logger.info("Certificate install [\(self.installer.id)]: app entered background, stage=\(self.installer.diagnosticStatus) background=\(self.backgroundDiagnostic)")
+                logger.info("Compatible install [\(self.installer.id)]: app entered background, stage=\(self.installer.diagnosticStatus) background=\(self.backgroundDiagnostic)")
             }
         }
     }
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        refreshCertificateTrust()
-    }
     deinit {
-        trustTask?.cancel()
         if let foregroundObserver { NotificationCenter.default.removeObserver(foregroundObserver) }
         if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
-    }
-    private func refreshCertificateTrust() {
-        trustTask?.cancel()
-        guard let identity = installer.certificateIdentity else { return }
-        trustTask = Task { [weak self] in
-            let trusted = await Task.detached { identity.isTrusted }.value
-            guard !Task.isCancelled else { return }
-            self?.certificateTrusted = trusted
-            self?.reload()
-        }
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isMovingFromParent {
-            logger.info("Certificate install [\(installer.id)]: leaving installation page, stage=\(installer.diagnosticStatus)")
+            logger.info("Compatible install [\(installer.id)]: leaving installation page, stage=\(installer.diagnosticStatus)")
             installer.onStatusChange = nil
             backgroundExecution.finish(success: false)
             installer.destroy()
@@ -450,39 +430,19 @@ final class NativeCertificateInstall: NativePage {
     override func rows() -> [NativeSection] {
         let text: String
         switch installer.status {
-        case .ready: text = awaitingSystem ? (installer.isCompatible ? "等待系统下载本机安装包…" : "等待系统获取安装清单…") : "准备安装"
-        case .sendingManifest: text = "正在发送清单…"
+        case .ready: text = awaitingSystem ? "等待系统下载本机安装包…" : "准备安装"
         case .sendingPayload:
             let percent = installer.payloadSize > 0 ? Int(Double(installer.sentBytes) / Double(installer.payloadSize) * 100) : 0
             text = "正在发送安装包… \(percent)%"
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        var sections = [NativeSection(rows: [NativeRow(title: working ? (installer.isCompatible ? "正在检查安装清单…" : "正在检查本地连接…") : (waitingForBackground ? "正在申请后台执行…" : text),
-            detail: installer.isCompatible ? "联网获取安装清单，安装包在本机传输，无需根证书或 Wi-Fi。" : "通过本机连接安装，无需 Wi-Fi。"), link("安装") { [weak self] in self?.openInstaller() }])]
-        if !installer.isCompatible, !certificateTrusted, let identity = installer.certificateIdentity {
-            sections.insert(NativeSection(title: "首次使用 IP 安装", rows: [
-                NativeRow(title: identity.rootName,
-                    detail: "安装描述文件后，在设置 → 通用 → 关于本机 → 证书信任设置中启用此证书的完整信任。旧版 Asspp 证书不适用于本机 IP。"),
-                link("安装本机证书") { [weak self] in self?.openCertificateProfile() },
-            ]), at: 0)
-        }
-        return sections
-    }
-    private func openCertificateProfile() {
-        run { try await Installer.openCertificateProfile() }
+        return [NativeSection(rows: [NativeRow(title: working ? "正在检查安装清单…" : (waitingForBackground ? "正在申请后台执行…" : text),
+            detail: "联网获取安装清单，安装包在本机传输，无需根证书或 Wi-Fi。"), link("安装") { [weak self] in self?.openInstaller() }])]
     }
     private func openInstaller() {
         guard !waitingForBackground else { return }
         run { [self] in
-            if let identity = installer.certificateIdentity {
-                certificateTrusted = await Task.detached { identity.isTrusted }.value
-                logger.info("Certificate install [\(installer.id)]: system trust=\(certificateTrusted) root=\(identity.rootName)")
-                guard certificateTrusted else {
-                    throw NSError(domain: "ssstore.install", code: 2, userInfo: [NSLocalizedDescriptionKey:
-                        "请先安装本机证书，并在系统的证书信任设置中启用 \(identity.rootName) 的完整信任，然后返回重试。"])
-                }
-            }
             var request = URLRequest(url: installer.pingEndpoint)
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.timeoutInterval = 10
@@ -491,7 +451,7 @@ final class NativeCertificateInstall: NativePage {
                 guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                     throw NSError(domain: "ssstore.install", code: 1, userInfo: [NSLocalizedDescriptionKey: "本机安装服务未正常响应。"])
                 }
-                logger.info("Local install [\(installer.id)]: \(installer.isCompatible ? "HTTP" : "HTTPS") loopback preflight succeeded")
+                logger.info("Local install [\(installer.id)]: HTTP loopback preflight succeeded")
             } catch {
                 logger.error("Local install [\(installer.id)]: loopback preflight failed: \(DiagnosticLog.errorDetails(error))")
                 guard view.window != nil, navigationController?.topViewController === self else { return }
@@ -499,19 +459,17 @@ final class NativeCertificateInstall: NativePage {
                 throw NSError(domain: "ssstore.install", code: error.code, userInfo: [NSLocalizedDescriptionKey: "本机安装服务连接失败（\(error.code)）：\(error.localizedDescription)"])
             }
             guard view.window != nil, navigationController?.topViewController === self else { return }
-            if installer.isCompatible {
-                do { try await installer.checkCompatibleManifest() }
-                catch {
-                    guard view.window != nil, navigationController?.topViewController === self else { return }
-                    throw error
-                }
+            do { try await installer.checkCompatibleManifest() }
+            catch {
+                guard view.window != nil, navigationController?.topViewController === self else { return }
+                throw error
             }
             guard view.window != nil, navigationController?.topViewController === self else { return }
             installer.prepareForAttempt()
             waitingForBackground = true
             do {
                 try backgroundExecution.start(id: installer.id, name: installer.archive.software.name,
-                    subtitle: installer.isCompatible ? "等待系统下载本机安装包…" : "等待系统获取安装清单…",
+                    subtitle: "等待系统下载本机安装包…",
                     onReady: { [weak self] in self?.openInstallationPage() },
                     onStop: { [weak self] in
                         guard let self else { return }
@@ -540,7 +498,7 @@ final class NativeCertificateInstall: NativePage {
             return
         }
         awaitingSystem = true
-        logger.info("Certificate install [\(installer.id)]: opening local installation page background=\(backgroundDiagnostic) url=\(installer.installPage.absoluteString)")
+        logger.info("Compatible install [\(installer.id)]: opening local installation page background=\(backgroundDiagnostic) url=\(installer.installPage.absoluteString)")
         UIApplication.shared.open(installer.installPage) { [weak self] opened in
             guard let self, !opened else { return }
             self.awaitingSystem = false
@@ -554,8 +512,6 @@ final class NativeCertificateInstall: NativePage {
         let name = installer.archive.software.name
         switch installer.status {
         case .ready: break
-        case .sendingManifest:
-            backgroundExecution.update(completed: 0, name: name, subtitle: "正在发送安装清单…")
         case .sendingPayload:
             let fraction = installer.payloadSize > 0 ? Double(installer.sentBytes) / Double(installer.payloadSize) : 0
             backgroundExecution.update(completed: Int64(fraction * 1000), name: name,
