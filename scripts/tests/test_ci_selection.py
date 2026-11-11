@@ -29,6 +29,7 @@ class SelectionTests(unittest.TestCase):
             "Packages/UpdateCore/Tests/UpdateCoreTests/CatalogTests.swift": {"core"},
             selection.STORE + "Asspp/Backend/Installer/Installer+Compute.swift": {"core"},
             "ssstore/CompatibleInstallBackgroundExecution.swift": {"core"},
+            "ssstore/StoreRuntime.swift": {"core"},
             "ssstore/UIKit/StoreScreens.swift": {"core"},
             selection.STORE + "Asspp/Backend/AppStore/StoreProtocol.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreHistorySupport.swift": {"downloads"},
