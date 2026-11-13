@@ -83,6 +83,10 @@ def main():
     run("xcodebuild", "-quiet", "-project", stage / "NativeSheetProbe.xcodeproj", "-scheme", "NativeSheetProbe",
         "-configuration", "Debug", "-sdk", "iphonesimulator", "-destination", "generic/platform=iOS Simulator",
         "-derivedDataPath", derived, "CODE_SIGNING_ALLOWED=NO", "build", timeout=300)
+    fixture = derived / "Build/Products/Debug-iphonesimulator/NativeSheetProbe.app"
+    phase("signing simulator fixture")
+    run("codesign", "--force", "--deep", "--sign", "-", "--timestamp=none", fixture, capture=True)
+    run("codesign", "--verify", "--deep", "--strict", fixture, capture=True)
     phase("locating simulator runtime")
     runtimes = json.loads(run("xcrun", "simctl", "list", "runtimes", "--json", capture=True).stdout)["runtimes"]
     available = [r for r in runtimes if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
@@ -117,8 +121,10 @@ def main():
         phase("booting " + runtime["name"])
         run("xcrun", "simctl", "boot", device)
         run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
+        phase("waiting for simulator app services")
+        run("xcrun", "simctl", "listapps", device, capture=True, timeout=60)
         phase("installing simulator fixture")
-        run("xcrun", "simctl", "install", device, derived / "Build/Products/Debug-iphonesimulator/NativeSheetProbe.app")
+        run("xcrun", "simctl", "install", device, fixture)
         container = Path(run("xcrun", "simctl", "get_app_container", device, bundle, "data", capture=True).stdout.strip())
         phase("launching simulator fixture")
         launched = run("xcrun", "simctl", "launch", device, bundle, capture=True).stdout.strip()

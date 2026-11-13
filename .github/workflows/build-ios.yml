@@ -19,10 +19,15 @@ permissions:
   contents: read
   actions: read
 jobs:
-  build:
-    runs-on: xcode-27
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+  checks:
+    runs-on: ubuntu-latest
+    outputs:
+      native_sheet: ${{ steps.checks.outputs.native_sheet }}
+      manifest_credentials: ${{ steps.checks.outputs.manifest_credentials }}
+      core: ${{ steps.checks.outputs.core }}
+      downloads: ${{ steps.checks.outputs.downloads }}
+      localization: ${{ steps.checks.outputs.localization }}
+      kbsync: ${{ steps.checks.outputs.kbsync }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,6 +41,15 @@ jobs:
       - name: Test CI check selection
         if: steps.checks.outputs.selection == 'true'
         run: python3 -m unittest discover -s scripts/tests -v
+  build:
+    needs: checks
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Verify Xcode 27 and iOS 27 SDK
         run: |
           xcodebuild -version
@@ -71,34 +85,21 @@ jobs:
           path: build/KBSyncCache
           key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
       - name: Test UpdateCore
-        if: steps.checks.outputs.core == 'true'
+        if: needs.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore
-      - name: Check native sheet navigation in the iOS simulator
-        if: steps.checks.outputs.native_sheet == 'true'
-        run: python3 tests/native-sheet/run.py
-      - name: Upload native sheet diagnostics
-        if: always() && steps.checks.outputs.native_sheet == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-sheet-diagnostics
-          path: |
-            build/native-sheet-results/probe.json
-            build/native-sheet-results/main-thread-sample.txt
-            build/native-sheet-results/screen.png
-          if-no-files-found: warn
       - name: Check manifest credential responsiveness
-        if: steps.checks.outputs.manifest_credentials == 'true'
+        if: needs.checks.outputs.manifest_credentials == 'true'
         run: |
           swiftc -parse-as-library ssstore/ManifestAPICredentials.swift scripts/tests/ManifestCredentialChecks.swift -o "$RUNNER_TEMP/manifest-credential-checks"
           "$RUNNER_TEMP/manifest-credential-checks"
       - name: Check download protocol
-        if: steps.checks.outputs.downloads == 'true'
+        if: needs.checks.outputs.downloads == 'true'
         run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh protocol
       - name: Check store localization
-        if: steps.checks.outputs.localization == 'true'
+        if: needs.checks.outputs.localization == 'true'
         run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh localization
       - name: Check local WebKit kbsync generation
-        if: steps.checks.outputs.kbsync == 'true'
+        if: needs.checks.outputs.kbsync == 'true'
         timeout-minutes: 8
         run: bash scripts/check-kbsync.sh
       - name: Build IPA
@@ -117,5 +118,30 @@ jobs:
           name: ssstore-unsigned
           path: dist/*.ipa
           if-no-files-found: error
+
+  native-sheet:
+    needs: checks
+    if: needs.checks.outputs.native_sheet == 'true'
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Xcode
+        run: xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Check native sheet navigation in the iOS simulator
+        run: python3 tests/native-sheet/run.py
+      - name: Upload native sheet diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sheet-diagnostics
+          path: |
+            build/native-sheet-results/probe.json
+            build/native-sheet-results/main-thread-sample.txt
+            build/native-sheet-results/screen.png
+          if-no-files-found: warn
 
 
