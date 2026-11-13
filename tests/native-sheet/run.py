@@ -1,6 +1,7 @@
 """Exercise the production adaptive navigation container in an iOS simulator."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -87,12 +88,27 @@ def main():
     phase("signing simulator fixture")
     run("codesign", "--force", "--deep", "--sign", "-", "--timestamp=none", fixture, capture=True)
     run("codesign", "--verify", "--deep", "--strict", fixture, capture=True)
+    # Hosted runners are disposable, isolated VMs. Reset their simulator service
+    # before creating our device; never do this on a shared/self-hosted machine.
+    if os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted":
+        phase("resetting hosted simulator service")
+        subprocess.run(["killall", "-9", "com.apple.CoreSimulator.CoreSimulatorService"],
+                       capture_output=True, timeout=15)
     phase("locating simulator runtime")
     runtimes = json.loads(run("xcrun", "simctl", "list", "runtimes", "--json", capture=True).stdout)["runtimes"]
     available = [r for r in runtimes if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
     if not available:
         raise RuntimeError("No iOS simulator runtime is installed; no UI result can be claimed")
-    runtime = max(available, key=lambda r: tuple(map(int, r["version"].split("."))))
+    sdk = run("xcrun", "--sdk", "iphonesimulator", "--show-sdk-version", capture=True).stdout.strip()
+    sdk_version = tuple(map(int, sdk.split(".")))
+    compatible = [r for r in available if int(r["version"].split(".")[0]) == sdk_version[0]
+                  and tuple(map(int, r["version"].split(".")[:2])) <= sdk_version[:2]]
+    if not compatible:
+        raise RuntimeError("No runtime matching the selected iOS SDK " + sdk + "; available: " +
+                           ", ".join(r["name"] for r in available))
+    runtime = max(compatible, key=lambda r: tuple(map(int, r["version"].split("."))))
+    print("::notice title=Simulator runtime::SDK=" + sdk + "; selected=" + runtime["name"] +
+          "; available=" + ", ".join(r["name"] for r in available), flush=True)
     devices = json.loads(run("xcrun", "simctl", "list", "devicetypes", "--json", capture=True).stdout)["devicetypes"]
     # Use runtime compatibility metadata, never a hard-coded phone model. A
     # configured device supplies a compatible type without touching that device.
@@ -121,7 +137,7 @@ def main():
         phase("booting " + runtime["name"])
         run("xcrun", "simctl", "boot", device)
         run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
-        phase("waiting for simulator app services")
+        phase("waiting for simulator app services on " + runtime["name"] + " / " + device_type["name"])
         run("xcrun", "simctl", "listapps", device, capture=True, timeout=60)
         phase("installing simulator fixture")
         run("xcrun", "simctl", "install", device, fixture)
