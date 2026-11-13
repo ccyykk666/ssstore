@@ -32,6 +32,16 @@ def run(*args, timeout=180, capture=False):
     return result
 
 
+def diagnostic(*args, timeout=15):
+    """Optional capture must never replace the actual UI assertion result."""
+    try:
+        result = subprocess.run(list(map(str, args)), capture_output=True, timeout=timeout)
+        if result.returncode:
+            print("::warning title=Optional UI diagnostic::" + str(args[0]) + " capture was unavailable", flush=True)
+    except (OSError, subprocess.TimeoutExpired):
+        print("::warning title=Optional UI diagnostic::" + str(args[0]) + " capture timed out or was unavailable", flush=True)
+
+
 def source(revision):
     def read(path):
         if revision:
@@ -139,6 +149,9 @@ def main():
         run("xcrun", "simctl", "bootstatus", device, "-b", timeout=240)
         phase("waiting for simulator app services on " + runtime["name"] + " / " + device_type["name"])
         run("xcrun", "simctl", "listapps", device, capture=True, timeout=60)
+        phase("opening simulator renderer")
+        developer = Path(os.environ.get("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer"))
+        run("open", "-a", developer / "Applications/Simulator.app", "--args", "-CurrentDeviceUDID", device)
         phase("installing simulator fixture")
         run("xcrun", "simctl", "install", device, fixture)
         container = Path(run("xcrun", "simctl", "get_app_container", device, bundle, "data", capture=True).stdout.strip())
@@ -157,12 +170,14 @@ def main():
                 pass
             time.sleep(0.2)
         if not report or report["status"] != "passed":
-            subprocess.run(["sample", pid, "2", "1", "-file", str(output / "main-thread-sample.txt")], capture_output=True, timeout=15)
+            diagnostic("sample", pid, "2", "1", "-file", output / "main-thread-sample.txt")
         (output / "probe.json").write_text(json.dumps(report or {"status": "no-report"}, indent=2, ensure_ascii=False))
-        subprocess.run(["xcrun", "simctl", "io", device, "screenshot", str(output / "screen.png")], capture_output=True, timeout=15)
+        state = {key: report.get(key) for key in ["status", "phase", "measurements", "system"]} if report else {"status": "no-report"}
+        notice = json.dumps(state, ensure_ascii=False).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print("::notice title=Native sheet result::" + notice, flush=True)
+        diagnostic("xcrun", "simctl", "io", device, "screenshot", output / "screen.png")
         print(json.dumps(report, ensure_ascii=False), flush=True)
         if not report or report["status"] != "passed":
-            state = {key: report.get(key) for key in ["status", "phase", "measurements", "system"]} if report else {"status": "no-report"}
             raise RuntimeError("Sheet UI probe failed or stopped responding: " + json.dumps(state))
         print("Native sheet UI probe passed on " + runtime["name"], flush=True)
     finally:
