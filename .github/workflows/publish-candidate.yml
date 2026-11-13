@@ -1,0 +1,27 @@
+name: Publish explicitly unverified test IPA
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful App build whose UI job failed only during simulator setup
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify candidate eligibility rules
+        run: python3 -m unittest discover -s tests/candidate-publication -v
+      - name: Publish prerelease without changing stable downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.run_id }}
+        run: python3 scripts/publish-candidate.py --repository "$GITHUB_REPOSITORY" --run "$CANDIDATE_RUN"
