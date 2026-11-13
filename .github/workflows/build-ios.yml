@@ -122,9 +122,8 @@ jobs:
   native-sheet:
     needs: checks
     if: needs.checks.outputs.native_sheet == 'true'
-    runs-on: xcode-27
-    env:
-      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+    # UI tests need the complete Simulator application, not the SDK-only builder.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify Xcode

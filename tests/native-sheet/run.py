@@ -150,8 +150,12 @@ def main():
         phase("waiting for simulator app services on " + runtime["name"] + " / " + device_type["name"])
         run("xcrun", "simctl", "listapps", device, capture=True, timeout=60)
         phase("opening simulator renderer")
-        developer = Path(os.environ.get("DEVELOPER_DIR", "/Applications/Xcode.app/Contents/Developer"))
-        run("open", "-a", developer / "Applications/Simulator.app", "--args", "-CurrentDeviceUDID", device)
+        developer = Path(run("xcode-select", "-p", capture=True).stdout.strip())
+        simulator = developer / "Applications/Simulator.app"
+        if simulator.exists():
+            run("open", "-a", simulator, "--args", "-CurrentDeviceUDID", device)
+        else:
+            diagnostic("open", "-a", "Simulator", "--args", "-CurrentDeviceUDID", device)
         phase("installing simulator fixture")
         run("xcrun", "simctl", "install", device, fixture)
         container = Path(run("xcrun", "simctl", "get_app_container", device, bundle, "data", capture=True).stdout.strip())
