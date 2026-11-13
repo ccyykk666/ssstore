@@ -16,7 +16,7 @@ cp Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved \
   ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 xcodebuild -project ssstore.xcodeproj -scheme ssstore \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-  -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build
+  -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build 2>&1 | python3 scripts/report-build-errors.py
 
 app="$PWD/build/DerivedData/Build/Products/Release-iphoneos/ssstore.app"
 if [[ ! -d "$app" ]]; then

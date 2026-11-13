@@ -4,7 +4,7 @@ import UIKit
 /// Keep the local server runnable while Safari and the system installer fetch it.
 /// Opening Safari must wait for the continued task's launch callback, not submit().
 @MainActor
-final class CompatibleInstallBackgroundExecution {
+final class InstallBackgroundExecution {
     private var task: BGTask?
     private var identifier: String?
     private var shortTask: UIBackgroundTaskIdentifier = .invalid
@@ -16,6 +16,48 @@ final class CompatibleInstallBackgroundExecution {
         if task != nil { return "continued-task-granted" }
         if shortTask != .invalid { return "short-task-only" }
         return identifier == nil ? "none" : "waiting-for-grant"
+    }
+
+    /// Pairing can still run in the foreground when continued execution is
+    /// unavailable. The caller exposes the limited short-task budget to the user.
+    func beginPairing(id: UUID, name: String, onStop: @escaping () -> Void) async throws -> Bool {
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                var resolved = false
+                do {
+                    try start(id: id, name: name, subtitle: "正在连接设备…", onReady: {
+                        guard !resolved else { return }; resolved = true
+                        continuation.resume()
+                    }, onStop: {
+                        onStop()
+                        guard !resolved else { return }; resolved = true
+                        continuation.resume(throwing: CancellationError())
+                    })
+                } catch {
+                    guard !resolved else { return }; resolved = true
+                    continuation.resume(throwing: error)
+                }
+            }
+            return task != nil
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            guard UIApplication.shared.applicationState == .active else { throw error }
+            logger.warning("Pairing install [\(id)]: continued execution unavailable; using short foreground grace")
+            try startShortTask(id: id, onStop: onStop)
+            return false
+        }
+    }
+
+    private func startShortTask(id: UUID, onStop: @escaping () -> Void) throws {
+        shortTask = UIApplication.shared.beginBackgroundTask(withName: "LocalInstall") { [weak self] in
+            guard let self else { return }
+            logger.warning("Local install [\(id)]: short background task expired")
+            self.finish(success: false)
+            onStop()
+        }
+        guard shortTask != .invalid else {
+            throw InstallBackgroundError.message("系统未允许本机安装服务在后台运行，请返回软件重试。")
+        }
     }
 
     func start(id: UUID, name: String, subtitle: String = "等待系统下载本机安装包…", onReady: @escaping () -> Void,
@@ -45,12 +87,12 @@ final class CompatibleInstallBackgroundExecution {
                     continued.expirationHandler = { [weak self] in
                         Task { @MainActor in
                             guard let self, self.identifier == requestID else { return }
-                            logger.warning("Compatible install [\(id)]: continued task expired or stopped by user")
+                            logger.warning("Local install [\(id)]: continued task expired or stopped by user")
                             self.finish(success: false)
                             onStop()
                         }
                     }
-                    logger.info("Compatible install [\(id)]: continued task granted; opening browser is now allowed")
+                    logger.info("Local install [\(id)]: continued task granted; operation may begin")
                     onReady()
                 }
             }
@@ -63,23 +105,15 @@ final class CompatibleInstallBackgroundExecution {
             request.strategy = .fail
             do {
                 try BGTaskScheduler.shared.submit(request)
-                logger.info("Compatible install [\(id)]: continued task submitted; waiting for grant")
+                logger.info("Local install [\(id)]: continued task submitted; waiting for grant")
             } catch {
-                logger.error("Compatible install [\(id)]: continued task rejected: \(error.localizedDescription)")
+                logger.error("Local install [\(id)]: continued task rejected: \(error.localizedDescription)")
                 finish(success: false)
                 throw InstallBackgroundError.message("系统未允许本机安装服务在后台运行：\(error.localizedDescription)。请检查“后台 App 刷新”后重试。")
             }
         } else {
-            shortTask = UIApplication.shared.beginBackgroundTask(withName: "CompatibleInstall") { [weak self] in
-                guard let self else { return }
-                logger.warning("Compatible install [\(id)]: short background task expired")
-                self.finish(success: false)
-                onStop()
-            }
-            guard shortTask != .invalid else {
-                throw InstallBackgroundError.message("系统未允许本机安装服务在后台运行，请返回软件重试。")
-            }
-            logger.info("Compatible install [\(id)]: short background task granted (iOS before 26)")
+            try startShortTask(id: id, onStop: onStop)
+            logger.info("Local install [\(id)]: short background task granted (iOS before 26)")
             onReady()
         }
     }

@@ -24,7 +24,8 @@ CHECK_INPUTS = {
     "core": (
         "Packages/UpdateCore/",
         STORE + "Asspp/Backend/Installer/",
-        "ssstore/CompatibleInstallBackgroundExecution.swift",
+        "ssstore/InstallBackgroundExecution.swift",
+        "ssstore/AppCacheCleaner.swift",
         "ssstore/StoreRuntime.swift",
         "ssstore/UIKit/StoreScreens.swift",
     ),

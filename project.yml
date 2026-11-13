@@ -41,7 +41,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "70"
+    CURRENT_PROJECT_VERSION: "71"
   configs:
     Release:
       # Keep crash symbols in a separate dSYM instead of shipping the executable's

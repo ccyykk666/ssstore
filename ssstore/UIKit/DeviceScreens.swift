@@ -23,15 +23,32 @@ final class NativeChoices: NativeSearchPage {
 
 @MainActor
 final class NativeSettings: NativePage, UIDocumentPickerDelegate {
+    private var clearingCache = false
+    private var cacheStatus = ""
     init(_ model: AppModel) { super.init(model, title: "设置") }
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
         var sections = [NativeSection(title: "连接配置", rows: [NativeRow(title: "IP 地址", detail: model.host, action: { [weak self] in guard let self else { return }; edit("IP 地址", value: model.host) { [weak self] in self?.model.host = $0; self?.reload() } }), NativeRow(title: "端口", detail: model.port, action: { [weak self] in guard let self else { return }; edit("端口", value: model.port) { [weak self] in self?.model.port = $0; self?.reload() } }), NativeRow(title: "配对", detail: model.hasPairing ? "已配对" : "未配对", action: { [weak self] in guard let self else { return }; push(NativePairing(model)) })]), NativeSection(rows: [NativeRow(title: "商店地区", detail: StoreRegionNames.name(model.country), action: { [weak self] in guard let self else { return }; let items = [(StoreQueryPolicy.chinaThenUS, "中国大陆优先")] + ApplePackage.Configuration.storeFrontValues.keys.sorted().map { ($0.lowercased(), "\(StoreRegionNames.name($0))  \($0)") }; push(NativeChoices(model, title: "商店地区", items: items) { [weak self] in self?.model.country = $0; self?.reload() }) })]), NativeSection(title: "商店连接", rows: [NativeRow(title: "设备 GUID", detail: AppStore.this.deviceIdentifier, action: { [weak self] in guard let self else { return }; edit("设备 GUID", value: AppStore.this.deviceIdentifier) { [weak self] value in guard let normalized = AppStore.normalizedDeviceIdentifier(value) else { self?.alert("请输入有效的 12 位十六进制 GUID。"); return }; AppStore.this.deviceIdentifier = normalized; self?.reload() } }), link("打开系统设置") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }]), NativeSection(title: "下载管理", rows: [NativeRow(title: "删除全部下载", color: .systemRed, action: { [weak self] in self?.confirm("删除全部下载？") { Downloads.this.removeAll() } }), NativeRow(title: "重置商店数据", color: .systemRed, action: { [weak self] in self?.confirm("重置商店数据后需要重启 App") { [weak self] in do { Downloads.this.removeAll(); try FileManager.default.removeItem(at: documentsDirectory); self?.alert("已重置，请关闭并重新打开 App。") } catch { self?.alert(error.localizedDescription) } } }), link("日志") { [weak self] in guard let self else { return }; push(NativeLogs(model)) }])]
         sections.insert(NativeSection(title: "兼容安装", rows: [NativeRow(title: "清单服务", detail: InstallerManifestService.displayAddress,
             action: { [weak self] in guard let self else { return }; push(NativeManifestService(model)) })]), at: 3)
+        sections[4].rows.insert(NativeRow(title: clearingCache ? "正在清理缓存…" : "清理缓存", detail: cacheStatus,
+            color: working || model.busy ? .secondaryLabel : .systemBlue,
+            action: working || model.busy ? nil : { [weak self] in self?.clearCache() }), at: 0)
         if !model.ignoredApps.names.isEmpty { sections.append(NativeSection(rows: [link("已忽略应用") { [weak self] in guard let self else { return }; push(NativeIgnored(model)) }])) }
         sections.append(NativeSection(title: "关于", rows: [link("开源许可") { [weak self] in guard let self else { return }; let text = ["AssppLicense", "AssppWebLicense"].compactMap { Bundle.main.url(forResource: $0, withExtension: "txt") }.compactMap { try? String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n\n"); push(NativeText(model, title: "开源许可", text: text)) }, NativeRow(title: "ssstore", detail: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")]))
         return sections
+    }
+    private func clearCache() {
+        guard !working, !model.busy else { return }
+        let protected = model.protectedCacheFiles
+        let ids = Set(Downloads.this.manifests.map(\.id))
+        cacheStatus = ""
+        clearingCache = true
+        run { [self] in
+            defer { clearingCache = false }
+            try await AppCacheCleaner.clear(keeping: protected, downloadIDs: ids)
+            cacheStatus = "缓存已清理"
+        }
     }
 }
 @MainActor

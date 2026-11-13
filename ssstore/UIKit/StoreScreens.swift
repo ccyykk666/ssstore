@@ -182,7 +182,7 @@ final class NativeAccountDetail: NativePage {
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
         guard let user = AppStore.this.accounts.first(where: { $0.id == id }) else { return [] }
-        return [NativeSection(rows: [NativeRow(title: user.account.email), NativeRow(title: "地区", detail: user.account.store), NativeRow(title: "Directory Services ID", detail: user.account.directoryServicesIdentifier), NativeRow(title: "密码令牌", detail: "••••••••"), link("轮换密码令牌") { [weak self] in guard let self else { return }; run { _ = try await AppStore.this.rotate(id: self.id); self.alert("已更新") } }, NativeRow(title: "删除账户", color: .systemRed, action: { [weak self] in self?.confirm("删除账户？") { [weak self] in guard let self else { return }; AppStore.this.delete(id: id); navigationController?.popViewController(animated: true) } })])]
+        return [NativeSection(rows: [NativeRow(title: user.account.email), NativeRow(title: "地区", detail: user.account.store), NativeRow(title: "Directory Services ID", detail: user.account.directoryServicesIdentifier), NativeRow(title: "密码令牌", detail: "••••••••"), NativeRow(title: working ? "正在轮换密码令牌…" : "轮换密码令牌", color: working ? .secondaryLabel : .systemBlue, action: working ? nil : { [weak self] in guard let self else { return }; run { _ = try await AppStore.this.rotate(id: self.id); self.alert("已更新") } }), NativeRow(title: "删除账户", color: .systemRed, action: working ? nil : { [weak self] in self?.confirm("删除账户？") { [weak self] in guard let self else { return }; AppStore.this.delete(id: id); navigationController?.popViewController(animated: true) } })])]
     }
 }
 
@@ -321,6 +321,7 @@ final class NativeInstall: UIViewController, NativeSheetContent {
     private let status = UILabel()
     private let progress = UIProgressView(progressViewStyle: .default)
     private let percent = UILabel()
+    private let backgroundNotice = UILabel()
     private let retry = UIButton(type: .system)
     private let stack = UIStackView()
     private let scroll = UIScrollView()
@@ -345,14 +346,16 @@ final class NativeInstall: UIViewController, NativeSheetContent {
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         status.font = .preferredFont(forTextStyle: .body); status.numberOfLines = 0
         percent.font = .preferredFont(forTextStyle: .caption1); percent.textColor = .secondaryLabel
-        for label in [status, percent] { label.adjustsFontForContentSizeCategory = true }
+        backgroundNotice.font = .preferredFont(forTextStyle: .footnote)
+        backgroundNotice.textColor = .secondaryLabel; backgroundNotice.numberOfLines = 0; backgroundNotice.isHidden = true
+        for label in [status, percent, backgroundNotice] { label.adjustsFontForContentSizeCategory = true }
         progress.accessibilityLabel = "安装进度"
         retry.setTitle("重试", for: .normal)
         retry.addAction(UIAction { [weak self] _ in self?.start() }, for: .touchUpInside)
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
         stack.axis = .vertical; stack.spacing = 12
-        for item in [status, progress, percent, retry] { stack.addArrangedSubview(item) }
+        for item in [status, progress, percent, backgroundNotice, retry] { stack.addArrangedSubview(item) }
         stack.translatesAutoresizingMaskIntoConstraints = false; scroll.addSubview(stack)
         NSLayoutConstraint.activate([
             scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 20), scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
@@ -371,17 +374,22 @@ final class NativeInstall: UIViewController, NativeSheetContent {
         navigationController?.isModalInPresentation = true
         retry.isHidden = true; navigationItem.rightBarButtonItem?.isEnabled = false
         status.text = "正在连接设备…"; progress.setProgress(0, animated: false); percent.isHidden = false; percent.text = "0%"
+        backgroundNotice.isHidden = true
         Task { [self] in
             do {
-                try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID) { [weak self] stage, value in
+                try await model.installPackage(at: package.targetLocation, bundleID: package.package.software.bundleID,
+                    name: package.package.software.name) { [weak self] stage, value in
                     guard let self, self.working else { return }
                     self.status.text = stage
                     self.progress.setProgress(Float(min(1, max(0, value))), animated: true)
                     self.percent.text = "\(Int(min(1, max(0, value)) * 100))%"
+                    self.backgroundNotice.text = self.model.installationBackgroundNotice
+                    self.backgroundNotice.isHidden = self.model.installationBackgroundNotice == nil
                 }
                 status.text = "安装完成"; progress.setProgress(1, animated: true); percent.isHidden = true
             } catch { status.text = error.localizedDescription; retry.isHidden = false }
             working = false; navigationController?.isModalInPresentation = false; navigationItem.rightBarButtonItem?.isEnabled = true
+            backgroundNotice.isHidden = true
         }
     }
 }
@@ -389,7 +397,7 @@ final class NativeInstall: UIViewController, NativeSheetContent {
 @MainActor
 final class NativeCompatibleInstall: NativePage {
     let installer: Installer
-    private let backgroundExecution = CompatibleInstallBackgroundExecution()
+    private let backgroundExecution = InstallBackgroundExecution()
     private var waitingForBackground = false
     private var awaitingSystem = false
     private var foregroundObserver: NSObjectProtocol?
@@ -437,8 +445,7 @@ final class NativeCompatibleInstall: NativePage {
         case .completed(let result): text = (try? result.get()) != nil ? "发送完成" : "发送失败"
         case .broken(let error): text = error.localizedDescription
         }
-        return [NativeSection(rows: [NativeRow(title: working ? "正在检查安装清单…" : (waitingForBackground ? "正在申请后台执行…" : text),
-            detail: "联网获取安装清单，安装包在本机传输，无需根证书或 Wi-Fi。"), link("安装") { [weak self] in self?.openInstaller() }])]
+        return [NativeSection(rows: [NativeRow(title: working ? "正在检查安装清单…" : (waitingForBackground ? "正在申请后台执行…" : text)), link("安装") { [weak self] in self?.openInstaller() }])]
     }
     private func openInstaller() {
         guard !waitingForBackground else { return }

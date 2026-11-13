@@ -8,6 +8,7 @@ final class AppModel: ObservableObject {
     @Published var records: [AppRecord] = []
     @Published var busy = false
     @Published var activity = ""
+    @Published private(set) var installationBackgroundNotice: String?
     @Published var isChecking = false
     @Published private(set) var isRefreshingApps = false
     @Published private(set) var matchProgress: ApplicationMatchProgress?
@@ -202,7 +203,16 @@ final class AppModel: ObservableObject {
         return iconsDirectory.appendingPathComponent(key).appendingPathExtension("png")
     }
 
-    func installPackage(at url: URL, bundleID: String,
+    var protectedCacheFiles: [URL] {
+        let icons = records.compactMap { localIconURL(for: $0.installed) }
+        let ignoredIcons = ignoredApps.bundleIDs.compactMap { ignoredApps.application(for: $0) }
+            .compactMap { localIconURL(for: $0) }
+        let reports = inspectionReceipts.values.compactMap { $0.reportPath }
+            .map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
+        return icons + ignoredIcons + reports
+    }
+
+    func installPackage(at url: URL, bundleID: String, name: String,
                         progress: @escaping @MainActor (String, Double) -> Void) async throws {
         func failure(_ text: String) -> NSError {
             NSError(domain: "ssstore.Installation", code: 1, userInfo: [NSLocalizedDescriptionKey: text])
@@ -212,28 +222,46 @@ final class AppModel: ObservableObject {
         guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
         busy = true
         activity = "正在连接设备…"
+        installationBackgroundNotice = nil
+        let execution = InstallBackgroundExecution()
+        let cancellation = InstallationCancellation()
+        var succeeded = false
         let idleTimerWasDisabled = UIApplication.shared.isIdleTimerDisabled
         UIApplication.shared.isIdleTimerDisabled = true
         defer {
+            execution.finish(success: succeeded)
+            installationBackgroundNotice = nil
             UIApplication.shared.isIdleTimerDisabled = idleTimerWasDisabled
             busy = false; activity = ""
         }
         let pairingPath = pairingURL.path
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try DeviceInstaller.install(pairingPath: pairingPath, host: address, port: number,
-                        packagePath: url.path, bundleID: bundleID) { stage, fraction in
-                            DispatchQueue.main.async {
-                                self.activity = stage
-                                progress(stage, fraction)
-                            }
-                        }
-                    continuation.resume(returning: ())
-                } catch { continuation.resume(throwing: error) }
-            }
+        let continued = try await execution.beginPairing(id: UUID(), name: name) { [weak self] in
+            cancellation.cancel()
+            self?.installationBackgroundNotice = "后台任务已停止，正在结束当前操作…"
         }
+        if !continued { installationBackgroundNotice = "后台执行时间有限，请保持 App 在前台。" }
+        try Task.checkCancellation()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do {
+                        try DeviceInstaller.install(pairingPath: pairingPath, host: address, port: number,
+                            packagePath: url.path, bundleID: bundleID, isCancelled: { cancellation.isCancelled }) { stage, fraction in
+                                DispatchQueue.main.async {
+                                    guard !cancellation.isCancelled else { return }
+                                    self.activity = stage
+                                    execution.update(completed: Int64(min(1, max(0, fraction)) * 1000), name: name,
+                                        subtitle: stage + " · \(Int(min(1, max(0, fraction)) * 100))%")
+                                    progress(stage, fraction)
+                                }
+                            }
+                        continuation.resume(returning: ())
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+        } onCancel: { cancellation.cancel() }
+        succeeded = true
     }
 
     func importPairing(from url: URL) {
@@ -466,6 +494,13 @@ private struct SavedInventory: Codable {
     var records: [AppRecord]
     var scannedAt: Date?
     var origin: String
+}
+
+private final class InstallationCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
 }
 
 

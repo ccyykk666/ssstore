@@ -265,6 +265,8 @@ class NativePage: UITableViewController, NativeSheetContent {
     var sections: [NativeSection] = []
     private var changes: AnyCancellable?
     private var scheduled = false
+    private var swipingRow = false
+    private var reloadAfterSwipe = false
     var working = false
     init(_ model: AppModel, title: String) {
         self.model = model
@@ -285,6 +287,7 @@ class NativePage: UITableViewController, NativeSheetContent {
     }
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        swipingRow = false; reloadAfterSwipe = false
         changes = model.objectWillChange.sink { [weak self] _ in self?.scheduleReload() }
         reload()
     }
@@ -308,6 +311,9 @@ class NativePage: UITableViewController, NativeSheetContent {
     func rows() -> [NativeSection] { [] }
     func reload() {
         guard isViewLoaded else { return }
+        // Reconfiguring a cell during UIKit's swipe interaction changes its
+        // layout and swipe offset. Apply the latest snapshot once editing ends.
+        guard !swipingRow else { reloadAfterSwipe = true; return }
         let previous = sections
         withObservationTracking { sections = rows() } onChange: { [weak self] in
             Task { @MainActor in self?.scheduleReload() }
@@ -414,6 +420,16 @@ class NativePage: UITableViewController, NativeSheetContent {
         let swipe = UIContextualAction(style: .destructive, title: row.deleteTitle) { _, _, done in action(); done(true) }
         let configuration = UISwipeActionsConfiguration(actions: [swipe]); configuration.performsFirstActionWithFullSwipe = false
         return configuration
+    }
+    override func tableView(_ tableView: UITableView, willBeginEditingRowAt indexPath: IndexPath) {
+        swipingRow = true
+    }
+    override func tableView(_ tableView: UITableView, didEndEditingRowAt indexPath: IndexPath?) {
+        swipingRow = false
+        if reloadAfterSwipe {
+            reloadAfterSwipe = false
+            scheduleReload()
+        }
     }
     func push(_ page: UIViewController) { navigationController?.pushViewController(page, animated: true) }
     func sheet(_ page: UIViewController) {

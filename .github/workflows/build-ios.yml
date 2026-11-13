@@ -50,6 +50,8 @@ jobs:
             27.*) ;;
             *) echo "Expected an iOS 27 SDK" >&2; exit 1 ;;
           esac
+      - name: Check App Swift syntax
+        run: python3 scripts/check-swift-syntax.py
       - name: Install XcodeGen
         run: brew install xcodegen
       - uses: actions/cache@v4

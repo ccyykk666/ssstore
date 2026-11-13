@@ -125,6 +125,7 @@ final class NativeStoreSearch: NativeSearchPage {
             buttons.insert(regionButton(menu: UIMenu(children: regions.map { key in UIAction(title: "\(StoreRegionNames.name(key))  \(key)", state: key == region ? .on : .off) { [weak self] _ in self?.region = key; UserDefaults.standard.set(key, forKey: "searchRegion"); self?.reset(); self?.reload() } })), at: 0)
         }
         navigationItem.rightBarButtonItems = buttons
+        buttons.forEach { $0.tintColor = .label }
         }
         var sections: [NativeSection] = []
         if let error { sections.append(NativeSection(rows: [NativeRow(title: error, color: .systemRed)])) }
@@ -135,6 +136,12 @@ final class NativeStoreSearch: NativeSearchPage {
         let button = UIButton(type: .system)
         var configuration = UIButton.Configuration.plain()
         configuration.title = region; configuration.image = UIImage(systemName: "globe"); configuration.imagePadding = 6
+        configuration.baseForegroundColor = .label
+        configuration.imageColorTransformer = UIConfigurationColorTransformer { _ in .label }
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var attributes = incoming; attributes.foregroundColor = .label; return attributes
+        }
+        button.tintColor = .label
         button.configuration = configuration; button.menu = menu; button.showsMenuAsPrimaryAction = true
         return UIBarButtonItem(customView: button)
     }

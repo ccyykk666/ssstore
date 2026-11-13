@@ -3,8 +3,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface DeviceInstaller : NSObject
 + (BOOL)installPairingPath:(NSString *)pairingPath host:(NSString *)host port:(uint16_t)port
               packagePath:(NSString *)packagePath bundleID:(NSString *)bundleID
+              isCancelled:(BOOL (^)(void))isCancelled
                  progress:(void (^)(NSString *stage, double fraction))progress
                     error:(NSError * _Nullable * _Nullable)error
-    NS_SWIFT_NAME(install(pairingPath:host:port:packagePath:bundleID:progress:));
+    NS_SWIFT_NAME(install(pairingPath:host:port:packagePath:bundleID:isCancelled:progress:));
 @end
 NS_ASSUME_NONNULL_END

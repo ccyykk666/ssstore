@@ -20,6 +20,13 @@ static BOOL InstallCheck(IdeviceFfiError *failure, NSString *stage, NSError **er
 
 typedef void (^InstallationProgressBlock)(NSString *, double);
 
+static BOOL InstallCheckCancellation(BOOL (^isCancelled)(void), NSError **error) {
+    if (!isCancelled()) return YES;
+    if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError
+        userInfo:@{NSLocalizedDescriptionKey: @"安装操作已取消或后台任务已停止，请重试。"}];
+    return NO;
+}
+
 static void InstallProgress(uint64_t percent, void *context) {
     InstallationProgressBlock progress = (__bridge InstallationProgressBlock)context;
     progress(@"正在安装…", 0.85 + 0.15 * MIN(percent, 100) / 100.0);
@@ -28,7 +35,9 @@ static void InstallProgress(uint64_t percent, void *context) {
 @implementation DeviceInstaller
 + (BOOL)installPairingPath:(NSString *)pairingPath host:(NSString *)host port:(uint16_t)port
               packagePath:(NSString *)packagePath bundleID:(NSString *)bundleID
+              isCancelled:(BOOL (^)(void))isCancelled
                  progress:(void (^)(NSString *, double))progress error:(NSError **)error {
+    if (!InstallCheckCancellation(isCancelled, error)) return NO;
     struct sockaddr_in address = {0};
     address.sin_len = sizeof(address); address.sin_family = AF_INET; address.sin_port = htons(port);
     if (inet_pton(AF_INET, host.UTF8String, &address.sin_addr) != 1)
@@ -59,6 +68,7 @@ static void InstallProgress(uint64_t percent, void *context) {
         if (!InstallCheck(rp_pairing_file_read(pairingPath.UTF8String, &pairing), @"读取配对文件", error)) return NO;
         if (!InstallCheck(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address),
             "ssstore-install", pairing, NULL, NULL, &adapter, &handshake), @"连接配对通道", error)) return NO;
+        if (!InstallCheckCancellation(isCancelled, error)) return NO;
         if (!InstallCheck(afc_client_connect_rsd(adapter, handshake, &afc), @"连接安装包传输服务", error)) return NO;
         // PublicStaging is shared. Only the UUID subdirectory created below is ever removed.
         struct AfcFileInfo info = {0};
@@ -74,6 +84,7 @@ static void InstallProgress(uint64_t percent, void *context) {
         double lastReported = -1;
         while (YES) {
             @autoreleasepool {
+                if (!InstallCheckCancellation(isCancelled, error)) return NO;
                 NSError *readError = nil;
                 NSData *chunk = [source readDataUpToLength:256 * 1024 error:&readError];
                 if (!chunk) { if (error) *error = readError; return NO; }
@@ -91,10 +102,12 @@ static void InstallProgress(uint64_t percent, void *context) {
         // Closing consumes the FFI handle, including when the close itself reports an error.
         IdeviceFfiError *closeError = afc_file_close(remote); remote = NULL;
         if (!InstallCheck(closeError, @"完成安装包传输", error)) return NO;
+        if (!InstallCheckCancellation(isCancelled, error)) return NO;
         if (!InstallCheck(installation_proxy_connect_rsd(adapter, handshake, &installation), @"连接系统安装服务", error)) return NO;
         options = plist_new_dict();
         plist_dict_set_item(options, "CFBundleIdentifier", plist_new_string(bundleID.UTF8String));
         progress(@"正在安装…", 0.85);
+        if (!InstallCheckCancellation(isCancelled, error)) return NO;
         // System installation still validates the app's original signature and FairPlay authorization.
         if (!InstallCheck(installation_proxy_install_with_callback(installation, remotePath.UTF8String,
             options, InstallProgress, (__bridge void *)progress), @"系统安装", error)) return NO;
