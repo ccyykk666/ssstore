@@ -5,7 +5,7 @@ import UpdateCore
 
 @MainActor
 final class PerformanceMonitor {
-    enum State { case idle, connecting, running, stopping, stopped, failed }
+    enum State: Equatable { case idle, connecting, running, stopping, stopped, failed }
     private(set) var state: State = .idle
     private(set) var status = "尚未开始"
     private(set) var latest: PerformanceSnapshot?
@@ -41,7 +41,7 @@ final class PerformanceMonitor {
         let token = UUID(); session = token
         let pairing = model.pairingURL.path
         latest = nil; history = []; raw = nil
-        state = .connecting; status = "正在连接开发者性能服务…"; onChange?()
+        state = .connecting; status = "正在连接开发者性能服务…"
         recording = Task { [weak self] in
             do {
                 let localPort = try await relay.open()

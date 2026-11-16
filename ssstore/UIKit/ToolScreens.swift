@@ -21,6 +21,8 @@ final class NativePerformance: NativePage {
     private let trend = PerformanceTrendView()
     private let trendCell = UITableViewCell(style: .default, reuseIdentifier: nil)
     private var sortByMemory = false
+    private var lastButtonState: PerformanceMonitor.State?
+    private var lastButtonActive: Bool?
     private let unavailable = "设备未提供"
     init(_ model: AppModel) { super.init(model, title: "整机性能监控") }
     required init?(coder: NSCoder) { fatalError() }
@@ -47,6 +49,8 @@ final class NativePerformance: NativePage {
     }
     private func updateButton() {
         let active = monitor.isActive
+        guard lastButtonState != monitor.state || lastButtonActive != active else { return }
+        lastButtonState = monitor.state; lastButtonActive = active
         let button = UIBarButtonItem(image: UIImage(systemName: active ? "stop.fill" : "play.fill"),
             primaryAction: UIAction(title: active ? "停止监控" : "开始监控") { [weak self] _ in
                 guard let self else { return }
@@ -85,10 +89,7 @@ final class NativePerformance: NativePage {
             return $0.pid < $1.pid
         }
         var processRows = [link("排序：\(sortByMemory ? "内存" : "CPU")") { [weak self] in
-            guard let self else { return }
-            push(NativeChoices(model, title: "进程排序", items: [("cpu", "CPU 使用率"), ("memory", "内存占用")]) { [weak self] in
-                self?.sortByMemory = $0 == "memory"; self?.reload()
-            })
+            self?.chooseSort()
         }]
         if processes.isEmpty { processRows.append(NativeRow(title: "进程采样", detail: sample == nil ? "等待采样" : "设备未返回进程采样")) }
         processRows += processes.prefix(20).map { process in
@@ -98,6 +99,19 @@ final class NativePerformance: NativePage {
             NativeSection(title: "最近 120 次采样 · CPU 蓝色 / 内存紫色", rows: [NativeRow(title: "趋势")]),
             NativeSection(title: "CPU 核心", rows: coreRows), NativeSection(title: "进程排行 · 前 20 项", rows: processRows),
             NativeSection(rows: [NativeRow(title: "离开页面或进入后台后停止采样。未提供的指标会留空；速率需要两次有效采样。进程 CPU 按单核心 100% 计，多线程进程可能超过 100%。")])]
+    }
+    private func chooseSort() {
+        let menu = UIAlertController(title: "进程排序", message: nil, preferredStyle: .actionSheet)
+        menu.addAction(UIAlertAction(title: "CPU 使用率", style: .default) { [weak self] _ in
+            self?.sortByMemory = false; self?.reload()
+        })
+        menu.addAction(UIAlertAction(title: "内存占用", style: .default) { [weak self] _ in
+            self?.sortByMemory = true; self?.reload()
+        })
+        menu.addAction(UIAlertAction(title: "取消", style: .cancel))
+        menu.popoverPresentationController?.sourceView = view
+        menu.popoverPresentationController?.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+        present(menu, animated: true)
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         if indexPath.section == 2 { return trendCell }
