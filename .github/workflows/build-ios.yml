@@ -28,6 +28,7 @@ jobs:
       downloads: ${{ steps.checks.outputs.downloads }}
       localization: ${{ steps.checks.outputs.localization }}
       kbsync: ${{ steps.checks.outputs.kbsync }}
+      performance: ${{ steps.checks.outputs.performance }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,6 +88,12 @@ jobs:
       - name: Test UpdateCore
         if: needs.checks.outputs.core == 'true'
         run: swift test --package-path Packages/UpdateCore
+      - name: Check performance transport cancellation
+        if: needs.checks.outputs.performance == 'true'
+        timeout-minutes: 2
+        run: |
+          swiftc -parse-as-library ssstore/PerformanceRelay.swift scripts/tests/PerformanceRelayChecks.swift -o "$RUNNER_TEMP/performance-relay-checks"
+          "$RUNNER_TEMP/performance-relay-checks"
       - name: Check manifest credential responsiveness
         if: needs.checks.outputs.manifest_credentials == 'true'
         run: |

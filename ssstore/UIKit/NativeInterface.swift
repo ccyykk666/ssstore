@@ -632,7 +632,7 @@ final class NativeTabs: UITabBarController, UITabBarControllerDelegate {
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad(); delegate = self
-        let pages: [(UIViewController, String, String)] = [(apps, "应用", "square.stack.3d.up"), (NativeData(model), "数据", "chart.bar.xaxis"), (NativeAccounts(model), "账户", "person.crop.circle"), (store, "搜索", "magnifyingglass")]
+        let pages: [(UIViewController, String, String)] = [(apps, "应用", "square.stack.3d.up"), (NativeTools(model), "工具", "wrench.and.screwdriver"), (NativeAccounts(model), "账户", "person.crop.circle"), (store, "搜索", "magnifyingglass")]
         viewControllers = pages.map { page, title, icon in
             let nav = UINavigationController(rootViewController: page)
             nav.navigationBar.prefersLargeTitles = true

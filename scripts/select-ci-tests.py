@@ -10,6 +10,13 @@ import urllib.request
 
 STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
+    "performance": (
+        "ssstore/PerformanceRelay.swift",
+        "ssstore/PerformanceMonitor.swift",
+        "ssstore/Bridge/DevicePerformance.h",
+        "ssstore/Bridge/DevicePerformance.m",
+        "scripts/tests/PerformanceRelayChecks.swift",
+    ),
     "native_sheet": (
         "ssstore/UIKit/NativeInterface.swift",
         "ssstore/UIKit/NativeFittingNavigation.swift",
@@ -28,6 +35,10 @@ CHECK_INPUTS = {
         "ssstore/AppCacheCleaner.swift",
         "ssstore/StoreRuntime.swift",
         "ssstore/UIKit/StoreScreens.swift",
+        "ssstore/PerformanceMonitor.swift",
+        "ssstore/UIKit/ToolScreens.swift",
+        "ssstore/Bridge/DevicePerformance.h",
+        "ssstore/Bridge/DevicePerformance.m",
     ),
     "downloads": (
         STORE + "Asspp/Backend/AppStore/AppStore.swift",
