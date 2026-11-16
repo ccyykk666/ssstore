@@ -1,6 +1,7 @@
 #import "DevicePerformance.h"
 @import IDevice;
 #include <arpa/inet.h>
+#include <math.h>
 
 static BOOL PCheck(IdeviceFfiError *failure, NSString *stage, NSError **error) {
     if (!failure) return YES;
@@ -17,6 +18,27 @@ static id PPlist(plist_t node) {
     if (!xml) return NSNull.null;
     NSData *data = [NSData dataWithBytes:xml length:length]; plist_mem_free(xml);
     return [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL] ?: NSNull.null;
+}
+// Private sampling schemas can contain dates, opaque data and uninitialized
+// floating point values. Normalize them before NSJSONSerialization, which
+// otherwise raises an exception rather than returning an NSError for these.
+static id PJSON(id value) {
+    if (!value || value == NSNull.null) return NSNull.null;
+    if ([value isKindOfClass:NSNumber.class]) return isfinite([value doubleValue]) ? value : NSNull.null;
+    if ([value isKindOfClass:NSString.class]) return value;
+    if ([value isKindOfClass:NSDate.class]) return [[NSISO8601DateFormatter new] stringFromDate:value];
+    if ([value isKindOfClass:NSData.class]) return @{@"byteCount":@([value length])};
+    if ([value isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *result = [NSMutableDictionary dictionary];
+        for (id key in value) result[[key description]] = PJSON(value[key]);
+        return result;
+    }
+    if ([value isKindOfClass:NSArray.class]) {
+        NSMutableArray *result = [NSMutableArray array];
+        for (id item in value) [result addObject:PJSON(item)];
+        return result;
+    }
+    return NSNull.null;
 }
 static NSDictionary *PAttributes(NSArray *keys, id values) {
     if (![values isKindOfClass:NSArray.class]) return @{};
@@ -100,7 +122,7 @@ static NSArray *PNames(char **names, uintptr_t count) {
                     @"uptime":@(NSProcessInfo.processInfo.systemUptime), @"system":PAttributes(systemKeys, PPlist(system)),
                     @"cpu":PPlist(cpu), @"processes":rows, @"hasProcesses":@([rawProcesses isKindOfClass:NSDictionary.class]),
                     @"hardware":PPlist(hardware)};
-                NSData *data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:error];
+                NSData *data = [NSJSONSerialization dataWithJSONObject:PJSON(payload) options:0 error:error];
                 plist_free(processes); processes = NULL; plist_free(system); system = NULL; plist_free(cpu); cpu = NULL;
                 if (!data) return NO;
                 sample(data);

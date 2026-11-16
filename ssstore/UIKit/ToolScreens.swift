@@ -23,7 +23,7 @@ final class NativePerformance: NativePage {
     private var sortByMemory = false
     private var lastButtonState: PerformanceMonitor.State?
     private var lastButtonActive: Bool?
-    private let unavailable = "设备未提供"
+    private let unavailable = "暂不可用"
     init(_ model: AppModel) { super.init(model, title: "整机性能监控") }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
