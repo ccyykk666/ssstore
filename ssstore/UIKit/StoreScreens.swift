@@ -178,11 +178,37 @@ final class NativeAccounts: NativePage {
 @MainActor
 final class NativeAccountDetail: NativePage {
     let id: String
+    private var rotationStatus = "轮换密码令牌"
     init(_ model: AppModel, id: String) { self.id = id; super.init(model, title: "账户详情") }
     required init?(coder: NSCoder) { fatalError() }
     override func rows() -> [NativeSection] {
         guard let user = AppStore.this.accounts.first(where: { $0.id == id }) else { return [] }
-        return [NativeSection(rows: [NativeRow(title: user.account.email), NativeRow(title: "地区", detail: user.account.store), NativeRow(title: "Directory Services ID", detail: user.account.directoryServicesIdentifier), NativeRow(title: "密码令牌", detail: "••••••••"), NativeRow(title: working ? "正在轮换密码令牌…" : "轮换密码令牌", color: working ? .secondaryLabel : .systemBlue, action: working ? nil : { [weak self] in guard let self else { return }; run { _ = try await AppStore.this.rotate(id: self.id); self.alert("已更新") } }), NativeRow(title: "删除账户", color: .systemRed, action: working ? nil : { [weak self] in self?.confirm("删除账户？") { [weak self] in guard let self else { return }; AppStore.this.delete(id: id); navigationController?.popViewController(animated: true) } })])]
+        return [NativeSection(rows: [
+            NativeRow(title: user.account.email),
+            NativeRow(title: "地区", detail: user.account.store),
+            NativeRow(title: "Directory Services ID", detail: user.account.directoryServicesIdentifier),
+            NativeRow(title: "密码令牌", detail: "••••••••"),
+            NativeRow(title: working ? "正在轮换密码令牌…" : rotationStatus, color: .systemBlue,
+                action: working ? nil : { [weak self] in self?.rotateToken() }),
+            NativeRow(title: "删除账户", color: .systemRed, action: working ? nil : { [weak self] in
+                self?.confirm("删除账户？") { [weak self] in
+                    guard let self else { return }
+                    AppStore.this.delete(id: id)
+                    navigationController?.popViewController(animated: true)
+                }
+            }),
+        ])]
+    }
+    private func rotateToken() {
+        guard !working else { return }
+        run { [self] in
+            do {
+                _ = try await AppStore.this.rotate(id: id)
+                rotationStatus = "已更新"
+            } catch {
+                rotationStatus = "更新失败：\(error.localizedDescription)"
+            }
+        }
     }
 }
 

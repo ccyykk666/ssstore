@@ -29,17 +29,15 @@ final class NativeManifestService: NativePage {
     override func rows() -> [NativeSection] {
         // Rendering and navigation must use cached state only. In particular,
         // no synchronous Security.framework IPC may run from rows().
-        var rows = [
+        let rows = [
             NativeRow(title: "服务地址", detail: InstallerManifestService.displayAddress,
                 action: working ? nil : { [weak self] in self?.editEndpoint() }),
             NativeRow(title: "访问令牌", detail: credentialWorkDescription ?? credentialStatus,
                 action: working || usingPublicService ? nil : { [weak self] in self?.editToken() }),
-            NativeRow(title: testing ? "正在测试连接…" : "测试连接", color: working ? .secondaryLabel : .systemBlue,
+            NativeRow(title: testing ? "正在测试连接…" : (probeStatus ?? "测试连接"), color: .systemBlue,
                 action: working ? nil : { [weak self] in self?.probe() }),
         ]
-        if let probeStatus { rows.append(NativeRow(title: probeStatus)) }
-        var sections = [NativeSection(rows: rows), NativeSection(rows: [NativeRow(title:
-            "用于兼容安装。填写可直接访问的 HTTPS 清单接口，安装包仍在手机本机传输。私有服务需填写访问令牌，令牌仅保存在本机钥匙串并绑定当前完整地址，更换地址需单独配置。测试只发送示例数据。")])]
+        var sections = [NativeSection(rows: rows)]
         if InstallerManifestService.savedAddress != nil {
             sections.append(NativeSection(rows: [NativeRow(title: "恢复默认服务", color: .systemBlue, action: working ? nil : { [weak self] in
                 try? InstallerManifestService.setAddress("")
@@ -181,7 +179,7 @@ final class NativeManifestService: NativePage {
             } catch {
                 guard InstallerManifestService.displayAddress == address,
                       view.window != nil, navigationController?.topViewController === self else { return }
-                throw error
+                probeStatus = "连接失败：\(error.localizedDescription)"
             }
         }
     }
