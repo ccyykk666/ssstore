@@ -41,6 +41,7 @@ public struct PerformanceSnapshot: Codable, Equatable, Sendable {
     public var thermalState: String?
     public var processes: [PerformanceProcess]
     public var applications: [PerformanceApplication]? = nil
+    public var localMetrics: LocalPerformanceMetrics? = nil
     public var summary: Self { var value = self; value.processes = []; value.applications = nil; return value }
 }
 

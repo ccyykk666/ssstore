@@ -12,6 +12,8 @@ final class PerformanceDashboard: UIView {
         PerformanceMetricCard(title: "上传", symbol: "arrow.up", color: .systemGreen),
         PerformanceMetricCard(title: "磁盘读取", symbol: "internaldrive", color: .systemOrange),
         PerformanceMetricCard(title: "磁盘写入", symbol: "square.and.pencil", color: .systemPink),
+        PerformanceMetricCard(title: "GPU", symbol: "cube.transparent", color: .systemIndigo),
+        PerformanceMetricCard(title: "电池温度", symbol: "thermometer.medium", color: .systemRed),
     ]
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -30,9 +32,9 @@ final class PerformanceDashboard: UIView {
         for row in rows where row.axis != axis { row.axis = axis }
         super.layoutSubviews()
     }
-    func update(current: PerformanceReading?, scope: PerformanceScope) {
+    func update(current: PerformanceReading?, scope: PerformanceScope, metrics: LocalPerformanceMetrics?) {
         let values = [current?.cpuPercent, current?.memoryBytes, current?.networkReceived, current?.networkSent, current?.diskRead, current?.diskWritten]
-        for index in cards.indices {
+        for index in values.indices {
             let caption: String
             if index == 0 { caption = scope.isDevice ? "整机使用率" : "进程使用率 · 单核心 100%" }
             else if index == 1 { caption = scope.isDevice ? "非空闲内存（估算）" : "进程物理内存" }
@@ -40,6 +42,9 @@ final class PerformanceDashboard: UIView {
             cards[index].update(value: values[index], total: index == 1 ? current?.memoryTotal : nil,
                 percent: index == 0, perSecond: index >= 2, caption: caption)
         }
+        rows.last?.isHidden = !scope.isDevice
+        cards[6].update(value: metrics?.gpuPercent, total: nil, percent: true, perSecond: false, caption: "整机驱动当前值")
+        cards[7].updateTemperature(metrics?.batteryTemperature)
     }
 }
 
@@ -71,6 +76,14 @@ private final class PerformanceMetricCard: UIView {
         isAccessibilityElement = true
     }
     required init?(coder: NSCoder) { fatalError() }
+    func updateTemperature(_ number: Double?) {
+        caption.text = "电池传感器 · 非 CPU 温度"; progress.isHidden = true
+        accessibilityLabel = titleText
+        if let number, number.isFinite {
+            value.text = String(format: "%.1f", number); unit.text = "°C"
+            accessibilityValue = (value.text ?? "") + " °C"
+        } else { value.text = "—"; unit.text = nil; accessibilityValue = "暂不可用" }
+    }
     func update(value number: Double?, total: Double?, percent: Bool, perSecond: Bool, caption text: String) {
         caption.text = text; accessibilityLabel = titleText + "，" + text
         if let number, number.isFinite, number >= 0 {

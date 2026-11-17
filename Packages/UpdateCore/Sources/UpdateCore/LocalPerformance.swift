@@ -20,6 +20,7 @@ public struct LocalPerformanceReducer: Sendable {
         let processMemory: Double?
         let processStarted: UInt64?
         let issues: [String: String]
+        let metrics: LocalPerformanceMetrics?
     }
     private var previousScope: PerformanceScope?
     private var previousCPU: [[UInt64]]?
@@ -87,6 +88,6 @@ public struct LocalPerformanceReducer: Sendable {
             cpuPercent: cpu, corePercent: cores, memoryTotal: value.memoryTotal, memoryFree: free,
             memoryUsed: used, memoryEstimated: used != nil, memoryPressure: nil,
             networkReceived: networkIn, networkSent: networkOut, diskRead: diskIn, diskWritten: diskOut,
-            thermalState: value.thermal, processes: processes)
+            thermalState: value.thermal, processes: processes, localMetrics: value.metrics)
     }
 }

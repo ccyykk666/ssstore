@@ -18,6 +18,8 @@ CHECK_INPUTS = {
         "ssstore/CurrentValueRefresh.swift",
         "ssstore/Bridge/LocalPerformance.h",
         "ssstore/Bridge/LocalPerformance.m",
+        "ssstore/Bridge/LocalMetricParsing.h",
+        "ssstore/UIKit/HardwareSensors.swift",
         "scripts/check-local-performance.sh",
         "scripts/tests/LocalPerformanceChecks.m",
         "scripts/tests/CurrentValueRefreshChecks.swift",
@@ -47,6 +49,7 @@ CHECK_INPUTS = {
         "ssstore/Bridge/LocalPerformance.h",
         "ssstore/Bridge/LocalPerformance.m",
         "ssstore/UIKit/PerformanceDashboard.swift",
+        "ssstore/UIKit/HardwareSensors.swift",
         "ssstore/UIKit/FileContents.swift",
     ),
     "downloads": (

@@ -60,4 +60,29 @@ final class LocalPerformanceTests: XCTestCase {
         let invalid = try reducer.consume(frame(2, ["memoryTotal":1000, "memoryFree":2000]), scope: .device)
         XCTAssertNil(invalid.memoryUsed)
     }
+    func testCurrentMetricsDisappearRatherThanReusingOldValues() throws {
+        var reducer = LocalPerformanceReducer()
+        let first = try reducer.consume(frame(1, ["metrics":["gpuPercent":0, "batteryTemperature":32.1, "batteryCurrent":(-0.5), "batteryCharging":false, "memoryAvailablePercent":20]]), scope: .device)
+        XCTAssertEqual(first.localMetrics?.gpuPercent, 0)
+        XCTAssertEqual(first.localMetrics?.batteryTemperature, 32.1)
+        XCTAssertEqual(first.localMetrics?.batteryCurrent, -0.5)
+        XCTAssertEqual(first.localMetrics?.batteryCharging, false)
+        let second = try reducer.consume(frame(2, ["metrics":["processorCount":6]]), scope: .device)
+        XCTAssertNil(second.localMetrics?.gpuPercent)
+        XCTAssertNil(second.localMetrics?.batteryTemperature)
+        XCTAssertEqual(second.localMetrics?.processorCount, 6)
+        let app = try reducer.consume(frame(3, ["pid":123, "metrics":["processThreads":20, "processIdleWakeups":12]]), scope: .application(bundleID:"app", name:"App"))
+        XCTAssertEqual(app.localMetrics?.processThreads, 20)
+        XCTAssertNil(app.localMetrics?.memoryAvailablePercent)
+        let missing = try reducer.consume(frame(4, [:]), scope: .device)
+        XCTAssertNil(missing.localMetrics)
+    }
+    func testSensorSnapshotPreservesNamesAndSignedCurrent() throws {
+        let data = try JSONSerialization.data(withJSONObject:["timestamp":1, "status":"ready", "unavailableCount":2,
+            "sensors":[["id":"current:IQ0u", "name":"Charger", "key":"IQ0u", "kind":"current", "value":(-0.5), "unit":"A"]]])
+        let snapshot = try JSONDecoder().decode(LocalSensorSnapshot.self, from:data)
+        XCTAssertEqual(snapshot.sensors.first?.value, -0.5)
+        XCTAssertEqual(snapshot.sensors.first?.key, "IQ0u")
+        XCTAssertEqual(snapshot.unavailableCount, 2)
+    }
 }

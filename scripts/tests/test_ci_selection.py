@@ -38,6 +38,8 @@ class SelectionTests(unittest.TestCase):
             "ssstore/PerformancePanel.swift": {"performance", "core"},
             "ssstore/CurrentValueRefresh.swift": {"performance"},
             "ssstore/Bridge/LocalPerformance.m": {"performance", "core"},
+            "ssstore/Bridge/LocalMetricParsing.h": {"performance"},
+            "ssstore/UIKit/HardwareSensors.swift": {"performance", "core"},
             "ssstore/UIKit/ToolScreens.swift": {"core"},
             "ssstore/UIKit/PerformanceDashboard.swift": {"core"},
             "ssstore/UIKit/FileContents.swift": {"core"},

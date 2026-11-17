@@ -8,6 +8,8 @@ final class NativeTools: NativePage {
     override func rows() -> [NativeSection] {
         [NativeSection(title: "性能", rows: [link("实时面板") { [weak self] in
             guard let self else { return }; push(NativePerformancePanel(model))
+        }, link("硬件传感器") { [weak self] in
+            guard let self else { return }; push(NativeHardwareSensors(model))
         }]), NativeSection(title: "设备", rows: [
             link("数据") { [weak self] in guard let self else { return }; push(NativeData(model)) },
             link("连接诊断") { [weak self] in guard let self else { return }; push(NativeInspection(model, operation: .probe)) },
@@ -78,7 +80,7 @@ final class NativePerformancePanel: NativePage {
         applicationButton.configuration?.title = panel.scope.title
         statusLabel.text = panel.status
         timeLabel.text = panel.latest.map { "更新于 " + DateFormatter.localizedString(from: $0.capturedAt, dateStyle: .none, timeStyle: .medium) }
-        dashboard.update(current: panel.reading, scope: panel.scope)
+        dashboard.update(current: panel.reading, scope: panel.scope, metrics: panel.latest?.localMetrics)
         super.reload()
     }
     private func changeScope() {
@@ -118,13 +120,51 @@ final class NativePerformancePanel: NativePage {
             }
             result.append(NativeSection(title: "设备", rows: values))
         }
+        if let sample = panel.latest, let metrics = sample.localMetrics {
+            result.append(contentsOf: metricSections(metrics, scope: panel.scope, uptime: sample.uptime))
+        }
         if !panel.issues.isEmpty {
-            let labels = ["cpu":"CPU", "memory":"内存", "network":"网络", "disk":"磁盘", "application":"应用"]
+            let labels = ["cpu":"CPU", "memory":"内存", "network":"网络", "disk":"磁盘", "application":"应用",
+                "gpu":"GPU", "battery":"电池", "memoryAvailability":"可用内存", "processDetails":"进程详情"]
             result.append(NativeSection(title: "接口状态", rows: panel.issues.keys.sorted().map { key in
                 NativeRow(title: labels[key] ?? key, detail: panel.issues[key] ?? "", color: .secondaryLabel)
             }))
         }
         return result
+    }
+    private func metricSections(_ value: LocalPerformanceMetrics, scope: PerformanceScope, uptime: Double) -> [NativeSection] {
+        func number(_ title: String, _ amount: Double?, unit: String = "", digits: Int = 0) -> NativeRow? {
+            guard let amount, amount.isFinite else { return nil }
+            return NativeRow(title: title, detail: String(format: "%.*f%@", digits, amount, unit))
+        }
+        func bytes(_ title: String, _ amount: Double?) -> NativeRow? {
+            guard let amount, amount.isFinite, amount >= 0, amount < Double(Int64.max) else { return nil }
+            return NativeRow(title: title, detail: ByteCountFormatter.string(fromByteCount: Int64(amount), countStyle: .memory))
+        }
+        func state(_ title: String, _ flag: Bool?) -> NativeRow? { flag.map { NativeRow(title: title, detail: $0 ? "是" : "否") } }
+        func text(_ title: String, _ string: String?) -> NativeRow? { string.map { NativeRow(title: title, detail: $0) } }
+        func group(_ title: String, _ rows: [NativeRow?]) -> NativeSection? {
+            let available = rows.compactMap { $0 }; return available.isEmpty ? nil : NativeSection(title: title, rows: available)
+        }
+        if scope.isDevice {
+            return [group("GPU", [number("渲染器使用率", value.gpuRenderer, unit: "%", digits: 1), number("分块器使用率", value.gpuTiler, unit: "%", digits: 1), bytes("GPU 系统内存占用", value.gpuMemory)]),
+                group("电池与电源", [number("电量", value.batteryPercent, unit: "%"), number("电池电压", value.batteryVoltage, unit: " V", digits: 3),
+                    number("电池电流", value.batteryCurrent, unit: " A", digits: 3), number("电池侧功率", value.batteryPower, unit: " W", digits: 2),
+                    number("循环次数", value.batteryCycles), state("正在充电", value.batteryCharging), state("外接电源", value.batteryExternal),
+                    state("已充满", value.batteryFull), state("低电量模式", value.lowPowerMode), number("适配器标称功率", value.adapterWatts, unit: " W")]),
+                group("内存分类", [number("内核可用内存比例", value.memoryAvailablePercent, unit: "%"), bytes("活跃内存", value.memoryActive),
+                    bytes("非活跃内存", value.memoryInactive), bytes("固定内存", value.memoryWired), bytes("压缩器占用", value.memoryCompressed), bytes("可清理内存", value.memoryPurgeable)]),
+                group("系统", [number("运行时间", uptime / 3600, unit: " 小时", digits: 1), number("处理器核心数", value.processorCount),
+                    number("活跃处理器核心数", value.activeProcessorCount), number("1 分钟负载", value.load1, digits: 2),
+                    number("5 分钟负载", value.load5, digits: 2), number("15 分钟负载", value.load15, digits: 2),
+                    bytes("存储总容量", value.storageTotal), bytes("文件系统空闲空间", value.storageFree)]),
+                group("硬件与系统信息", [text("产品型号", value.hardwareProduct), text("硬件型号", value.hardwareModel), text("硬件平台", value.hardwarePlatform),
+                    text("处理器架构", value.cpuArchitecture), text("设备类别", value.deviceClass), text("系统构建", value.osBuild), text("Darwin 版本", value.darwinVersion)])].compactMap { $0 }
+        }
+        return [group("进程详情", [bytes("常驻内存", value.processResident), bytes("固定内存", value.processWired), bytes("虚拟地址空间", value.processVirtual),
+            number("线程数", value.processThreads), number("运行中线程数", value.processRunningThreads),
+            number("缺页累计", value.processFaults), number("换入页累计", value.processPageins), number("上下文切换累计", value.processContextSwitches),
+            number("空闲唤醒累计", value.processIdleWakeups), number("中断唤醒累计", value.processInterruptWakeups)])].compactMap { $0 }
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         if indexPath.section == 0 { return scopeCell }
