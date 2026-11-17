@@ -154,8 +154,12 @@ static NSDictionary *PExecutablePaths(struct AppServiceHandle *service) {
                     }
                     for (NSString *pid in rawProcesses) {
                         NSMutableDictionary *values = [PAttributes(processKeys, rawProcesses[pid]) mutableCopy];
-                        if (!values[@"name"] && labels[[pid description]]) values[@"name"] = labels[[pid description]];
-                        if (paths[[pid description]]) values[@"executablePath"] = paths[[pid description]];
+                        NSString *currentPath = paths[[pid description]];
+                        if (currentPath.length) values[@"executablePath"] = currentPath;
+                        if (![values[@"name"] isKindOfClass:NSString.class] || ![values[@"name"] length]) {
+                            NSString *name = currentPath.length ? ([currentPath hasPrefix:@"file:"] ? [NSURL URLWithString:currentPath].lastPathComponent : currentPath.lastPathComponent) : nil;
+                            values[@"name"] = name.length ? name : (labels[[pid description]] ?: [@"PID " stringByAppendingString:[pid description]]);
+                        }
                         [rows addObject:@{@"pid":[pid description], @"values":values}];
                     }
                 }

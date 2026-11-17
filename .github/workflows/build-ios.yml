@@ -125,7 +125,8 @@ jobs:
           dirname "$(command -v rustup)" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           echo "RUSTUP_TOOLCHAIN=1.94.0" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: performance-cache
         with:
           path: |
             ~/.cargo/registry
@@ -134,6 +135,19 @@ jobs:
             build/PerformanceDeviceKit
           key: performance-devicekit-rust194-${{ runner.arch }}-${{ hashFiles('scripts/prepare-performance-devicekit.py', 'scripts/patches/**') }}
           restore-keys: performance-devicekit-rust194-${{ runner.arch }}-
+      - name: Prepare and test the patched performance dependency
+        run: |
+          bash scripts/prepare-devicekit.sh
+          python3 scripts/prepare-performance-devicekit.py
+      - uses: actions/cache/save@v4
+        if: steps.performance-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/PerformanceCargo
+            build/PerformanceDeviceKit
+          key: ${{ steps.performance-cache.outputs.cache-primary-key }}
       - name: Build IPA
         run: bash scripts/build-ipa.sh
       - name: Preserve release crash symbols

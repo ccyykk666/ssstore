@@ -55,7 +55,7 @@ final class NativeAppFileLocations: NativePage {
             NativeRow(title: "共享文档", action: { [weak self] in self?.open(.documents) }),
             NativeRow(title: "应用容器", action: { [weak self] in self?.open(.container) }),
         ])]
-        if let package = Downloads.this.manifests.filter({ $0.completed && $0.package.metadata.bundleID == application.bundleID }).sorted(by: { $0.creation > $1.creation }).first {
+        if let package = Downloads.this.manifests.filter({ $0.completed && $0.package.software.bundleID == application.bundleID }).sorted(by: { $0.creation > $1.creation }).first {
             sections.append(NativeSection(title: "本机已下载的 IPA", rows: [NativeRow(title: "安装包内容", action: { [weak self] in
                 guard let self else { return }; push(NativeArchiveFiles(model, file: package.targetLocation))
             })]))

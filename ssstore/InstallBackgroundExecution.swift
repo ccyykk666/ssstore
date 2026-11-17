@@ -1,5 +1,6 @@
 import BackgroundTasks
 import UIKit
+import UpdateCore
 
 /// Keep the local server runnable while Safari and the system installer fetch it.
 /// Opening Safari must wait for the continued task's launch callback, not submit().
