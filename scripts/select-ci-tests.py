@@ -12,6 +12,9 @@ STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
     "performance": (
         "ssstore/PerformanceRelay.swift",
+        "ssstore/Bridge/DevicePlist.h",
+        "scripts/check-device-plist.sh",
+        "scripts/tests/DevicePlistChecks.m",
         "ssstore/PerformanceMonitor.swift",
         "ssstore/Bridge/DevicePerformance.h",
         "ssstore/Bridge/DevicePerformance.m",

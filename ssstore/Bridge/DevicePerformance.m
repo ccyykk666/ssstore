@@ -1,5 +1,6 @@
 #import "DevicePerformance.h"
 @import IDevice;
+#import "DevicePlist.h"
 #include <arpa/inet.h>
 #include <math.h>
 #import <TargetConditionals.h>
@@ -24,14 +25,7 @@ static BOOL PCheck(IdeviceFfiError *failure, NSString *stage, NSError **error) {
     idevice_error_free(failure);
     return NO;
 }
-static id PPlist(plist_t node) {
-    if (!node) return NSNull.null;
-    char *xml = NULL; uint32_t length = 0;
-    plist_to_xml(node, &xml, &length);
-    if (!xml) return NSNull.null;
-    NSData *data = [NSData dataWithBytes:xml length:length]; plist_mem_free(xml);
-    return [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL] ?: NSNull.null;
-}
+static id PPlist(plist_t node) { return SSDevicePlistValue(node); }
 // Private sampling schemas can contain dates, opaque data and uninitialized
 // floating point values. Normalize them before NSJSONSerialization, which
 // otherwise raises an exception rather than returning an NSError for these.

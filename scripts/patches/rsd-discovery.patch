@@ -1,0 +1,148 @@
+--- a/idevice/src/services/rsd.rs
++++ b/idevice/src/services/rsd.rs
+@@ -51,75 +51,7 @@
+             }
+         };
+ 
+-        // Parse available services
+-        let mut services: HashMap<String, RsdService> = HashMap::new();
+-        for (name, service) in services_dict.into_iter() {
+-            match service.as_dictionary() {
+-                Some(service) => {
+-                    let entitlement = match service.get("Entitlement").and_then(|x| x.as_string()) {
+-                        Some(e) => e.to_string(),
+-                        None => {
+-                            warn!("Service did not contain entitlement string");
+-                            continue;
+-                        }
+-                    };
+-                    let port = match service
+-                        .get("Port")
+-                        .and_then(|x| x.as_string())
+-                        .and_then(|x| x.parse::<u16>().ok())
+-                    {
+-                        Some(e) => e,
+-                        None => {
+-                            warn!("Service did not contain port string");
+-                            continue;
+-                        }
+-                    };
+-                    let uses_remote_xpc = match service
+-                        .get("Properties")
+-                        .and_then(|x| x.as_dictionary())
+-                        .and_then(|x| x.get("UsesRemoteXPC"))
+-                        .and_then(|x| x.as_boolean())
+-                    {
+-                        Some(e) => e.to_owned(),
+-                        None => false, // default is false
+-                    };
+-
+-                    let features = service
+-                        .get("Properties")
+-                        .and_then(|x| x.as_dictionary())
+-                        .and_then(|x| x.get("Features"))
+-                        .and_then(|x| x.as_array())
+-                        .map(|f| {
+-                            f.iter()
+-                                .filter_map(|x| x.as_string())
+-                                .map(|x| x.to_string())
+-                                .collect::<Vec<String>>()
+-                        });
+-
+-                    let service_version = service
+-                        .get("Properties")
+-                        .and_then(|x| x.as_dictionary())
+-                        .and_then(|x| x.get("ServiceVersion"))
+-                        .and_then(|x| x.as_signed_integer())
+-                        .map(|e| e.to_owned());
+-
+-                    services.insert(
+-                        name.to_string(),
+-                        RsdService {
+-                            entitlement,
+-                            port,
+-                            uses_remote_xpc,
+-                            features,
+-                            service_version,
+-                        },
+-                    );
+-                }
+-                None => {
+-                    warn!("Service is not a dictionary!");
+-                    continue;
+-                }
+-            }
+-        }
++        let services = ssstore_parse_services(services_dict);
+ 
+         let protocol_version = match data.as_dictionary().and_then(|x| {
+             x.get("MessagingProtocolVersion")
+@@ -188,3 +120,68 @@
+         T::from_stream(stream).await
+     }
+ }
++
++// Preserve every valid advertised endpoint. Entitlement is optional discovery
++// metadata, not an authorization decision by the client. Devices may encode
++// Port as either a decimal string or a plist integer.
++fn ssstore_parse_services(entries: &plist::Dictionary) -> HashMap<String, RsdService> {
++    let mut services = HashMap::new();
++    for (name, value) in entries {
++        let Some(entry) = value.as_dictionary() else { continue };
++        let port = entry.get("Port").and_then(|value| {
++            value.as_string().and_then(|s| s.parse::<u16>().ok()).or_else(|| {
++                value.as_unsigned_integer().and_then(|p| u16::try_from(p).ok())
++            })
++        }).filter(|p| *p != 0);
++        let Some(port) = port else { warn!("Ignoring RSD endpoint with invalid port: {name}"); continue };
++        let entitlement = entry.get("Entitlement").and_then(|v| v.as_string()).unwrap_or("").to_string();
++        let properties = entry.get("Properties").and_then(|p| p.as_dictionary());
++        let uses_remote_xpc = properties.and_then(|p| p.get("UsesRemoteXPC")).and_then(|v| v.as_boolean()).unwrap_or(false);
++        let features = properties.and_then(|p| p.get("Features")).and_then(|v| v.as_array()).map(|values| {
++            values.iter().filter_map(|v| v.as_string().map(str::to_string)).collect()
++        });
++        let service_version = properties.and_then(|p| p.get("ServiceVersion")).and_then(|v| v.as_signed_integer());
++        services.insert(name.clone(), RsdService { entitlement, port, uses_remote_xpc, features, service_version });
++    }
++    services
++}
++
++#[cfg(test)]
++mod ssstore_rsd_tests {
++    use super::*;
++    use plist::{Dictionary, Value};
++    fn endpoint(port: Value, entitlement: Option<&str>) -> Value {
++        let mut entry = Dictionary::new(); entry.insert("Port".into(), port);
++        if let Some(e) = entitlement { entry.insert("Entitlement".into(), Value::String(e.into())); }
++        let mut properties = Dictionary::new();
++        properties.insert("UsesRemoteXPC".into(), Value::Boolean(true));
++        properties.insert("Features".into(), Value::Array(vec![Value::String("listFiles".into())]));
++        properties.insert("ServiceVersion".into(), Value::Integer(2i64.into()));
++        entry.insert("Properties".into(), Value::Dictionary(properties)); Value::Dictionary(entry)
++    }
++    #[test]
++    fn ssstore_rsd_retains_optional_entitlement_and_integer_ports() {
++        let mut entries = Dictionary::new();
++        entries.insert("com.apple.coredevice.fileservice.control".into(), endpoint(Value::String("49152".into()), None));
++        entries.insert("legacy".into(), endpoint(Value::String("49153".into()), Some("required.entitlement")));
++        entries.insert("integer".into(), endpoint(Value::Integer(49154u64.into()), None));
++        let result = ssstore_parse_services(&entries);
++        assert_eq!(result.len(), 3);
++        let control = &result["com.apple.coredevice.fileservice.control"];
++        assert_eq!(control.port, 49152); assert!(control.entitlement.is_empty());
++        assert!(control.uses_remote_xpc); assert_eq!(control.features.as_ref().unwrap(), &vec!["listFiles".to_string()]);
++        assert_eq!(control.service_version, Some(2));
++        assert_eq!(result["legacy"].entitlement, "required.entitlement");
++        assert_eq!(result["integer"].port, 49154);
++    }
++    #[test]
++    fn ssstore_rsd_does_not_invent_absent_or_invalid_endpoints() {
++        let mut entries = Dictionary::new();
++        for (name, value) in [("zero", Value::Integer(0u64.into())), ("negative", Value::Integer((-1i64).into())),
++            ("tooLarge", Value::Integer(65536u64.into())), ("badText", Value::String("port".into()))] {
++            entries.insert(name.into(), endpoint(value, None));
++        }
++        entries.insert("notDictionary".into(), Value::String("49152".into()));
++        assert!(ssstore_parse_services(&entries).is_empty());
++    }
++}

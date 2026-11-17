@@ -148,6 +148,9 @@ jobs:
             build/PerformanceCargo
             build/PerformanceDeviceKit
           key: ${{ steps.performance-cache.outputs.cache-primary-key }}
+      - name: Check device plist conversion and legacy crash regression
+        if: needs.checks.outputs.performance == 'true'
+        run: bash scripts/check-device-plist.sh
       - name: Build IPA
         run: bash scripts/build-ipa.sh
       - name: Preserve release crash symbols

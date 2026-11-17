@@ -193,6 +193,11 @@ final class AppModel: ObservableObject {
                 let context = keys.compactMap { key in nativeError.userInfo[key].map { "\(key)=\($0)" } }.joined(separator: " ")
                 logger.info("App file access diagnostic bundle=\(bundleID) \(DiagnosticLog.redact(context))")
             }
+            if nativeError.domain == "ssstore.ServiceDiscovery" {
+                let requested = nativeError.userInfo["requestedService"] as? String ?? "unknown"
+                let related = nativeError.userInfo["availableRelatedServices"] as? [String] ?? []
+                logger.info("Device service unavailable requested=\(requested) related=\(related.joined(separator: ","))")
+            }
             inspectionReceipts[key] = InspectionReceipt(success: false, message: error.localizedDescription)
             saveInspectionReceipts()
             throw error

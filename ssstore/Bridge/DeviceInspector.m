@@ -1,5 +1,6 @@
 #import "DeviceInspector.h"
 @import IDevice;
+#import "DevicePlist.h"
 #import <UIKit/UIKit.h>
 #import <Security/Security.h>
 #include <arpa/inet.h>
@@ -16,15 +17,7 @@ static BOOL ICheck(IdeviceFfiError *failure, NSString *stage, NSError **error) {
     return NO;
 }
 static NSString *IString(const char *text) { return text ? ([NSString stringWithUTF8String:text] ?: @"") : @""; }
-static id IPlist(plist_t node) {
-    if (!node) return NSNull.null;
-    char *xml = NULL; uint32_t length = 0;
-    plist_to_xml(node, &xml, &length);
-    if (!xml) return NSNull.null;
-    NSData *data = [NSData dataWithBytes:xml length:length];
-    plist_mem_free(xml);
-    return [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL] ?: NSNull.null;
-}
+static id IPlist(plist_t node) { return SSDevicePlistValue(node); }
 static id IJSON(id value) {
     if (!value) return NSNull.null;
     if ([value isKindOfClass:NSDate.class]) return [[NSISO8601DateFormatter new] stringFromDate:value];
@@ -130,6 +123,31 @@ static NSError *IApplicationFileFailure(InspectionConnection *c, NSString *bundl
         details[@"getTaskAllow"] = (id)debugging ?: @"unknown";
     }
     return [NSError errorWithDomain:@"ssstore.AppFiles" code:underlying.code userInfo:details];
+}
+
+static BOOL IRequireFileService(InspectionConnection *connection, NSError **error) {
+    const char *name = "com.apple.coredevice.fileservice.control";
+    bool available = false;
+    if (!ICheck(rsd_service_available(connection->handshake, name, &available), @"查询文件服务", error)) return NO;
+    if (available) return YES;
+    struct CRsdServiceArray *services = NULL;
+    IdeviceFfiError *failure = rsd_get_services(connection->handshake, &services);
+    NSMutableArray *related = [NSMutableArray array];
+    if (failure) idevice_error_free(failure);
+    else if (services) {
+        for (size_t i = 0; i < services->count; i++) {
+            NSString *candidate = IString(services->services[i].name);
+            if ([candidate hasPrefix:@"com.apple.coredevice.fileservice"] || [candidate hasPrefix:@"com.apple.instruments."]) {
+                [related addObject:candidate];
+            }
+        }
+    }
+    rsd_free_services(services);
+    [related sortUsingSelector:@selector(compare:)];
+    if (error) *error = [NSError errorWithDomain:@"ssstore.ServiceDiscovery" code:21 userInfo:@{
+        NSLocalizedDescriptionKey:@"当前设备连接未公布 CoreDevice 文件服务，尚未进入应用目录授权。可在“广播服务”和“已挂载开发镜像”中查看设备能力。",
+        @"requestedService":IString(name), @"availableRelatedServices":related}];
+    return NO;
 }
 
 #define REQUIRE(call, stage) if (!ICheck((call), (stage), error)) return nil
@@ -465,6 +483,7 @@ static NSError *IApplicationFileFailure(InspectionConnection *c, NSString *bundl
                 if ([op isEqualToString:@"fileRead"] || [op isEqualToString:@"fileInfo"]) {
                     IError(error, @"此入口仅浏览目录。文件属性和导出请使用共享文档或应用容器。"); return nil;
                 }
+                if (!IRequireFileService(c, error)) return nil;
                 REQUIRE(file_service_connect_rsd(c->adapter, c->handshake, &fileService), @"连接 CoreDevice 文件服务");
                 int domain = [options[@"domain"] intValue];
                 if (domain != 2 && domain != 3 && domain != 5) domain = 1;

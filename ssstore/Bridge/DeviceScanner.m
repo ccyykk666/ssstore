@@ -1,5 +1,6 @@
 #import "DeviceScanner.h"
 @import IDevice;
+#import "DevicePlist.h"
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -19,13 +20,7 @@ static NSString *IconKey(NSDictionary *item) {
 }
 
 static NSDictionary *ReadPlist(plist_t node) {
-    char *xml = NULL;
-    uint32_t length = 0;
-    plist_to_xml(node, &xml, &length);
-    if (!xml) return nil;
-    NSData *data = [NSData dataWithBytes:xml length:length];
-    plist_mem_free(xml);
-    id value = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL];
+    id value = SSDevicePlistValue(node);
     return [value isKindOfClass:NSDictionary.class] ? value : nil;
 }
 
@@ -132,14 +127,8 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         NSMutableArray *apps = [NSMutableArray array];
         plist_t *nodes = raw;
         for (size_t index = 0; index < count; index++) {
-            char *xml = NULL;
-            uint32_t length = 0;
-            plist_to_xml(nodes[index], &xml, &length);
-            if (!xml) { SetError(error, @"无法解析设备返回的应用清单。"); return nil; }
-            NSData *data = [NSData dataWithBytes:xml length:length];
-            plist_mem_free(xml);
-            NSDictionary *row = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:error];
-            if (![row isKindOfClass:NSDictionary.class]) return nil;
+            NSDictionary *row = ReadPlist(nodes[index]);
+            if (!row) { SetError(error, @"无法解析设备返回的应用清单。"); return nil; }
             // Only return fields needed for update detection, never credentials or entitlements.
             NSMutableDictionary *item = [NSMutableDictionary dictionary];
             for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName",
