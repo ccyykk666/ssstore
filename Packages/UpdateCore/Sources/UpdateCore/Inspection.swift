@@ -1,6 +1,6 @@
 import Foundation
 
-public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
+public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, Sendable {
     case services, probe, appDetails, appCapabilities, appStorage, allStorage, profiles
     case documents, container, media, crashes, filesystemInfo, icon
     case homeWallpaper, lockWallpaper, iconMetrics, orientation, screenshot
@@ -109,7 +109,14 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
         default: return ""
         }
     }
-    public static var menu: [Self] { allCases.filter { !$0.isFileHelper && ![.installedApps, .documents, .container, .coreFiles].contains($0) } }
+    public static var menu: [Self] {
+        // Removed file access paths and DVT's failing remote-server transport.
+        // Keep other data services; one unavailable service does not prove that
+        // unrelated RSD operations cannot read the device.
+        let removed: Set<Self> = [.installedApps, .documents, .container, .coreFiles,
+            .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot]
+        return allCases.filter { !$0.isFileHelper && !removed.contains($0) }
+    }
     public static var groups: [String] { menu.reduce(into: []) { if !$0.contains($1.group) { $0.append($1.group) } } }
 }
 

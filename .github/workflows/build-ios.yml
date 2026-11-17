@@ -92,9 +92,6 @@ jobs:
         run: |
           set -o pipefail
           swift test --package-path Packages/UpdateCore 2>&1 | python3 scripts/report-build-errors.py
-      - name: Check direct local performance snapshots
-        if: needs.checks.outputs.performance == 'true'
-        run: bash scripts/check-local-performance.sh
       - name: Check manifest credential responsiveness
         if: needs.checks.outputs.manifest_credentials == 'true'
         run: |
@@ -110,7 +107,7 @@ jobs:
         if: needs.checks.outputs.kbsync == 'true'
         timeout-minutes: 8
         run: bash scripts/check-kbsync.sh
-      - name: Install pinned Rust toolchain for the performance dependency
+      - name: Install pinned Rust toolchain for device data services
         run: |
           if ! command -v rustup >/dev/null; then
             brew install rustup
@@ -132,7 +129,7 @@ jobs:
             build/PerformanceDeviceKit
           key: performance-devicekit-rust194-${{ runner.arch }}-${{ hashFiles('scripts/prepare-performance-devicekit.py', 'scripts/patches/**') }}
           restore-keys: performance-devicekit-rust194-${{ runner.arch }}-
-      - name: Prepare and test the patched performance dependency
+      - name: Prepare and test the patched device data dependency
         run: |
           bash scripts/prepare-devicekit.sh
           python3 scripts/prepare-performance-devicekit.py

@@ -1,4 +1,4 @@
-Current UI (0.6.0 build 78): the live panel uses direct local Mach, network interface, IOKit, FrontBoard and libproc reads only while visible. The remote performance recorder and other-app file browsing entries have been removed; downloaded IPA inspection remains. The dependency listings and earlier integrations below are reference material, not a promise that every declared service has a UI entry or system permission.
+Current UI (0.6.0 build 80): the second bottom tab opens Data directly. Performance monitoring, local live panels, hardware sensors, app-file browsing and failed DVT menu entries have been removed. Downloaded IPA inspection remains. The declarations below are historical/reference integrations, not a list of current menu entries or guaranteed permissions.
 
 # ssstore 0.5.2 device data interfaces
 

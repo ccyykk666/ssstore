@@ -80,8 +80,9 @@ def main():
     stage = Path(tempfile.mkdtemp(prefix="sheet-probe-", dir=output))
     (stage / "NativeFittingNavigation.swift").write_text(source(args.revision))
     shutil.copyfile(ROOT / "tests/native-sheet/Probe.swift", stage / "Probe.swift")
+    shutil.copyfile(ROOT / "ssstore/UIKit/NativeListCell.swift", stage / "NativeListCell.swift")
     config = {"name": "NativeSheetProbe", "options": {"deploymentTarget": {"iOS": "17.0"}}, "targets": {
-        "NativeSheetProbe": {"type": "application", "platform": "iOS", "sources": ["Probe.swift", "NativeFittingNavigation.swift"],
+        "NativeSheetProbe": {"type": "application", "platform": "iOS", "sources": ["Probe.swift", "NativeFittingNavigation.swift", "NativeListCell.swift"],
             "settings": {"base": {"PRODUCT_BUNDLE_IDENTIFIER": "dev.personal.ssstore.NativeSheetProbe", "SWIFT_VERSION": "5.9", "TARGETED_DEVICE_FAMILY": "1"}},
             "info": {"path": "Info.plist", "properties": {"UILaunchScreen": {}, "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False, "UISceneConfigurations": {}},
                 "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"]}}}}}

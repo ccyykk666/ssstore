@@ -8,7 +8,7 @@ The device transport links the published **idevice v0.1.68** Apple XCFramework f
 
 Pinned release asset: `idevice-xcframework-v0.1.68.zip`.
 
-The iOS arm64 slice is rebuilt from upstream commit `d32c8189c51c2789496b0768039419c3705498c3` with `scripts/patches/rsd-discovery.patch`, which preserves valid advertised endpoints whose optional entitlement metadata is absent and accepts numeric ports. Discovery fixtures run before compilation; the source archive/module hashes, Cargo lockfile and Rust 1.94.0 toolchain are pinned. Earlier sysmontap and cancellation-relay patches were removed with the remote performance recorder. The current live panel reads local OS interfaces and does not use this device library. Other XCFramework slices retain the pinned published binary. The upstream MIT notice is bundled as `ssstore/Resources/IDeviceLicense.txt`.
+The iOS arm64 slice is rebuilt from upstream commit `d32c8189c51c2789496b0768039419c3705498c3` with `scripts/patches/rsd-discovery.patch`, which preserves valid advertised endpoints whose optional entitlement metadata is absent and accepts numeric ports. Discovery fixtures run before compilation; the source archive/module hashes, Cargo lockfile and Rust 1.94.0 toolchain are pinned. Earlier sysmontap and cancellation-relay patches were removed with the remote performance recorder. The live panel, hardware sensors and their private OS readers were removed in build 80. Other XCFramework slices retain the pinned published binary. The upstream MIT notice is bundled as `ssstore/Resources/IDeviceLicense.txt`.
 
 SHA-256: `c9eccdd1942de756d746a2569d93302774ab0eff1cff314ec8118f768b3d8dc7`.
 

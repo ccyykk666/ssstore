@@ -72,7 +72,7 @@ final class AppModel: ObservableObject {
             }
             if let data = try? Data(contentsOf: inspectionReceiptsURL) { inspectionReceipts = (try? JSONDecoder().decode([String: InspectionReceipt].self, from: data)) ?? [:] }
         } catch { message = "读取本地记录失败：\(error.localizedDescription)" }
-        if ignoredApps.names.keys.contains(where: { ignoredApps.applications?[$0] == nil }),
+        if ignoredApps.names.keys.contains(where: { ignoredApps.applications?[$0]?.localIconKey == nil }),
            let data = try? Data(contentsOf: folder.appendingPathComponent("device-inventory.json")),
            let apps = try? InventoryParser.parse(data) {
             ignoredApps.captureMetadata(from: apps)
@@ -210,9 +210,7 @@ final class AppModel: ObservableObject {
     }
 
     func localIconURL(for app: InstalledApp) -> URL? {
-        guard let key = app.localIconKey, key.count == 64,
-              key.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
-        return iconsDirectory.appendingPathComponent(key).appendingPathExtension("png")
+        LocalAppIcon.url(for: app, in: iconsDirectory)
     }
 
     var protectedCacheFiles: [URL] {
@@ -336,6 +334,9 @@ final class AppModel: ObservableObject {
     }
 
     private func merge(_ apps: [InstalledApp], origin: String) {
+        let previousIgnored = ignoredApps
+        ignoredApps.captureMetadata(from: apps)
+        if ignoredApps != previousIgnored { saveIgnoredApps() }
         let previous = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
         records = ignoredApps.visible(apps.map { app in
             var record = previous[app.id] ?? AppRecord(installed: app)

@@ -10,6 +10,23 @@ import UniformTypeIdentifiers
 import ZIPFoundation
 
 @MainActor
+enum NativeIconLoading {
+    static func load(_ request: NativeIconRequest, completion: @escaping (UIImage?) -> Void) -> (() -> Void)? {
+        let source: Kingfisher.Source = request.url.isFileURL
+            ? .provider(LocalFileImageDataProvider(fileURL: request.url)) : .network(ImageResource(downloadURL: request.url))
+        let task = KingfisherManager.shared.retrieveImage(with: source, options: [
+            .processor(DownsamplingImageProcessor(size: CGSize(width: request.size, height: request.size))),
+            .scaleFactor(request.scale), .backgroundDecode,
+        ]) { result in
+            DispatchQueue.main.async {
+                if case let .success(value) = result { completion(value.image) } else { completion(nil) }
+            }
+        }
+        return { task?.cancel() }
+    }
+}
+
+@MainActor
 struct NativeRow {
     var title: String
     var detail: String = ""
@@ -37,46 +54,6 @@ struct NativeRow {
         isDownload == other.isDownload && progress == other.progress &&
         (action == nil) == (other.action == nil) && (delete == nil) == (other.delete == nil) && deleteTitle == other.deleteTitle
     }
-}
-@MainActor
-final class NativeCell: UITableViewCell {
-    let progressFill = NativeProgressFill(frame: .zero)
-    var representedIcon: URL?
-    var imageTask: DownloadTask?
-    override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
-        super.init(style: .subtitle, reuseIdentifier: reuseIdentifier)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    override func layoutSubviews() {
-        accessoryView?.sizeToFit()
-        super.layoutSubviews()
-    }
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        imageTask?.cancel()
-        imageTask = nil
-        representedIcon = nil
-    }
-}
-@MainActor
-final class NativeProgressFill: UIView {
-    private let fill = UIView()
-    private var fraction = 0.0
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false; clipsToBounds = true
-        fill.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.28)
-        addSubview(fill)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    func update(_ value: Double) {
-        fraction = min(1, max(0, value))
-        guard window != nil else { layoutFill(); return }
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveLinear, .allowUserInteraction]) { self.layoutFill() }
-    }
-    func reset() { fill.layer.removeAllAnimations(); fraction = 0; layoutFill() }
-    override func layoutSubviews() { super.layoutSubviews(); layoutFill() }
-    private func layoutFill() { fill.frame = CGRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height) }
 }
 @MainActor
 final class NativeDescriptionCell: UITableViewCell, UITextViewDelegate {
@@ -248,8 +225,9 @@ final class NativeMetricCell: UITableViewCell {
     required init?(coder: NSCoder) { fatalError() }
     func update(_ values: [Int], actions: [Int: () -> Void]) {
         state.actions = actions
-        state.values = values
+        if state.values != values { state.values = values }
     }
+    override func prepareForReuse() { super.prepareForReuse(); state.actions = [:] }
 }
 @MainActor
 struct NativeSection {
@@ -267,6 +245,7 @@ class NativePage: UITableViewController, NativeSheetContent {
     private var scheduled = false
     private var swipingRow = false
     private var reloadAfterSwipe = false
+    private var reloadAfterTransition = false
     var working = false
     init(_ model: AppModel, title: String) {
         self.model = model
@@ -314,6 +293,16 @@ class NativePage: UITableViewController, NativeSheetContent {
         // Reconfiguring a cell during UIKit's swipe interaction changes its
         // layout and swipe offset. Apply the latest snapshot once editing ends.
         guard !swipingRow else { reloadAfterSwipe = true; return }
+        // Preserve the current content during interactive and animated pushes /
+        // pops. UIKit's completion also runs when an interactive pop is cancelled.
+        if !sections.isEmpty, let transition = transitionCoordinator, transition.isAnimated {
+            guard !reloadAfterTransition else { return }
+            reloadAfterTransition = true
+            if transition.animate(alongsideTransition: nil, completion: { [weak self] _ in
+                self?.reloadAfterTransition = false; self?.scheduleReload()
+            }) { return }
+            reloadAfterTransition = false
+        }
         let previous = sections
         withObservationTracking { sections = rows() } onChange: { [weak self] in
             Task { @MainActor in self?.scheduleReload() }
@@ -379,20 +368,14 @@ class NativePage: UITableViewController, NativeSheetContent {
             config.secondaryTextProperties.font = .preferredFont(forTextStyle: .footnote)
             config.directionalLayoutMargins.top = 10; config.directionalLayoutMargins.bottom = 10
         }
-        let previousImage = cell.representedIcon == row.icon ? (cell.contentConfiguration as? UIListContentConfiguration)?.image : nil
-        cell.imageTask?.cancel()
-        cell.representedIcon = row.icon
-        if let url = row.icon {
-            config.image = previousImage ?? UIImage(systemName: "app")
-            let source: Kingfisher.Source = url.isFileURL ? .provider(LocalFileImageDataProvider(fileURL: url)) : .network(ImageResource(downloadURL: url))
-            cell.imageTask = KingfisherManager.shared.retrieveImage(with: source, options: [.processor(DownsamplingImageProcessor(size: CGSize(width: iconSize, height: iconSize))), .scaleFactor(UIScreen.main.scale), .backgroundDecode]) { [weak cell] result in
-                DispatchQueue.main.async {
-                    guard let cell, cell.representedIcon == url, case let .success(value) = result,
-                          var current = cell.contentConfiguration as? UIListContentConfiguration else { return }
-                    current.image = value.image; cell.contentConfiguration = current
-                }
+        let request = row.icon.map { NativeIconRequest(url: $0, size: iconSize, scale: max(1, traitCollection.displayScale), revision: row.iconRevision) }
+        let image = cell.iconState.update(request, load: NativeIconLoading.load) { [weak cell] image in
+            guard let cell, var current = cell.contentConfiguration as? UIListContentConfiguration else { return }
+            UIView.performWithoutAnimation {
+                current.image = image; cell.contentConfiguration = current
             }
         }
+        if row.icon != nil { config.image = image ?? UIImage(systemName: "app") }
         cell.contentConfiguration = config
         if let action = row.accessoryAction {
             let button = UIButton(type: .system, primaryAction: action)
@@ -413,6 +396,9 @@ class NativePage: UITableViewController, NativeSheetContent {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         sections[indexPath.section].rows[indexPath.row].action?()
+    }
+    override func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if !tableView.visibleCells.contains(where: { $0 === cell }) { (cell as? NativeCell)?.releaseIcon() }
     }
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let row = sections[indexPath.section].rows[indexPath.row]
@@ -632,7 +618,7 @@ final class NativeTabs: UITabBarController, UITabBarControllerDelegate {
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad(); delegate = self
-        let pages: [(UIViewController, String, String)] = [(apps, "应用", "square.stack.3d.up"), (NativeTools(model), "工具", "wrench.and.screwdriver"), (NativeAccounts(model), "账户", "person.crop.circle"), (store, "搜索", "magnifyingglass")]
+        let pages: [(UIViewController, String, String)] = [(apps, "应用", "square.stack.3d.up"), (NativeData(model), "数据", "chart.bar.xaxis"), (NativeAccounts(model), "账户", "person.crop.circle"), (store, "搜索", "magnifyingglass")]
         viewControllers = pages.map { page, title, icon in
             let nav = UINavigationController(rootViewController: page)
             nav.navigationBar.prefersLargeTitles = true

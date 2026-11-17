@@ -2,5 +2,4 @@
 #import "PairingHost.h"
 #import "DeviceInspector.h"
 #import "DeviceInstaller.h"
-#import "LocalPerformance.h"
 

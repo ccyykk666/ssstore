@@ -57,6 +57,9 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
                 }),
             ]),
             NativeSection(title: "下载管理", rows: [
+                NativeRow(title: clearingCache ? "正在清理缓存…" : (cacheStatus.isEmpty ? "清理缓存" : cacheStatus),
+                    color: .systemBlue, action: working || model.busy ? nil : { [weak self] in self?.clearCache() }),
+                link("日志") { [weak self] in guard let self else { return }; push(NativeLogs(model)) },
                 NativeRow(title: "删除全部下载", color: .systemRed, action: { [weak self] in
                     self?.confirm("删除全部下载？") { Downloads.this.removeAll() }
                 }),
@@ -69,9 +72,6 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
                         } catch { self?.alert(error.localizedDescription) }
                     }
                 }),
-                NativeRow(title: clearingCache ? "正在清理缓存…" : (cacheStatus.isEmpty ? "清理缓存" : cacheStatus),
-                    color: .systemBlue, action: working || model.busy ? nil : { [weak self] in self?.clearCache() }),
-                link("日志") { [weak self] in guard let self else { return }; push(NativeLogs(model)) },
             ]),
         ]
         if !model.ignoredApps.names.isEmpty { sections.append(NativeSection(rows: [link("已忽略应用") { [weak self] in guard let self else { return }; push(NativeIgnored(model)) }])) }
@@ -98,14 +98,34 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
 @MainActor
 final class NativeIgnored: NativePage {
     private var ids: [String] = []
+    private var attemptedIconRepair = false
     init(_ model: AppModel) { super.init(model, title: "已忽略应用") }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .refresh, primaryAction: UIAction { [weak self] _ in self?.repairIcons() })
+    }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if !attemptedIconRepair, model.hasPairing, !model.busy,
+           ids.contains(where: { model.localIconURL(for: model.ignoredApps.application(for: $0)) == nil && model.ignoredApps.iconURLs?[$0] == nil }) {
+            repairIcons()
+        }
+    }
+    private func repairIcons() {
+        guard !working, !model.busy, model.hasPairing else { return }
+        attemptedIconRepair = true
+        // Refresh local metadata/icons only. Ignored applications stay excluded
+        // from the visible inventory and never enter store version queries.
+        run { [self] in _ = await model.scan() }
+    }
     override func rows() -> [NativeSection] {
         ids = model.ignoredApps.names.keys.sorted()
         return [NativeSection(rows: ids.map { id in NativeRow(title: model.ignoredApps.names[id] ?? id, detail: id, icon: model.localIconURL(for: model.ignoredApps.application(for: id)) ?? model.ignoredApps.iconURLs?[id], compact: true) })]
     }
     override func reload() {
         guard isViewLoaded else { return }
+        navigationItem.rightBarButtonItem?.isEnabled = !working && !model.busy && model.hasPairing
         let remaining = model.ignoredApps.bundleIDs
         if ids.count == remaining.count + 1, let removed = ids.firstIndex(where: { !remaining.contains($0) }) {
             sections = rows()

@@ -8,6 +8,12 @@ final class InspectionTests: XCTestCase {
         for removed in [InspectionOperation.installedApps, .documents, .container, .coreFiles] {
             XCTAssertFalse(InspectionOperation.menu.contains(removed))
         }
+        for removed in [InspectionOperation.dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot] {
+            XCTAssertFalse(InspectionOperation.menu.contains(removed))
+        }
+        for kept in [InspectionOperation.appDetails, .appCapabilities, .allStorage, .profiles, .deviceInfo, .icon, .screenshot] {
+            XCTAssertTrue(InspectionOperation.menu.contains(kept))
+        }
         // Keep the existing single-app tools scoped to the selected application.
         XCTAssertTrue(InspectionOperation.appDetails.requiresApp)
         XCTAssertTrue(InspectionOperation.documents.requiresApp)

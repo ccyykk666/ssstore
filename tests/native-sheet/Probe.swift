@@ -128,6 +128,7 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
     }
 
     private func exercise(_ root: UIViewController) async {
+        guard exerciseListRendering() else { return }
         let address = "https://ssstore-install-manifest.kkkk0615.chatgpt.site/manifest.plist"
         let settings = SheetPage("设置", sections: [
             .init(title: "连接配置", rows: [("IP 地址", "10.7.0.1"), ("端口", "49152"), ("配对", "已配对")]),
@@ -189,5 +190,56 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
         await dismiss(fitting)
         guard root.presentedViewController == nil else { SheetTrace.shared.mark("fitting-dismiss-incomplete", status: "failed"); return }
         SheetTrace.shared.mark("finished", status: "passed")
+    }
+
+    private func exerciseListRendering() -> Bool {
+        SheetTrace.shared.mark("list-icon-lifecycle")
+        let state = NativeIconState()
+        var completions: [(UIImage?) -> Void] = [], cancellations = 0, delivered = 0
+        let loader: NativeIconState.Loader = { _, completion in
+            completions.append(completion); return { cancellations += 1 }
+        }
+        func require(_ condition: Bool, _ message: String) -> Bool {
+            if !condition { SheetTrace.shared.mark("list-regression", status: "failed", detail: message) }
+            return condition
+        }
+        let first = NativeIconRequest(url: URL(string: "https://example.com/a.png")!, size: 46, scale: 3, revision: 0)
+        let next = NativeIconRequest(url: URL(string: "https://example.com/b.png")!, size: 46, scale: 3, revision: 0)
+        for _ in 0..<50 { _ = state.update(first, load: loader) { _ in delivered += 1 } }
+        guard require(completions.count == 1 && cancellations == 0, "Progress refresh restarted an in-flight icon") else { return false }
+        _ = state.update(next, load: loader) { _ in delivered += 1 }
+        completions[0](UIImage())
+        guard require(state.image == nil && delivered == 0 && cancellations == 1, "Reused request accepted a stale callback") else { return false }
+        let loaded = UIImage()
+        completions[1](loaded)
+        for _ in 0..<50 { _ = state.update(next, load: loader) { _ in delivered += 1 } }
+        guard require(completions.count == 2 && state.image === loaded && delivered == 1, "Loaded icon decoded again during text/progress updates") else { return false }
+        state.reset()
+        guard require(state.image == nil, "Reset retained the decoded image") else { return false }
+        _ = state.update(first, load: loader) { _ in delivered += 1 }
+        state.reset(); completions[2](UIImage())
+        guard require(state.image == nil && delivered == 1 && cancellations == 2, "Cancelled icon updated a reused cell") else { return false }
+        _ = state.update(first, load: { _, done in done(loaded); return { cancellations += 1 } }) { _ in delivered += 1 }
+        state.reset()
+        guard require(cancellations == 2, "Synchronously completed cache result retained cancellation") else { return false }
+        _ = state.update(first, load: loader) { _ in }
+        completions[3](nil)
+        _ = state.update(first, load: loader) { _ in }
+        guard require(completions.count == 5, "Failed request could not be retried") else { return false }
+        let revised = NativeIconRequest(url: first.url, size: 46, scale: 3, revision: 1)
+        _ = state.update(revised, load: loader) { _ in }
+        guard require(completions.count == 6, "Icon revision did not invalidate pending request") else { return false }
+        state.reset()
+        let cell = NativeCell(style: .subtitle, reuseIdentifier: "test")
+        var configuration = cell.defaultContentConfiguration(); configuration.image = loaded; cell.contentConfiguration = configuration
+        cell.prepareForReuse()
+        guard require((cell.contentConfiguration as? UIListContentConfiguration)?.image == nil, "Reusable cell retained previous icon") else { return false }
+        let progress = NativeProgressFill(frame: CGRect(x: 0, y: 0, width: 200, height: 40))
+        progress.update(0.5); progress.layoutIfNeeded()
+        guard require(progress.subviews.first?.frame.width == 100, "First progress value animated from a reused row's origin") else { return false }
+        progress.update(.nan); progress.layoutIfNeeded()
+        guard require(progress.subviews.first?.frame.width == 0, "Invalid progress produced invalid geometry") else { return false }
+        progress.update(0.75); progress.reset()
+        return require(progress.subviews.first?.frame.width == 0, "Progress reuse retained old width")
     }
 }

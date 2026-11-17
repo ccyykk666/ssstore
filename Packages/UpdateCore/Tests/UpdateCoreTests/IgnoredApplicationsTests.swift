@@ -2,6 +2,38 @@ import XCTest
 @testable import UpdateCore
 
 final class IgnoredApplicationsTests: XCTestCase {
+    func testRefreshRepairsExistingIgnoredMetadataWithoutRestoringOrDroppingRemoteIcon() throws {
+        var ignored = IgnoredApplications()
+        let old = InstalledApp(bundleID: "hidden", name: "Hidden", version: "1")
+        let remote = URL(string: "https://example.com/icon.png")!
+        ignored.ignore(old, iconURL: remote)
+        var refreshed = old; refreshed.version = "2"; refreshed.localIconKey = String(repeating: "a", count: 64)
+        ignored.captureMetadata(from: [refreshed, record("visible").installed])
+        XCTAssertEqual(ignored.application(for: "hidden").localIconKey, refreshed.localIconKey)
+        XCTAssertEqual(ignored.application(for: "hidden").version, "2")
+        XCTAssertEqual(ignored.iconURLs?["hidden"], remote)
+        XCTAssertEqual(ignored.visible([AppRecord(installed: refreshed), record("visible")]).map(\.id), ["visible"])
+        ignored.captureMetadata(from: [old])
+        XCTAssertEqual(ignored.application(for: "hidden").localIconKey, refreshed.localIconKey)
+        XCTAssertEqual(ignored.bundleIDs, ["hidden"])
+        XCTAssertNil(ignored.applications?["visible"])
+    }
+    func testEvictedLocalIconAllowsStoreFallbackAndRepairedFileBecomesAvailable() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let key = String(repeating: "b", count: 64)
+        let app = InstalledApp(bundleID: "hidden", name: "Hidden", version: "1", localIconKey: key)
+        let remote = URL(string: "https://example.com/icon.png")!
+        XCTAssertEqual(LocalAppIcon.url(for: app, in: directory) ?? remote, remote)
+        let local = directory.appendingPathComponent(key).appendingPathExtension("png")
+        try Data([1, 2, 3]).write(to: local)
+        XCTAssertEqual(LocalAppIcon.url(for: app, in: directory), local)
+        try FileManager.default.removeItem(at: local)
+        XCTAssertNil(LocalAppIcon.url(for: app, in: directory))
+        var invalid = app; invalid.localIconKey = "../" + key
+        XCTAssertNil(LocalAppIcon.url(for: invalid, in: directory))
+    }
     func testLegacyIgnoredListKeepsEntriesWhenIconMetadataIsMissing() throws {
         let data = Data(#"{"names":{"com.example.hidden":"Hidden"}}"#.utf8)
         var ignored = try JSONDecoder().decode(IgnoredApplications.self, from: data)

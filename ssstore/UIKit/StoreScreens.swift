@@ -10,6 +10,7 @@ import ZIPFoundation
 
 @MainActor
 final class NativeProductHeaderCell: UITableViewCell {
+    private let iconState = NativeIconState()
     private let icon = UIImageView()
     private let name = UILabel()
     private let price = UILabel()
@@ -32,11 +33,12 @@ final class NativeProductHeaderCell: UITableViewCell {
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 52), icon.heightAnchor.constraint(equalToConstant: 52), row.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20), row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20), row.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12), row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12)])
     }
     required init?(coder: NSCoder) { fatalError() }
-    override func prepareForReuse() { super.prepareForReuse(); icon.kf.cancelDownloadTask() }
+    override func prepareForReuse() { super.prepareForReuse(); iconState.reset(); icon.image = nil }
     func update(_ row: NativeRow) {
         name.text = row.title; price.text = row.badge; seller.text = row.detail
         price.isHidden = row.badge?.isEmpty != false; seller.isHidden = row.detail.isEmpty
-        icon.kf.setImage(with: row.icon, placeholder: UIImage(systemName: "app"), options: [.processor(DownsamplingImageProcessor(size: CGSize(width: 52, height: 52))), .scaleFactor(UIScreen.main.scale), .backgroundDecode])
+        let request = row.icon.map { NativeIconRequest(url: $0, size: 52, scale: max(1, traitCollection.displayScale), revision: row.iconRevision) }
+        icon.image = iconState.update(request, load: NativeIconLoading.load) { [weak self] image in self?.icon.image = image } ?? UIImage(systemName: "app")
     }
 }
 

@@ -39,4 +39,5 @@ final class SSStoreSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneWillEnterForeground(_ scene: UIScene) {
         (UIApplication.shared.delegate as? AppDelegate)?.applicationWillEnterForeground(UIApplication.shared)
     }
+    func sceneDidEnterBackground(_ scene: UIScene) { StoreRuntime.releaseTransientMemory() }
 }

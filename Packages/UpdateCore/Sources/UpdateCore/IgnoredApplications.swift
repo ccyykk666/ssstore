@@ -26,9 +26,12 @@ public struct IgnoredApplications: Codable, Equatable, Sendable {
     }
 
     public mutating func captureMetadata(from apps: [InstalledApp]) {
-        for app in apps where names[app.id] != nil && applications?[app.id] == nil {
+        for app in apps where names[app.id] != nil {
             if applications == nil { applications = [:] }
-            applications?[app.id] = app
+            var refreshed = app
+            // A sparse response must not discard a previously known local icon.
+            if refreshed.localIconKey == nil { refreshed.localIconKey = applications?[app.id]?.localIconKey }
+            if applications?[app.id] != refreshed { applications?[app.id] = refreshed }
         }
     }
 

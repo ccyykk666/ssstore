@@ -126,21 +126,25 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         if (!Check(installation_proxy_get_apps(client, NULL, NULL, 0, &raw, &count), @"查询应用列表", error)) return nil;
         NSMutableArray *apps = [NSMutableArray array];
         plist_t *nodes = raw;
+        BOOL invalidInventory = NO;
         for (size_t index = 0; index < count; index++) {
-            NSDictionary *row = ReadPlist(nodes[index]);
-            if (!row) { SetError(error, @"无法解析设备返回的应用清单。"); return nil; }
-            // Only return fields needed for update detection, never credentials or entitlements.
-            NSMutableDictionary *item = [NSMutableDictionary dictionary];
-            for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName",
-                                    @"CFBundleShortVersionString", @"CFBundleVersion", @"ApplicationType"]) {
-                if ([row[key] isKindOfClass:NSString.class]) item[key] = row[key];
+            @autoreleasepool {
+                NSDictionary *row = ReadPlist(nodes[index]);
+                if (!row) { invalidInventory = YES; break; }
+                // Only return fields needed for update detection, never credentials or entitlements.
+                NSMutableDictionary *item = [NSMutableDictionary dictionary];
+                for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName",
+                                        @"CFBundleShortVersionString", @"CFBundleVersion", @"ApplicationType"]) {
+                    if ([row[key] isKindOfClass:NSString.class]) item[key] = row[key];
+                }
+                if (![item[@"CFBundleIdentifier"] length]) continue;
+                item[@"LocalIconKey"] = IconKey(item);
+                MergeStoreMetadata(item, row);
+                MergeBuildMetadata(item, row);
+                [apps addObject:item];
             }
-            if (![item[@"CFBundleIdentifier"] length] || [ignored containsObject:item[@"CFBundleIdentifier"]]) continue;
-            item[@"LocalIconKey"] = IconKey(item);
-            MergeStoreMetadata(item, row);
-            MergeBuildMetadata(item, row);
-            [apps addObject:item];
         }
+        if (invalidInventory) { SetError(error, @"无法解析设备返回的应用清单。"); return nil; }
         NSData *result = [NSJSONSerialization dataWithJSONObject:apps options:0 error:error];
         if (!result) return nil;
         inventory(result); // Publish the list before the icon loop finishes.
@@ -160,14 +164,16 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         plist_dict_set_item(browseOptions, "ReturnAttributes", attributes);
         if (Check(installation_proxy_browse(client, browseOptions, &browseRows, &browseCount), @"补充安装元数据", &readError)) {
             for (size_t index = 0; index < browseCount; index++) {
-                NSDictionary *row = ReadPlist(browseRows[index]);
-                if (![row[@"CFBundleIdentifier"] isKindOfClass:NSString.class]) continue;
-                NSMutableDictionary *item = byID[row[@"CFBundleIdentifier"]];
-                if (!item) continue;
-                if ([row[@"CFBundleShortVersionString"] isKindOfClass:NSString.class]) item[@"BrowseVersion"] = row[@"CFBundleShortVersionString"];
-                if ([row[@"CFBundleVersion"] isKindOfClass:NSString.class]) item[@"BrowseBuild"] = row[@"CFBundleVersion"];
-                MergeStoreMetadata(item, row);
-                MergeBuildMetadata(item, row);
+                @autoreleasepool {
+                    NSDictionary *row = ReadPlist(browseRows[index]);
+                    if (![row[@"CFBundleIdentifier"] isKindOfClass:NSString.class]) continue;
+                    NSMutableDictionary *item = byID[row[@"CFBundleIdentifier"]];
+                    if (!item) continue;
+                    if ([row[@"CFBundleShortVersionString"] isKindOfClass:NSString.class]) item[@"BrowseVersion"] = row[@"CFBundleShortVersionString"];
+                    if ([row[@"CFBundleVersion"] isKindOfClass:NSString.class]) item[@"BrowseBuild"] = row[@"CFBundleVersion"];
+                    MergeStoreMetadata(item, row);
+                    MergeBuildMetadata(item, row);
+                }
             }
             [versionNotes addObject:@"已读取 InstallationProxy Lookup / Browse"];
         } else {
@@ -197,6 +203,13 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         if (missing.count == 0) {
             return result;
         }
+        // Ignored apps still need metadata/icons for Settings and restoration.
+        // Fetch visible app icons first; store update filtering stays in Swift.
+        [missing sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            BOOL first = [ignored containsObject:a[@"CFBundleIdentifier"]];
+            BOOL second = [ignored containsObject:b[@"CFBundleIdentifier"]];
+            return first == second ? NSOrderedSame : first ? NSOrderedDescending : NSOrderedAscending;
+        }];
         progress(@"正在连接图标服务…");
         // Reuse this authenticated tunnel, not one new connection per icon.
         IdeviceFfiError *failure = springboard_services_connect_rsd(adapter, handshake, &springboard);
