@@ -187,6 +187,12 @@ final class AppModel: ObservableObject {
             return (result, reportURL)
         } catch {
             logger.warning("Device inspection failed operation=\(operation.rawValue) bundle=\(bundleID) source=\(source ?? operation.rawValue): \(DiagnosticLog.errorDetails(error))")
+            let nativeError = error as NSError
+            if nativeError.domain == "ssstore.AppFiles" {
+                let keys = ["installationLookupSucceeded", "applicationFound", "fileSharingEnabled", "installationLookupError"]
+                let context = keys.compactMap { key in nativeError.userInfo[key].map { "\(key)=\($0)" } }.joined(separator: " ")
+                logger.info("App file access diagnostic bundle=\(bundleID) \(DiagnosticLog.redact(context))")
+            }
             inspectionReceipts[key] = InspectionReceipt(success: false, message: error.localizedDescription)
             saveInspectionReceipts()
             throw error

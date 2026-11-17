@@ -2,6 +2,7 @@
 @import IDevice;
 #include <arpa/inet.h>
 #include <math.h>
+#import <TargetConditionals.h>
 
 // Custom additive entry point in the pinned dependency. Existing upstream APIs
 // retain their ABI and direct connection behavior.
@@ -115,8 +116,16 @@ static NSDictionary *PExecutablePaths(struct AppServiceHandle *service) {
     @try {
         if (isCancelled()) return YES;
         if (!PCheck(rp_pairing_file_read(path.UTF8String, &pairing), @"读取配对文件", error)) return NO;
+#if TARGET_OS_SIMULATOR
+        // Only the device arm64 slice is rebuilt with the additive relay API.
+        // Keep simulator builds linkable against the original upstream slices.
+        if (error) *error = [NSError errorWithDomain:@"ssstore.Performance" code:1
+            userInfo:@{NSLocalizedDescriptionKey:@"设备性能采样需要在真机上运行。"}];
+        return NO;
+#else
         if (!PCheck(ssstore_tunnel_create_rppairing_relay((const idevice_sockaddr *)&address, sizeof(address), "ssstore-performance",
                     pairing, NULL, NULL, PMapTunnelPort, (__bridge void *)mapTunnelPort, &adapter, &handshake), @"连接性能通道", error)) return NO;
+#endif
         if (isCancelled()) return YES;
         NSArray *applications = @[];
         IdeviceFfiError *optionalService = app_service_connect_rsd(adapter, handshake, &appService);
