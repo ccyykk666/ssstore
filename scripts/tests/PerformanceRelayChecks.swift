@@ -3,7 +3,7 @@ import Network
 
 @main
 struct PerformanceRelayChecks {
-    enum Failure: Error { case noPort, mismatch, deadline, notCancelled }
+    enum Failure: Error { case noPort, pairingMismatch, pairingEOF, pairingCancelledTunnel, tunnelMismatch, deadline, notCancelled }
     static func main() async throws {
         // Independent echo server proves real transport forwarding, including
         // backpressure across multiple 64 KiB receives, without an iPhone.
@@ -36,7 +36,7 @@ struct PerformanceRelayChecks {
             client.send(content: payload, completion: .contentProcessed { _ in })
             receive(client, expected: payload.count, accumulated: Data(), continuation: continuation)
         }
-        guard returned == payload else { throw Failure.mismatch }
+        guard returned == payload else { throw Failure.pairingMismatch }
         // RPPairing advertises another port. The TLS client must reach that
         // port rather than the same-numbered port on localhost (the old bug).
         let tunnelServer = try NWListener(using: .tcp, on: .any)
@@ -64,12 +64,13 @@ struct PerformanceRelayChecks {
                 continuation.resume(returning: complete || error != nil)
             }
         }
-        guard pairingClosed, !relay.isStopped else { throw Failure.mismatch }
+        guard pairingClosed else { throw Failure.pairingEOF }
+        guard !relay.isStopped else { throw Failure.pairingCancelledTunnel }
         let tunnelReturned: Data = try await withCheckedThrowingContinuation { continuation in
             tunnelClient.send(content: payload, completion: .contentProcessed { _ in })
             receive(tunnelClient, expected: payload.count, accumulated: Data(), continuation: continuation)
         }
-        guard tunnelReturned == payload else { throw Failure.mismatch }
+        guard tunnelReturned == payload else { throw Failure.tunnelMismatch }
         // Cancelling a recording must interrupt the second blocked reader too.
         let closed: Bool = await withCheckedContinuation { continuation in
             tunnelClient.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, complete, error in
@@ -99,7 +100,7 @@ struct PerformanceRelayChecks {
             if let error { continuation.resume(throwing: error); return }
             var result = accumulated; if let data { result.append(data) }
             if result.count == expected { continuation.resume(returning: result) }
-            else if complete { continuation.resume(throwing: Failure.mismatch) }
+            else if complete { continuation.resume(throwing: Failure.tunnelMismatch) }
             else { receive(connection, expected: expected, accumulated: result, continuation: continuation) }
         }
     }

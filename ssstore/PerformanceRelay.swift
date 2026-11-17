@@ -10,10 +10,12 @@ final class PerformanceRelay: @unchecked Sendable {
         var ready: ((Result<UInt16, Error>) -> Void)?
         var connections: [NWConnection] = []
         var accepted = false
+        var closed = false
         init(_ listener: NWListener, ready: @escaping (Result<UInt16, Error>) -> Void) {
             self.listener = listener; self.ready = ready
         }
         func close() {
+            guard !closed else { return }; closed = true
             listener.newConnectionHandler = nil; listener.stateUpdateHandler = nil; listener.cancel()
             for connection in connections { connection.stateUpdateHandler = nil; connection.cancel() }
             connections = []
@@ -71,7 +73,7 @@ final class PerformanceRelay: @unchecked Sendable {
                     if let port = listener.port, let pending = endpoint.ready {
                         endpoint.ready = nil; pending(.success(port.rawValue))
                     }
-                case .failed(let error): self.close(error: error)
+                case .failed(let error): self.endpointFailed(endpoint, error: error)
                 default: break
                 }
             }
@@ -88,38 +90,46 @@ final class PerformanceRelay: @unchecked Sendable {
         let outgoing = NWConnection(host: NWEndpoint.Host(host), port: targetPort, using: .tcp)
         endpoint.connections = [incoming, outgoing]
         for connection in endpoint.connections {
-            connection.stateUpdateHandler = { [weak self] state in
-                if case .failed(let error) = state { self?.close(error: error) }
+            connection.stateUpdateHandler = { [weak self, weak endpoint] state in
+                if case .failed(let error) = state, let endpoint { self?.endpointFailed(endpoint, error: error) }
             }
             connection.start(queue: queue)
         }
         forward(incoming, to: outgoing, endpoint: endpoint)
         forward(outgoing, to: incoming, endpoint: endpoint)
     }
+    private func endpointFailed(_ endpoint: Endpoint, error: Error) {
+        guard !endpoint.closed, !isStopped else { return }
+        if endpoints.count == 2, endpoint === endpoints.first {
+            // Once CreateTCPListener has succeeded, the pairing stream is no
+            // longer used. Its FIN or RST must not kill the independent TLS stream.
+            endpoint.close()
+        } else { close(error: error) }
+    }
     private func forward(_ source: NWConnection, to destination: NWConnection, endpoint: Endpoint) {
         source.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
-            guard let self, !self.isStopped else { return }
-            if let error { self.close(error: error); return }
+            guard let self, !self.isStopped, !endpoint.closed else { return }
+            if let error { self.endpointFailed(endpoint, error: error); return }
             guard let data, !data.isEmpty else {
                 // RPPairing closes normally once the TLS tunnel is established.
                 // Its EOF must never cancel that independent tunnel.
-                if complete { self.finishDirection(to: destination) }
+                if complete { self.finishDirection(to: destination, endpoint: endpoint) }
                 else { self.forward(source, to: destination, endpoint: endpoint) }
                 return
             }
             destination.send(content: data, completion: .contentProcessed { [weak self] error in
-                guard let self, !self.isStopped else { return }
-                if let error { self.close(error: error) }
-                else if complete { self.finishDirection(to: destination) }
+                guard let self, !self.isStopped, !endpoint.closed else { return }
+                if let error { self.endpointFailed(endpoint, error: error) }
+                else if complete { self.finishDirection(to: destination, endpoint: endpoint) }
                 else { self.forward(source, to: destination, endpoint: endpoint) }
             })
         }
     }
-    private func finishDirection(to connection: NWConnection) {
+    private func finishDirection(to connection: NWConnection, endpoint: Endpoint) {
         // Propagate a TCP half-close after the final bytes; the other direction
         // may still have buffered data. Keep the endpoint alive until teardown.
         connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] error in
-            if let self, !self.isStopped, let error { self.close(error: error) }
+            if let error { self?.endpointFailed(endpoint, error: error) }
         })
     }
     func receivedSample() { queue.async { if !self.isStopped { self.armTimeout(seconds: 15) } } }
