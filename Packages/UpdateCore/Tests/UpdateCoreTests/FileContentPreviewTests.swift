@@ -44,4 +44,15 @@ final class FileContentPreviewTests: XCTestCase {
         let entry = try JSONDecoder().decode(RemoteInspectionEntry.self, from: Data(#"{"name":"file","path":"/file"}"#.utf8))
         XCTAssertNil(entry.isDirectory); XCTAssertNil(entry.size)
     }
+    func testLocalPreviewDoesNotFollowSymbolicLinksOrOpenDirectories() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let target = root.appendingPathComponent("target.txt"), link = root.appendingPathComponent("link")
+        try Data("original".utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        XCTAssertEqual(try FileContentPreview.load(target).text, "original")
+        XCTAssertThrowsError(try FileContentPreview.load(link))
+        XCTAssertThrowsError(try FileContentPreview.load(root))
+    }
 }

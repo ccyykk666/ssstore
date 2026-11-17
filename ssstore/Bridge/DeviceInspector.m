@@ -441,6 +441,7 @@ static void IFreeStrings(char **strings, size_t count) {
                     struct AfcFileInfo info = {0};
                     REQUIRE(afc_get_file_info(afc, remotePath.UTF8String, &info), @"读取文件属性");
                     BOOL isDirectory = [IString(info.st_ifmt) isEqualToString:@"S_IFDIR"];
+                    BOOL isRegular = [IString(info.st_ifmt) isEqualToString:@"S_IFREG"];
                     value = @{@"path":remotePath, @"isDirectory":@(isDirectory), @"size":@(info.size), @"blocks":@(info.blocks),
                         @"createdAt":[NSDate dateWithTimeIntervalSince1970:info.creation], @"modifiedAt":[NSDate dateWithTimeIntervalSince1970:info.modified],
                         @"type":IString(info.st_ifmt), @"links":IString(info.st_nlink), @"linkTarget":IString(info.st_link_target)};
@@ -448,6 +449,7 @@ static void IFreeStrings(char **strings, size_t count) {
                     afc_file_info_free(&info);
                     if ([op isEqualToString:@"fileRead"]) {
                         if (isDirectory) { IError(error, @"此项为目录，请打开目录。"); return nil; }
+                        if (!isRegular) { IError(error, @"此类型不支持内容读取，请查看文件属性。"); return nil; }
                         const NSUInteger limit = 32 * 1024 * 1024;
                         if (fileSize > limit) { IError(error, @"文件过大。"); return nil; }
                         REQUIRE(afc_file_open(afc, remotePath.UTF8String, AfcRdOnly, &fileHandle), @"只读打开文件");

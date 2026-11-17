@@ -20,9 +20,14 @@ public struct FileContentPreview: Sendable {
     public let truncated: Bool
 
     public static func load(_ file: URL) throws -> Self {
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        guard (attributes[.type] as? FileAttributeType) == .typeRegular else {
+            throw NSError(domain: "ssstore.FilePreview", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "仅支持普通文件的内容预览。"])
+        }
         let handle = try FileHandle(forReadingFrom: file)
         defer { try? handle.close() }
-        let size = (try FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         let data = try handle.read(upToCount: maximumBytes) ?? Data()
         return make(data: data, totalBytes: size, fileExtension: file.pathExtension)
     }

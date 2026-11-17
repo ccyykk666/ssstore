@@ -138,7 +138,7 @@ final class NativeAppDirectory: NativeSearchPage {
                 }
                 guard view.window != nil else { return }
                 if directory == true { push(NativeAppDirectory(model, application: application, source: source, path: child)); return }
-                if type == "S_IFLNK" {
+                if type != "S_IFREG" {
                     let info = try await model.inspect(.fileInfo, bundleID: application.bundleID, path: child, source: source.rawValue).0
                     push(NativeValues(model, title: entry.name, value: info.value)); return
                 }
@@ -146,7 +146,11 @@ final class NativeAppDirectory: NativeSearchPage {
                 guard let file = output.files.first, view.window != nil else { return }
                 let url = URL(fileURLWithPath: file.path)
                 let kind = UTType(filenameExtension: url.pathExtension)
-                if kind?.conforms(to: .image) == true || kind?.conforms(to: .pdf) == true || kind?.conforms(to: .audiovisualContent) == true { preview(url) }
+                if kind?.conforms(to: .image) == true || kind?.conforms(to: .pdf) == true || kind?.conforms(to: .audiovisualContent) == true {
+                    let preview = NativePreview(url)
+                    preview.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak preview] _ in preview?.dismiss(animated: true) })
+                    present(UINavigationController(rootViewController: preview), animated: true)
+                }
                 else { push(NativeFileContents(model: model, file: url, name: entry.name)) }
             } catch { failure = error.localizedDescription }
         }
