@@ -36,19 +36,24 @@ public struct LocalPerformanceReducer: Sendable {
         if previousScope != scope { self = Self(); previousScope = scope }
         issues = value.issues
         var cores: [Double?] = []
+        var totalTicks = 0.0, busyTicks = 0.0, validTicks = true
         if let ticks = value.cpuTicks {
             if let previousCPU, ticks.count == previousCPU.count {
-                cores = zip(ticks, previousCPU).map { now, before in
-                    guard now.count == 4, before.count == 4, zip(now, before).allSatisfy({ $0 >= $1 }) else { return nil }
+                for (now, before) in zip(ticks, previousCPU) {
+                    guard now.count == 4, before.count == 4, zip(now, before).allSatisfy({ $0 >= $1 }) else {
+                        cores.append(nil); validTicks = false; continue
+                    }
                     let delta = zip(now, before).map { Double($0 - $1) }
-                    let total = delta.reduce(0, +)
-                    return total > 0 ? min(100, max(0, (total - delta[2]) / total * 100)) : nil
+                    let total = delta.reduce(0, +), busy = total - delta[2]
+                    totalTicks += total; busyTicks += busy
+                    cores.append(total > 0 ? min(100, max(0, busy / total * 100)) : nil)
                 }
             }
             previousCPU = ticks
         } else { previousCPU = nil }
-        let cpu: Double? = !cores.isEmpty && cores.allSatisfy({ $0 != nil })
-            ? cores.compactMap { $0 }.reduce(0, +) / Double(cores.count) : nil
+        // A parked core may not advance its ticks. It contributes no elapsed
+        // CPU ticks; never discard the valid aggregate or invent a core load.
+        let cpu: Double? = validTicks && totalTicks > 0 ? min(100, max(0, busyTicks / totalTicks * 100)) : nil
         if networkIdentity != value.networkIdentity {
             received = PerformanceCounter(); sent = PerformanceCounter(); networkIdentity = value.networkIdentity
         }

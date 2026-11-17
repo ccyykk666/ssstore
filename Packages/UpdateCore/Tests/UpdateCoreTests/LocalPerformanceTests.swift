@@ -16,6 +16,13 @@ final class LocalPerformanceTests: XCTestCase {
         let reset = try reducer.consume(frame(3, ["cpuTicks": [[1, 1, 10, 0]]]), scope: .device)
         XCTAssertNil(reset.cpuPercent)
     }
+    func testParkedCoreDoesNotEraseAValidAggregate() throws {
+        var reducer = LocalPerformanceReducer()
+        _ = try reducer.consume(frame(1, ["cpuTicks": [[10, 10, 80, 0], [0, 0, 100, 0]]]), scope: .device)
+        let second = try reducer.consume(frame(2, ["cpuTicks": [[30, 10, 160, 0], [0, 0, 100, 0]]]), scope: .device)
+        XCTAssertEqual(second.cpuPercent, 20)
+        XCTAssertEqual(second.corePercent, [20, nil])
+    }
     func testInterfaceChangesAndCounterWrapNeverProduceSpikes() throws {
         var reducer = LocalPerformanceReducer()
         _ = try reducer.consume(frame(1, ["networkIdentity":"en0", "networkReceived":1000]), scope: .device)
