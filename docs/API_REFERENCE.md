@@ -1,3 +1,5 @@
+Current UI (0.6.0 build 78): the live panel uses direct local Mach, network interface, IOKit, FrontBoard and libproc reads only while visible. The remote performance recorder and other-app file browsing entries have been removed; downloaded IPA inspection remains. The dependency listings and earlier integrations below are reference material, not a promise that every declared service has a UI entry or system permission.
+
 # ssstore 0.5.2 device data interfaces
 
 This reference describes implemented calls, not guaranteed availability on a particular iOS release. The user's iOS 27.2 device has confirmed InstallationProxy metadata and SpringBoard icons. Other services must be tested on that device. The app displays actual errors rather than simulating unavailable data.

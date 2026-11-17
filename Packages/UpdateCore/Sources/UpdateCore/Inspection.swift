@@ -109,7 +109,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
         default: return ""
         }
     }
-    public static var menu: [Self] { allCases.filter { !$0.isFileHelper && $0 != .installedApps } }
+    public static var menu: [Self] { allCases.filter { !$0.isFileHelper && ![.installedApps, .documents, .container, .coreFiles].contains($0) } }
     public static var groups: [String] { menu.reduce(into: []) { if !$0.contains($1.group) { $0.append($1.group) } } }
 }
 

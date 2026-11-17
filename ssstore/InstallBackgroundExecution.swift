@@ -21,32 +21,6 @@ final class InstallBackgroundExecution {
 
     var isContinued: Bool { task != nil }
 
-    func beginMonitoring(id: UUID, onStop: @escaping () -> Void) async throws -> Bool {
-        guard #available(iOS 26.0, *) else { return false }
-        do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                var resolved = false
-                do {
-                    try start(id: id, name: "性能监控", subtitle: "正在连接采样服务…", purpose: "performance", onReady: {
-                        guard !resolved else { return }; resolved = true; continuation.resume()
-                    }, onStop: {
-                        onStop()
-                        guard !resolved else { return }; resolved = true
-                        continuation.resume(throwing: CancellationError())
-                    })
-                } catch {
-                    guard !resolved else { return }; resolved = true; continuation.resume(throwing: error)
-                }
-            }
-            return task != nil
-        } catch is CancellationError { throw CancellationError() }
-        catch {
-            finish(success: false)
-            logger.warning("Performance background execution unavailable: \(DiagnosticLog.errorDetails(error))")
-            return false
-        }
-    }
-
     /// Pairing can still run in the foreground when continued execution is
     /// unavailable. The caller exposes the limited short-task budget to the user.
     func beginPairing(id: UUID, name: String, onStop: @escaping () -> Void) async throws -> Bool {

@@ -5,7 +5,9 @@ final class InspectionTests: XCTestCase {
     func testApplicationInventoryCanLoadBeforeSelectingAnApplication() {
         XCTAssertFalse(InspectionOperation.installedApps.requiresApp)
         XCTAssertEqual(InspectionOperation.installedApps.service, InspectionOperation.appDetails.service)
-        XCTAssertFalse(InspectionOperation.menu.contains(.installedApps))
+        for removed in [InspectionOperation.installedApps, .documents, .container, .coreFiles] {
+            XCTAssertFalse(InspectionOperation.menu.contains(removed))
+        }
         // Keep the existing single-app tools scoped to the selected application.
         XCTAssertTrue(InspectionOperation.appDetails.requiresApp)
         XCTAssertTrue(InspectionOperation.documents.requiresApp)
