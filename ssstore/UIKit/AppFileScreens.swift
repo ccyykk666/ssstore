@@ -80,6 +80,7 @@ final class NativeAppDirectory: NativeSearchPage {
     private var failure: String?
     private var loaded = false
     private var hasDirectoryListing = false
+    private var canTryDeveloperFiles = false
     init(_ model: AppModel, application: PerformanceApplication, source: InspectionOperation, path: String = "/") {
         self.application = application; self.source = source; self.path = path
         super.init(model, title: path == "/" ? source.title : (path as NSString).lastPathComponent)
@@ -106,7 +107,17 @@ final class NativeAppDirectory: NativeSearchPage {
         if hasDirectoryListing {
             sections.append(NativeSection(rows: files.isEmpty ? [NativeRow(title: entries.isEmpty ? "没有文件" : "没有匹配的文件")] : files))
         } else if !working, failure != nil {
-            sections.append(NativeSection(rows: [NativeRow(title: "重试", color: .systemBlue, action: { [weak self] in self?.load() })]))
+            var actions = [NativeRow(title: "重试", color: .systemBlue, action: { [weak self] in self?.load() })]
+            if canTryDeveloperFiles {
+                actions.append(NativeRow(title: "尝试开发者文件目录", color: .systemBlue, action: { [weak self] in
+                    guard let self else { return }
+                    // Keep the alternate service explicit. A successful directory
+                    // list does not imply permission to read arbitrary files.
+                    let page = NativeInspection(model, operation: .coreFiles, bundle: application.bundleID)
+                    push(page); page.read()
+                }))
+            }
+            sections.append(NativeSection(rows: actions))
         }
         return sections
     }
@@ -125,13 +136,18 @@ final class NativeAppDirectory: NativeSearchPage {
     }
     private func load() {
         guard !working else { return }
-        working = true; failure = nil; hasDirectoryListing = false; entries = []; reload()
+        working = true; failure = nil; hasDirectoryListing = false; canTryDeveloperFiles = false; entries = []; reload()
         Task { [self] in
             defer { working = false; reload() }
             do {
                 entries = try await model.inspect(source, bundleID: application.bundleID, path: path, entryDetails: true).0.entries
                 hasDirectoryListing = true
-            } catch { failure = error.localizedDescription }
+            } catch {
+                failure = error.localizedDescription
+                let nativeError = error as NSError
+                canTryDeveloperFiles = nativeError.domain == "ssstore.AppFiles" &&
+                    (nativeError.userInfo["applicationFound"] as? Bool == true)
+            }
         }
     }
     private func open(_ entry: RemoteInspectionEntry) {

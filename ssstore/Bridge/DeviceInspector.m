@@ -101,21 +101,34 @@ static NSError *IApplicationFileFailure(InspectionConnection *c, NSString *bundl
     ICheck(failure, @"核对安装清单", &lookupError);
     IFreePlists(apps, count); installation_proxy_client_free(client);
     BOOL documents = [source isEqualToString:@"documents"];
+    // Lookup frequently omits Info.plist declarations. Absence is unknown,
+    // never an explicit false value (nil.boolValue would silently yield NO).
+    id sharingValue = application[@"UIFileSharingEnabled"];
+    NSNumber *sharing = [sharingValue isKindOfClass:NSNumber.class] ? sharingValue : nil;
+    id entitlements = application[@"Entitlements"];
+    id debuggingValue = [entitlements isKindOfClass:NSDictionary.class] ? entitlements[@"get-task-allow"] : nil;
+    NSNumber *debugging = [debuggingValue isKindOfClass:NSNumber.class] ? debuggingValue : nil;
     NSString *description;
     if (checked && !application) {
         description = @"系统安装清单未找到此应用。请返回刷新应用列表；已卸载或卸载保留数据的应用需要先重新安装。";
-    } else if (application && documents && [application[@"UIFileSharingEnabled"] isKindOfClass:NSNumber.class] && ![application[@"UIFileSharingEnabled"] boolValue]) {
+    } else if (application && documents && sharing && !sharing.boolValue) {
         description = @"此应用未开启文件共享，iOS 拒绝访问共享文档。";
     } else if (application && !documents) {
         description = @"应用已安装，但 iOS 未能打开其完整容器，可能受到容器权限限制。开启开发者模式不会自动开放所有应用的沙盒，具体错误已记入日志。";
+    } else if (application) {
+        description = sharing ? @"应用已安装并声明了文件共享，但系统文件服务未能打开其共享文档。可尝试开发者文件目录，具体错误已记入日志。"
+            : @"应用已安装，但系统文件服务未能打开其共享文档。设备未返回文件共享声明，不能判断该功能是否启用。可尝试开发者文件目录。";
     } else {
-        description = @"设备未能打开此应用的授权目录。请刷新应用列表后重试，具体服务错误已记入日志。";
+        description = @"无法核对应用安装状态，且系统文件服务未能打开此目录。具体错误已记入日志。";
     }
     NSMutableDictionary *details = [@{NSLocalizedDescriptionKey:description,
         NSUnderlyingErrorKey:underlying, @"bundleID":bundle, @"source":source,
         @"installationLookupSucceeded":@(checked), @"applicationFound":@(application != nil)} mutableCopy];
     if (lookupError) details[@"installationLookupError"] = lookupError.localizedDescription;
-    if (application) details[@"fileSharingEnabled"] = @([application[@"UIFileSharingEnabled"] boolValue]);
+    if (application) {
+        details[@"fileSharingEnabled"] = (id)sharing ?: @"unknown";
+        details[@"getTaskAllow"] = (id)debugging ?: @"unknown";
+    }
     return [NSError errorWithDomain:@"ssstore.AppFiles" code:underlying.code userInfo:details];
 }
 
