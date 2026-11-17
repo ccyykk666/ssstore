@@ -15,6 +15,17 @@ public struct PerformanceApplication: Codable, Equatable, Sendable, Identifiable
             return Self(bundleID: id, name: row["name"]?.string ?? id, path: row["path"]?.string ?? "")
         }
     }
+    /// House Arrest resolves CFBundleIdentifier in the installation database,
+    /// not CoreDevice's broader internal application index.
+    public static func fromInstalledApplications(_ value: InspectionValue) -> [Self] {
+        guard case .array(let rows) = value else { return [] }
+        var seen = Set<String>()
+        return rows.compactMap { row in
+            guard let id = row["CFBundleIdentifier"]?.string, !id.isEmpty, seen.insert(id).inserted else { return nil }
+            let name = row["CFBundleDisplayName"]?.string ?? row["CFBundleName"]?.string ?? id
+            return Self(bundleID: id, name: name.isEmpty ? id : name, path: row["Path"]?.string ?? "")
+        }
+    }
     public static func bundleID(forExecutable executable: String?, applications: [Self]) -> String? {
         guard let executable, let path = canonicalPath(executable) else { return nil }
         // Full bundle path boundaries, not substring/name guesses. Prefer a

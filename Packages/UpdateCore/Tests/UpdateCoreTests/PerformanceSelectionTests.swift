@@ -17,6 +17,21 @@ final class PerformanceSelectionTests: XCTestCase {
         ["pid": pid, "values": ["name": "Target", "executablePath": path, "cpuUsage": cpu,
                                   "physFootprint": 4096, "procAge": age, "netBytesIn": received]]
     }
+    func testFilePickerUsesInstallationIdentifiersAndDeduplicates() throws {
+        let rows: [[String: Any]] = [
+            ["CFBundleIdentifier": "com.example.Installed", "CFBundleDisplayName": "Example", "Path": "/var/App.app"],
+            ["CFBundleIdentifier": "com.example.Fallback", "CFBundleName": "Fallback"],
+            ["CFBundleIdentifier": "com.example.Installed", "CFBundleDisplayName": "Duplicate"],
+            ["bundleIdentifier": "com.example.Internal", "name": "CoreDevice-only row"],
+            ["CFBundleIdentifier": ""], ["CFBundleIdentifier": "com.example.NoName"]
+        ]
+        let value = try JSONDecoder().decode(InspectionValue.self, from: JSONSerialization.data(withJSONObject: rows))
+        let installed = PerformanceApplication.fromInstalledApplications(value)
+        XCTAssertEqual(installed.map(\.bundleID), ["com.example.Installed", "com.example.Fallback", "com.example.NoName"])
+        XCTAssertEqual(installed.map(\.name), ["Example", "Fallback", "com.example.NoName"])
+        XCTAssertEqual(installed[0].path, "/var/App.app")
+        XCTAssertTrue(PerformanceApplication.fromInstalledApplications(.null).isEmpty)
+    }
     func testPathAssociationUsesExactBundleBoundariesAndAliases() {
         XCTAssertEqual(PerformanceApplication.bundleID(forExecutable: "file:///private/var/containers/A/Target.app/Target", applications: apps), "app.target")
         XCTAssertNil(PerformanceApplication.bundleID(forExecutable: "/var/containers/A/Target.app-copy/Target", applications: apps))

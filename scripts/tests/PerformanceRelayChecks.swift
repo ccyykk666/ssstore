@@ -37,20 +37,53 @@ struct PerformanceRelayChecks {
             receive(client, expected: payload.count, accumulated: Data(), continuation: continuation)
         }
         guard returned == payload else { throw Failure.mismatch }
-        // A blocked reader must finish after cancellation, rather than leaking
-        // its worker/FFI handles. Repeated cancellation is intentionally harmless.
-        let closed: Bool = await withCheckedContinuation { continuation in
+        // RPPairing advertises another port. The TLS client must reach that
+        // port rather than the same-numbered port on localhost (the old bug).
+        let tunnelServer = try NWListener(using: .tcp, on: .any)
+        tunnelServer.newConnectionHandler = { connection in connection.start(queue: queue); echo(connection) }
+        let upstreamTunnelPort: UInt16 = try await withCheckedThrowingContinuation { continuation in
+            var resolved = false
+            tunnelServer.stateUpdateHandler = { state in
+                guard !resolved else { return }
+                if case .ready = state, let port = tunnelServer.port { resolved = true; continuation.resume(returning: port.rawValue) }
+                else if case .failed(let error) = state { resolved = true; continuation.resume(throwing: error) }
+            }
+            tunnelServer.start(queue: queue)
+        }
+        defer { tunnelServer.cancel() }
+        let tunnelPort = await Task.detached { relay.openTunnelPort(upstreamTunnelPort) }.value
+        guard tunnelPort > 0, tunnelPort != port else { throw Failure.noPort }
+        let tunnelClient = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: tunnelPort)!, using: .tcp)
+        tunnelClient.start(queue: queue)
+        defer { tunnelClient.cancel() }
+        // The short-lived pairing connection ends normally. The independent
+        // TLS connection must keep working after that EOF, including final bytes.
+        let pairingClosed: Bool = await withCheckedContinuation { continuation in
+            client.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in })
             client.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, complete, error in
+                continuation.resume(returning: complete || error != nil)
+            }
+        }
+        guard pairingClosed, !relay.isStopped else { throw Failure.mismatch }
+        let tunnelReturned: Data = try await withCheckedThrowingContinuation { continuation in
+            tunnelClient.send(content: payload, completion: .contentProcessed { _ in })
+            receive(tunnelClient, expected: payload.count, accumulated: Data(), continuation: continuation)
+        }
+        guard tunnelReturned == payload else { throw Failure.mismatch }
+        // Cancelling a recording must interrupt the second blocked reader too.
+        let closed: Bool = await withCheckedContinuation { continuation in
+            tunnelClient.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, complete, error in
                 continuation.resume(returning: complete || error != nil)
             }
             relay.cancel(); relay.cancel()
         }
         guard closed, relay.isStopped else { throw Failure.notCancelled }
+        guard relay.openTunnelPort(upstreamTunnelPort) == 0 else { throw Failure.notCancelled }
         let cancelled = PerformanceRelay(host: "127.0.0.1", port: upstreamPort)
         cancelled.cancel()
         do { _ = try await cancelled.open(); throw Failure.notCancelled }
         catch is CancellationError { }
-        print("Performance relay: real round trip, blocked-reader cancellation, repeated cancellation and pre-open cancellation passed")
+        print("Performance relay: two-port negotiation, pairing EOF isolation, 256 KiB round trips and cancellation passed")
     }
     static func echo(_ connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, complete, error in

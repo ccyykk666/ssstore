@@ -72,6 +72,7 @@ final class PerformanceMonitor {
                         var decodingError: Error?
                         do {
                             try DevicePerformance.stream(pairingPath: pairing, host: "127.0.0.1", port: localPort,
+                                mapTunnelPort: { relay.openTunnelPort($0) },
                                 isCancelled: { relay.isStopped }, sample: { data in
                                     do {
                                         let snapshot = try reducer.consume(data)

@@ -1,4 +1,4 @@
-"""Build the pinned idevice iOS slice with the reviewed sysmontap batch fix."""
+"""Build pinned idevice with sysmontap batches and cancellable two-port pairing."""
 import hashlib
 import os
 from pathlib import Path
@@ -29,7 +29,7 @@ def run(*args, **kwargs):
 
 def main():
     os.chdir(ROOT)
-    patches = [ROOT / "scripts/patches/sysmontap-batch.patch", ROOT / "scripts/patches/sysmontap-batch.rs"]
+    patches = [ROOT / "scripts/patches/sysmontap-batch.patch", ROOT / "scripts/patches/sysmontap-batch.rs", ROOT / "scripts/patches/rppairing-relay.patch"]
     digest = hashlib.sha256(COMMIT.encode() + b"".join(p.read_bytes() for p in patches)).hexdigest()
     cache = ROOT / "build/PerformanceDeviceKit"
     library = cache / f"{digest}.a"
@@ -58,6 +58,10 @@ def main():
                     raise ValueError("Pinned sysmontap source mismatch")
                 run("patch", "-p1", "-i", patches[0], cwd=roots[0], stdin=subprocess.DEVNULL)
                 with module.open("a") as output: output.write(patches[1].read_text())
+                tunnel_module = roots[0] / "ffi/src/tunnel_provider.rs"
+                if hashlib.sha256(tunnel_module.read_bytes()).hexdigest() != "dc18f5caa9822eae06971beaa1be9520df511cff1c2cf78517f0e41406720247":
+                    raise ValueError("Pinned RPPairing FFI source mismatch")
+                run("patch", "-p1", "-i", patches[2], cwd=roots[0], stdin=subprocess.DEVNULL)
                 roots[0].rename(source)
         env = os.environ.copy()
         env["CARGO_TARGET_DIR"] = str(ROOT / "build/PerformanceCargo")
@@ -74,7 +78,7 @@ def main():
         shutil.copyfile(built, staged); staged.replace(library)
     destination = ROOT / "Packages/DeviceKit/IDevice.xcframework/ios-arm64/libidevice_ffi.a"
     shutil.copyfile(library, destination)
-    print("Prepared pinned idevice iOS slice with sysmontap batch preservation", flush=True)
+    print("Prepared pinned idevice iOS slice with sysmontap batch preservation and two-port cancellation relays", flush=True)
 
 if __name__ == "__main__":
     try:

@@ -30,7 +30,7 @@ final class NativeAppFilesHome: NativePage {
         guard !working else { return }
         run { [self] in
             do {
-                applications = PerformanceApplication.fromInspection(try await model.inspect(.coreApps).0.value)
+                applications = PerformanceApplication.fromInstalledApplications(try await model.inspect(.appDetails).0.value)
             } catch {
                 if model.records.isEmpty { _ = await model.scan() }
                 applications = model.records.map { PerformanceApplication(bundleID: $0.id, name: $0.installed.name) }
@@ -79,6 +79,7 @@ final class NativeAppDirectory: NativeSearchPage {
     private var displayed: [RemoteInspectionEntry] = []
     private var failure: String?
     private var loaded = false
+    private var hasDirectoryListing = false
     init(_ model: AppModel, application: PerformanceApplication, source: InspectionOperation, path: String = "/") {
         self.application = application; self.source = source; self.path = path
         super.init(model, title: path == "/" ? source.title : (path as NSString).lastPathComponent)
@@ -94,13 +95,20 @@ final class NativeAppDirectory: NativeSearchPage {
             if ($0.isDirectory == true) != ($1.isDirectory == true) { return $0.isDirectory == true }
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
-        var status = [NativeRow(title: path, detail: working ? "正在读取…" : "\(entries.count) 项")]
+        let summary = working ? "正在读取…" : !hasDirectoryListing ? (failure == nil ? "尚未读取" : "读取失败") : "\(entries.count) 项"
+        var status = [NativeRow(title: path, detail: summary)]
         if let failure { status.append(NativeRow(title: failure, color: .systemOrange)) }
         let files = displayed.map { entry in
             NativeRow(title: entry.name, detail: entry.isDirectory == true ? "文件夹" : entry.size.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "",
                 action: working ? nil : { [weak self] in self?.open(entry) })
         }
-        return [NativeSection(rows: status), NativeSection(rows: files.isEmpty ? [NativeRow(title: working ? "正在加载目录…" : "没有文件")] : files)]
+        var sections = [NativeSection(rows: status)]
+        if hasDirectoryListing {
+            sections.append(NativeSection(rows: files.isEmpty ? [NativeRow(title: entries.isEmpty ? "没有文件" : "没有匹配的文件")] : files))
+        } else if !working, failure != nil {
+            sections.append(NativeSection(rows: [NativeRow(title: "重试", color: .systemBlue, action: { [weak self] in self?.load() })]))
+        }
+        return sections
     }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = super.tableView(tableView, cellForRowAt: indexPath)
@@ -117,11 +125,13 @@ final class NativeAppDirectory: NativeSearchPage {
     }
     private func load() {
         guard !working else { return }
-        working = true; failure = nil; reload()
+        working = true; failure = nil; hasDirectoryListing = false; entries = []; reload()
         Task { [self] in
             defer { working = false; reload() }
-            do { entries = try await model.inspect(source, bundleID: application.bundleID, path: path, entryDetails: true).0.entries }
-            catch { failure = error.localizedDescription }
+            do {
+                entries = try await model.inspect(source, bundleID: application.bundleID, path: path, entryDetails: true).0.entries
+                hasDirectoryListing = true
+            } catch { failure = error.localizedDescription }
         }
     }
     private func open(_ entry: RemoteInspectionEntry) {

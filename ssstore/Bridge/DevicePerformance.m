@@ -3,6 +3,18 @@
 #include <arpa/inet.h>
 #include <math.h>
 
+// Custom additive entry point in the pinned dependency. Existing upstream APIs
+// retain their ABI and direct connection behavior.
+extern IdeviceFfiError *ssstore_tunnel_create_rppairing_relay(
+    const idevice_sockaddr *, idevice_socklen_t, const char *, struct RpPairingFileHandle *,
+    char *(*)(void *), void *, uint16_t (*)(uint16_t, void *), void *,
+    struct AdapterHandle **, struct RsdHandshakeHandle **);
+typedef uint16_t (^PerformancePortMapper)(uint16_t);
+static uint16_t PMapTunnelPort(uint16_t port, void *context) {
+    PerformancePortMapper mapper = (__bridge id)context;
+    return mapper(port);
+}
+
 static BOOL PCheck(IdeviceFfiError *failure, NSString *stage, NSError **error) {
     if (!failure) return YES;
     NSString *message = failure->message ? [NSString stringWithUTF8String:failure->message] : @"未知错误";
@@ -81,6 +93,7 @@ static NSDictionary *PExecutablePaths(struct AppServiceHandle *service) {
 
 @implementation DevicePerformance
 + (BOOL)streamPairingPath:(NSString *)path host:(NSString *)host port:(uint16_t)port
+           mapTunnelPort:(uint16_t (^)(uint16_t))mapTunnelPort
              isCancelled:(BOOL (^)(void))isCancelled sample:(void (^)(NSData *))sample error:(NSError **)error {
     // All handles stay on this worker thread. Cancellation closes only the
     // Swift-owned transport relay; it never frees or mutates an in-flight FFI handle.
@@ -102,8 +115,8 @@ static NSDictionary *PExecutablePaths(struct AppServiceHandle *service) {
     @try {
         if (isCancelled()) return YES;
         if (!PCheck(rp_pairing_file_read(path.UTF8String, &pairing), @"读取配对文件", error)) return NO;
-        if (!PCheck(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address), "ssstore-performance",
-                    pairing, NULL, NULL, &adapter, &handshake), @"连接性能通道", error)) return NO;
+        if (!PCheck(ssstore_tunnel_create_rppairing_relay((const idevice_sockaddr *)&address, sizeof(address), "ssstore-performance",
+                    pairing, NULL, NULL, PMapTunnelPort, (__bridge void *)mapTunnelPort, &adapter, &handshake), @"连接性能通道", error)) return NO;
         if (isCancelled()) return YES;
         NSArray *applications = @[];
         IdeviceFfiError *optionalService = app_service_connect_rsd(adapter, handshake, &appService);

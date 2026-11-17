@@ -1,20 +1,37 @@
 import Foundation
 import Network
 
-/// One private, loopback-only transport per recording. Closing it interrupts a
-/// blocked DVT read without touching Rust handles from another thread.
+/// A recording owns two independent relays: RPPairing, then the dynamically
+/// negotiated TLS-PSK port. Closing both interrupts Rust reads without touching
+/// an in-flight FFI handle from another thread.
 final class PerformanceRelay: @unchecked Sendable {
+    private final class Endpoint {
+        let listener: NWListener
+        var ready: ((Result<UInt16, Error>) -> Void)?
+        var connections: [NWConnection] = []
+        var accepted = false
+        init(_ listener: NWListener, ready: @escaping (Result<UInt16, Error>) -> Void) {
+            self.listener = listener; self.ready = ready
+        }
+        func close() {
+            listener.newConnectionHandler = nil; listener.stateUpdateHandler = nil; listener.cancel()
+            for connection in connections { connection.stateUpdateHandler = nil; connection.cancel() }
+            connections = []
+        }
+    }
+    private final class PortResult: @unchecked Sendable {
+        let semaphore = DispatchSemaphore(value: 0)
+        var value: Result<UInt16, Error>?
+        func resolve(_ result: Result<UInt16, Error>) { value = result; semaphore.signal() }
+    }
     private let queue = DispatchQueue(label: "ssstore.performance.transport")
     private let lock = NSLock()
     private var stopped = false
     private var storedFailure: Error?
-    private var listener: NWListener?
-    private var connections: [NWConnection] = []
+    private var endpoints: [Endpoint] = []
     private var timeout: DispatchWorkItem?
-    private var ready: CheckedContinuation<UInt16, Error>?
     private let host: String
     private let port: UInt16
-    private var accepted = false
 
     init(host: String, port: UInt16) { self.host = host; self.port = port }
     var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
@@ -22,68 +39,94 @@ final class PerformanceRelay: @unchecked Sendable {
     func open() async throws -> UInt16 {
         try await withCheckedThrowingContinuation { continuation in
             queue.async {
-                guard !self.isStopped else { continuation.resume(throwing: CancellationError()); return }
-                self.ready = continuation
-                do {
-                    let parameters = NWParameters.tcp
-                    parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
-                    let listener = try NWListener(using: parameters)
-                    self.listener = listener
-                    listener.stateUpdateHandler = { [weak self] state in
-                        guard let self else { return }
-                        switch state {
-                        case .ready:
-                            if let port = listener.port, let pending = self.ready {
-                                self.ready = nil; pending.resume(returning: port.rawValue)
-                            }
-                        case .failed(let error): self.close(error: error)
-                        default: break
-                        }
-                    }
-                    listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-                    listener.start(queue: self.queue)
-                    self.armTimeout(seconds: 30)
-                } catch { self.close(error: error) }
+                self.listen(upstreamPort: self.port) { continuation.resume(with: $0) }
+                if !self.isStopped { self.armTimeout(seconds: 30) }
             }
         }
     }
-    private func accept(_ incoming: NWConnection) {
-        guard !isStopped, !accepted, let targetPort = NWEndpoint.Port(rawValue: port) else { incoming.cancel(); return }
-        accepted = true
+    /// Called only on the FFI worker, never the main thread or transport queue.
+    /// The callback finishes before Rust opens its second TCP connection.
+    func openTunnelPort(_ port: UInt16) -> UInt16 {
+        let result = PortResult()
+        queue.async { self.listen(upstreamPort: port) { result.resolve($0) } }
+        guard result.semaphore.wait(timeout: .now() + 10) == .success else {
+            queue.async { self.close(error: URLError(.timedOut)) }
+            return 0
+        }
+        return (try? result.value?.get()) ?? 0
+    }
+    private func listen(upstreamPort: UInt16, ready: @escaping (Result<UInt16, Error>) -> Void) {
+        guard !isStopped else { ready(.failure(CancellationError())); return }
+        guard upstreamPort > 0, endpoints.count < 2 else { ready(.failure(URLError(.badURL))); return }
+        do {
+            let parameters = NWParameters.tcp
+            parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+            let listener = try NWListener(using: parameters)
+            let endpoint = Endpoint(listener, ready: ready)
+            endpoints.append(endpoint)
+            listener.stateUpdateHandler = { [weak self, weak endpoint] state in
+                guard let self, let endpoint else { return }
+                switch state {
+                case .ready:
+                    if let port = listener.port, let pending = endpoint.ready {
+                        endpoint.ready = nil; pending(.success(port.rawValue))
+                    }
+                case .failed(let error): self.close(error: error)
+                default: break
+                }
+            }
+            listener.newConnectionHandler = { [weak self, weak endpoint] connection in
+                guard let self, let endpoint else { connection.cancel(); return }
+                self.accept(connection, endpoint: endpoint, upstreamPort: upstreamPort)
+            }
+            listener.start(queue: queue)
+        } catch { ready(.failure(error)); close(error: error) }
+    }
+    private func accept(_ incoming: NWConnection, endpoint: Endpoint, upstreamPort: UInt16) {
+        guard !isStopped, !endpoint.accepted, let targetPort = NWEndpoint.Port(rawValue: upstreamPort) else { incoming.cancel(); return }
+        endpoint.accepted = true
         let outgoing = NWConnection(host: NWEndpoint.Host(host), port: targetPort, using: .tcp)
-        connections = [incoming, outgoing]
-        for connection in connections {
+        endpoint.connections = [incoming, outgoing]
+        for connection in endpoint.connections {
             connection.stateUpdateHandler = { [weak self] state in
                 if case .failed(let error) = state { self?.close(error: error) }
             }
             connection.start(queue: queue)
         }
-        forward(incoming, to: outgoing)
-        forward(outgoing, to: incoming)
+        forward(incoming, to: outgoing, endpoint: endpoint)
+        forward(outgoing, to: incoming, endpoint: endpoint)
     }
-    private func forward(_ source: NWConnection, to destination: NWConnection) {
+    private func forward(_ source: NWConnection, to destination: NWConnection, endpoint: Endpoint) {
         source.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
             guard let self, !self.isStopped else { return }
             if let error { self.close(error: error); return }
             guard let data, !data.isEmpty else {
-                if complete { self.close(error: URLError(.networkConnectionLost)) }
-                else { self.forward(source, to: destination) }
+                // RPPairing closes normally once the TLS tunnel is established.
+                // Its EOF must never cancel that independent tunnel.
+                if complete { self.finishDirection(to: destination) }
+                else { self.forward(source, to: destination, endpoint: endpoint) }
                 return
             }
             destination.send(content: data, completion: .contentProcessed { [weak self] error in
                 guard let self, !self.isStopped else { return }
                 if let error { self.close(error: error) }
-                else if complete { self.close(error: URLError(.networkConnectionLost)) }
-                else { self.forward(source, to: destination) }
+                else if complete { self.finishDirection(to: destination) }
+                else { self.forward(source, to: destination, endpoint: endpoint) }
             })
         }
+    }
+    private func finishDirection(to connection: NWConnection) {
+        // Propagate a TCP half-close after the final bytes; the other direction
+        // may still have buffered data. Keep the endpoint alive until teardown.
+        connection.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] error in
+            if let self, !self.isStopped, let error { self.close(error: error) }
+        })
     }
     func receivedSample() { queue.async { if !self.isStopped { self.armTimeout(seconds: 15) } } }
     private func armTimeout(seconds: Double) {
         timeout?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.close(error: NSError(domain: "ssstore.Performance", code: 1,
+            self?.close(error: NSError(domain: "ssstore.Performance", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "性能服务未及时返回数据，请检查回环、配对连接及开发者服务后重试。 "]))
         }
         timeout = work
@@ -99,11 +142,10 @@ final class PerformanceRelay: @unchecked Sendable {
         if !(error is CancellationError), storedFailure == nil { storedFailure = error }
         lock.unlock()
         timeout?.cancel(); timeout = nil
-        listener?.newConnectionHandler = nil; listener?.stateUpdateHandler = nil
-        listener?.cancel(); listener = nil
-        for connection in connections { connection.stateUpdateHandler = nil; connection.cancel() }
-        connections = []
-        if let ready { self.ready = nil; ready.resume(throwing: error) }
+        for endpoint in endpoints {
+            endpoint.close()
+            if let pending = endpoint.ready { endpoint.ready = nil; pending(.failure(error)) }
+        }
+        endpoints = []
     }
 }
-

@@ -186,6 +186,7 @@ final class AppModel: ObservableObject {
             saveInspectionReceipts()
             return (result, reportURL)
         } catch {
+            logger.warning("Device inspection failed operation=\(operation.rawValue) bundle=\(bundleID) source=\(source ?? operation.rawValue): \(DiagnosticLog.errorDetails(error))")
             inspectionReceipts[key] = InspectionReceipt(success: false, message: error.localizedDescription)
             saveInspectionReceipts()
             throw error

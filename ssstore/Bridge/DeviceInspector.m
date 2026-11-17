@@ -75,6 +75,50 @@ static void IFreeStrings(char **strings, size_t count) {
 }
 @end
 
+// House Arrest uses the installation database, whereas CoreDevice's index can
+// also contain internal/system entries that House Arrest cannot resolve. On an
+// authorization/lookup failure, query the SAME database before explaining it.
+static NSError *IApplicationFileFailure(InspectionConnection *c, NSString *bundle, NSString *source, NSError *underlying) {
+    struct InstallationProxyClientHandle *client = NULL;
+    plist_t *apps = NULL; size_t count = 0;
+    NSDictionary *application = nil;
+    BOOL checked = NO;
+    IdeviceFfiError *failure = installation_proxy_connect_rsd(c->adapter, c->handshake, &client);
+    if (!failure) {
+        const char *identifier = bundle.UTF8String;
+        failure = installation_proxy_get_apps(client, "Any", &identifier, 1, (void **)&apps, &count);
+        if (!failure) {
+            checked = YES;
+            for (size_t i = 0; i < count; i++) {
+                id candidate = IPlist(apps[i]);
+                if ([candidate isKindOfClass:NSDictionary.class] && [candidate[@"CFBundleIdentifier"] isEqualToString:bundle]) {
+                    application = candidate; break;
+                }
+            }
+        }
+    }
+    NSError *lookupError = nil;
+    ICheck(failure, @"核对安装清单", &lookupError);
+    IFreePlists(apps, count); installation_proxy_client_free(client);
+    BOOL documents = [source isEqualToString:@"documents"];
+    NSString *description;
+    if (checked && !application) {
+        description = @"系统安装清单未找到此应用。请返回刷新应用列表；已卸载或卸载保留数据的应用需要先重新安装。";
+    } else if (application && documents && [application[@"UIFileSharingEnabled"] isKindOfClass:NSNumber.class] && ![application[@"UIFileSharingEnabled"] boolValue]) {
+        description = @"此应用未开启文件共享，iOS 拒绝访问共享文档。";
+    } else if (application && !documents) {
+        description = @"应用已安装，但 iOS 未能打开其完整容器，可能受到容器权限限制。开启开发者模式不会自动开放所有应用的沙盒，具体错误已记入日志。";
+    } else {
+        description = @"设备未能打开此应用的授权目录。请刷新应用列表后重试，具体服务错误已记入日志。";
+    }
+    NSMutableDictionary *details = [@{NSLocalizedDescriptionKey:description,
+        NSUnderlyingErrorKey:underlying, @"bundleID":bundle, @"source":source,
+        @"installationLookupSucceeded":@(checked), @"applicationFound":@(application != nil)} mutableCopy];
+    if (lookupError) details[@"installationLookupError"] = lookupError.localizedDescription;
+    if (application) details[@"fileSharingEnabled"] = @([application[@"UIFileSharingEnabled"] boolValue]);
+    return [NSError errorWithDomain:@"ssstore.AppFiles" code:underlying.code userInfo:details];
+}
+
 #define REQUIRE(call, stage) if (!ICheck((call), (stage), error)) return nil
 #define CONNECT(base, handle) base##_connect_rsd(c->adapter, c->handshake, &(handle))
 #define PROBE_SERVICE(base, handle, release, label) { \
@@ -424,7 +468,17 @@ static void IFreeStrings(char **strings, size_t count) {
                     IdeviceFfiError *failure = [source isEqualToString:@"documents"] ? house_arrest_vend_documents(house, bundle.UTF8String, &afc)
                         : house_arrest_vend_container(house, bundle.UTF8String, &afc);
                     house = NULL; // Vend consumes the client on both success and failure.
-                    REQUIRE(failure, @"打开应用授权目录");
+                    NSError *accessError = nil;
+                    if (!ICheck(failure, @"打开应用授权目录", &accessError)) {
+                        if (error) {
+                            NSString *description = accessError.localizedDescription;
+                            BOOL permissionFailure = [description containsString:@"InstallationLookupFailed"] ||
+                                [description containsString:@"ApplicationLookupFailed"] ||
+                                [description containsString:@"PermissionDenied"] || [description containsString:@"NotAllowed"];
+                            *error = permissionFailure ? IApplicationFileFailure(c, bundle, source, accessError) : accessError;
+                        }
+                        return nil;
+                    }
                 } else if ([source isEqualToString:@"crashes"]) {
                     REQUIRE(CONNECT(crash_report_client, crash), @"连接崩溃报告服务");
                     IdeviceFfiError *failure = crash_report_client_to_afc(crash, &afc);
