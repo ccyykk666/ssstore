@@ -248,17 +248,9 @@ static BOOL Probe(struct sockaddr_in *address, NSError **error) {
         }
         return result;
     } @finally {
-        if (browseRows) {
-            idevice_plist_array_free(browseRows, browseCount);
-            free(browseRows);
-        }
+        SSDevicePlistArrayFree(browseRows, browseCount);
         plist_free(browseOptions);
-        if (raw) {
-            idevice_plist_array_free((plist_t *)raw, count);
-            // v0.1.68 frees each node but leaves the boxed pointer slice allocated.
-            // The pinned Apple binary uses Rust's system (malloc/free) allocator.
-            free(raw);
-        }
+        SSDevicePlistArrayFree((plist_t *)raw, count);
         installation_proxy_client_free(client);
         springboard_services_free(springboard);
         rsd_handshake_free(handshake);

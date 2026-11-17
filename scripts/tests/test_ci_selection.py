@@ -34,6 +34,8 @@ class SelectionTests(unittest.TestCase):
             "ssstore/StoreRuntime.swift": {"core"},
             "ssstore/UIKit/StoreScreens.swift": {"core"},
             "ssstore/Bridge/DevicePlist.h": {"performance"},
+            "ssstore/Bridge/DeviceInspector.m": {"performance"},
+            "ssstore/Bridge/DeviceScanner.m": {"performance"},
             "scripts/check-device-plist.sh": {"performance"},
             "scripts/tests/DevicePlistChecks.m": {"performance", "selection"},
             "ssstore/UIKit/FileContents.swift": {"core"},

@@ -2,27 +2,23 @@ import Foundation
 
 public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, Sendable {
     case services, probe, appDetails, appCapabilities, appStorage, allStorage, profiles
-    case documents, container, media, crashes, filesystemInfo, icon
+    case media, crashes, filesystemInfo, icon
     case homeWallpaper, lockWallpaper, iconMetrics, orientation, screenshot
     case deviceInfo, batteryInfo, diskInfo, diagnostics, batteryDiagnostics, nandDiagnostics, wifiDiagnostics, mobileGestalt, ioRegistry
-    case coreApps, coreProcesses, coreFiles, configuration
-    case dvtApps, dvtProcesses, dvtHardware, dvtNetwork, dvtKernel, dvtAttributes, dvtScreenshot
+    case coreApps, coreProcesses, configuration
     case developerMode, mountedImages, companion
-    case fileInfo, fileRead, installedApps
+    case fileInfo, fileRead
 
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .services: return "广播服务"
         case .probe: return "连接测试"
-        case .installedApps: return "已安装应用清单"
         case .appDetails: return "应用信息"
         case .appCapabilities: return "应用能力与共享声明"
         case .appStorage: return "应用存储空间"
         case .allStorage: return "全部应用存储空间"
         case .profiles: return "描述文件"
-        case .documents: return "共享文档"
-        case .container: return "应用容器"
         case .media: return "AFC 媒体目录"
         case .crashes: return "崩溃报告目录"
         case .filesystemInfo: return "文件系统容量"
@@ -43,15 +39,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .ioRegistry: return "IORegistry 信息"
         case .coreApps: return "CoreDevice 应用列表"
         case .coreProcesses: return "CoreDevice 进程列表"
-        case .coreFiles: return "CoreDevice 文件目录"
         case .configuration: return "显示与辅助功能"
-        case .dvtApps: return "开发服务应用列表"
-        case .dvtProcesses: return "开发服务进程列表"
-        case .dvtHardware: return "开发服务硬件信息"
-        case .dvtNetwork: return "开发服务网络信息"
-        case .dvtKernel: return "内核名称"
-        case .dvtAttributes: return "性能采样字段"
-        case .dvtScreenshot: return "开发服务截图"
         case .developerMode: return "开发者模式"
         case .mountedImages: return "已挂载开发镜像"
         case .companion: return "伴侣设备"
@@ -62,25 +50,24 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
     public var group: String {
         switch self {
         case .services, .probe: return "服务发现"
-        case .appDetails, .appCapabilities, .appStorage, .allStorage, .installedApps: return "应用与存储"
+        case .appDetails, .appCapabilities, .appStorage, .allStorage: return "应用与存储"
         case .profiles: return "签名与描述文件"
-        case .documents, .container, .media, .crashes, .filesystemInfo, .coreFiles, .fileInfo, .fileRead: return "文件与报告"
+        case .media, .crashes, .filesystemInfo, .fileInfo, .fileRead: return "文件与报告"
         case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation, .screenshot: return "图标与屏幕"
-        case .coreApps, .coreProcesses, .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot, .developerMode, .mountedImages: return "开发服务"
+        case .coreApps, .coreProcesses, .developerMode, .mountedImages: return "开发服务"
         default: return "设备与诊断"
         }
     }
     public var requiresApp: Bool {
-        [.appDetails, .appCapabilities, .appStorage, .documents, .container, .icon, .coreFiles].contains(self)
+        [.appDetails, .appCapabilities, .appStorage, .icon].contains(self)
     }
-    public var isBrowser: Bool { [.documents, .container, .media, .crashes, .coreFiles].contains(self) }
+    public var isBrowser: Bool { [.media, .crashes].contains(self) }
     public var isFileHelper: Bool { self == .fileInfo || self == .fileRead }
     public var service: String {
         switch self {
         case .services, .probe: return "RSD"
-        case .appDetails, .appCapabilities, .appStorage, .allStorage, .installedApps: return "com.apple.mobile.installation_proxy.shim.remote"
+        case .appDetails, .appCapabilities, .appStorage, .allStorage: return "com.apple.mobile.installation_proxy.shim.remote"
         case .profiles: return "com.apple.misagent.shim.remote"
-        case .documents, .container: return "com.apple.mobile.house_arrest.shim.remote"
         case .media, .filesystemInfo, .fileInfo, .fileRead: return "com.apple.afc.shim.remote"
         case .crashes: return "com.apple.crashreportcopymobile.shim.remote"
         case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation: return "com.apple.springboardservices.shim.remote"
@@ -88,9 +75,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .deviceInfo, .batteryInfo, .diskInfo: return "com.apple.mobile.lockdown.remote.trusted"
         case .diagnostics, .batteryDiagnostics, .nandDiagnostics, .wifiDiagnostics, .mobileGestalt, .ioRegistry: return "com.apple.mobile.diagnostics_relay.shim.remote"
         case .coreApps, .coreProcesses: return "com.apple.coredevice.appservice"
-        case .coreFiles: return "com.apple.coredevice.fileservice.control"
         case .configuration: return "com.apple.coredevice.configuration"
-        case .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot: return "com.apple.instruments.dtservicehub"
         case .developerMode, .mountedImages: return "com.apple.mobile.mobile_image_mounter.shim.remote"
         case .companion: return "com.apple.companion_proxy.shim.remote"
         }
@@ -98,25 +83,15 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
     public var note: String {
         switch self {
         case .services: return "列出广播的服务及端口，不代表已获访问权限。"
-        case .probe: return "测试 15 类服务的连接；具体读取权限需单独验证。"
+        case .probe: return "仅测试连接，不代表可以读取数据。"
         case .appCapabilities: return "应用声明的能力，不代表实际隐私授权。"
         case .appStorage, .allStorage: return "统计可能较慢。动态占用不等于可清理缓存。"
         case .profiles: return "解析描述文件，不验证证书信任或撤销状态。"
-        case .documents, .container: return "仅浏览设备授权的目录。"
-        case .coreFiles: return "仅浏览目录。导出文件请使用共享文档或应用容器。"
         case .iconMetrics: return "读取图标网格参数，不包含完整主屏幕布局。"
-        case .coreApps, .coreProcesses, .configuration, .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot, .developerMode, .mountedImages: return "可能需要开发环境授权，服务以设备实际提供为准。"
         default: return ""
         }
     }
-    public static var menu: [Self] {
-        // Removed file access paths and DVT's failing remote-server transport.
-        // Keep other data services; one unavailable service does not prove that
-        // unrelated RSD operations cannot read the device.
-        let removed: Set<Self> = [.installedApps, .documents, .container, .coreFiles,
-            .dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot]
-        return allCases.filter { !$0.isFileHelper && !removed.contains($0) }
-    }
+    public static var menu: [Self] { allCases.filter { !$0.isFileHelper } }
     public static var groups: [String] { menu.reduce(into: []) { if !$0.contains($1.group) { $0.append($1.group) } } }
 }
 

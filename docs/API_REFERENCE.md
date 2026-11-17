@@ -1,4 +1,4 @@
-Current UI (0.6.0 build 80): the second bottom tab opens Data directly. Performance monitoring, local live panels, hardware sensors, app-file browsing and failed DVT menu entries have been removed. Downloaded IPA inspection remains. The declarations below are historical/reference integrations, not a list of current menu entries or guaranteed permissions.
+Current UI (0.6.0 build 81): Data is the second tab; removed DVT and app-container backends are deleted. Logs are in Settings > About. Mounted-image, plist and string array cleanup guards empty Rust slices. Ignored-app display reconciles only successful complete inventories; removed apps stay ignored but are hidden until installed again. The integrations below are historical references, not guaranteed availability.
 
 # ssstore 0.5.2 device data interfaces
 

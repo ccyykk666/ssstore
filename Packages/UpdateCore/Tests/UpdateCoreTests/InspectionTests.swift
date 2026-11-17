@@ -2,22 +2,18 @@ import XCTest
 @testable import UpdateCore
 
 final class InspectionTests: XCTestCase {
-    func testApplicationInventoryCanLoadBeforeSelectingAnApplication() {
-        XCTAssertFalse(InspectionOperation.installedApps.requiresApp)
-        XCTAssertEqual(InspectionOperation.installedApps.service, InspectionOperation.appDetails.service)
-        for removed in [InspectionOperation.installedApps, .documents, .container, .coreFiles] {
-            XCTAssertFalse(InspectionOperation.menu.contains(removed))
-        }
-        for removed in [InspectionOperation.dvtApps, .dvtProcesses, .dvtHardware, .dvtNetwork, .dvtKernel, .dvtAttributes, .dvtScreenshot] {
-            XCTAssertFalse(InspectionOperation.menu.contains(removed))
+    func testMenuOnlyExposesCurrentOperations() {
+        for removed in ["installedApps", "documents", "container", "coreFiles", "dvtApps", "dvtProcesses", "dvtHardware", "dvtNetwork", "dvtKernel", "dvtAttributes", "dvtScreenshot"] {
+            XCTAssertNil(InspectionOperation(rawValue: removed))
         }
         for kept in [InspectionOperation.appDetails, .appCapabilities, .allStorage, .profiles, .deviceInfo, .icon, .screenshot] {
             XCTAssertTrue(InspectionOperation.menu.contains(kept))
         }
         // Keep the existing single-app tools scoped to the selected application.
         XCTAssertTrue(InspectionOperation.appDetails.requiresApp)
-        XCTAssertTrue(InspectionOperation.documents.requiresApp)
-        XCTAssertTrue(InspectionOperation.container.requiresApp)
+        XCTAssertFalse(InspectionOperation.mountedImages.requiresApp)
+        XCTAssertFalse(InspectionOperation.menu.contains(.fileInfo))
+        XCTAssertFalse(InspectionOperation.menu.contains(.fileRead))
     }
     func testDeviceResultPreservesNestedValuesAndBinaryDescription() throws {
         let data = Data(#"{"value":{"enabled":true,"bytes":1234,"Entitlements":{"application-identifier":"TEAM.app"},"binary":{"类型":"二进制","字节数":20},"absent":null},"files":[{"name":"report.ips","path":"/cache/report.ips"}],"entries":[{"name":"Documents","path":"/Documents"}],"message":null}"#.utf8)

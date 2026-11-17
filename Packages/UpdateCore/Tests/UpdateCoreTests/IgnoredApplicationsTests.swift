@@ -2,6 +2,36 @@ import XCTest
 @testable import UpdateCore
 
 final class IgnoredApplicationsTests: XCTestCase {
+    func testUninstalledAppIsHiddenWithoutLosingItsIgnorePreference() throws {
+        var ignored = IgnoredApplications()
+        let installed = record("installed").installed, removed = record("removed").installed
+        ignored.ignore(installed); ignored.ignore(removed)
+        ignored.reconcileInstalledApps([installed, record("other").installed])
+        XCTAssertEqual(ignored.visibleBundleIDs, ["installed"])
+        XCTAssertEqual(ignored.bundleIDs, ["installed", "removed"])
+        let saved = try JSONDecoder().decode(IgnoredApplications.self, from: JSONEncoder().encode(ignored))
+        XCTAssertEqual(saved.visibleBundleIDs, ["installed"])
+        ignored.reconcileInstalledApps([removed])
+        XCTAssertEqual(ignored.visibleBundleIDs, ["removed"])
+        XCTAssertTrue(ignored.visible([AppRecord(installed: removed)]).isEmpty)
+        ignored.reconcileInstalledApps([])
+        XCTAssertTrue(ignored.visibleBundleIDs.isEmpty)
+        XCTAssertEqual(ignored.bundleIDs.count, 2)
+    }
+    func testPartialMetadataDoesNotEraseVerifiedInstallationState() {
+        var ignored = IgnoredApplications()
+        let app = record("a").installed
+        ignored.ignore(app); ignored.reconcileInstalledApps([app])
+        ignored.captureMetadata(from: [])
+        XCTAssertEqual(ignored.visibleBundleIDs, ["a"])
+        ignored.reconcileInstalledApps([])
+        ignored.captureMetadata(from: [app])
+        XCTAssertTrue(ignored.visibleBundleIDs.isEmpty)
+        ignored.ignore(record("b").installed)
+        XCTAssertEqual(ignored.visibleBundleIDs, ["b"])
+        ignored.restore("b")
+        XCTAssertTrue(ignored.visibleBundleIDs.isEmpty)
+    }
     func testRefreshRepairsExistingIgnoredMetadataWithoutRestoringOrDroppingRemoteIcon() throws {
         var ignored = IgnoredApplications()
         let old = InstalledApp(bundleID: "hidden", name: "Hidden", version: "1")

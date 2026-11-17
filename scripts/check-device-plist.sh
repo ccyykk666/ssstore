@@ -16,4 +16,8 @@ result = subprocess.run([sys.argv[1], '--legacy-xml'], stdout=subprocess.PIPE, s
 if result.returncode != -signal.SIGABRT:
     raise SystemExit('Expected legacy XML serializer to abort on the UID fixture; got '+str(result.returncode))
 print('Confirmed legacy XML abort in isolated process; production binary conversion completes')
+result = subprocess.run([sys.argv[1], '--legacy-empty-array'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+if result.returncode not in (-signal.SIGABRT, -signal.SIGSEGV, -signal.SIGBUS):
+    raise SystemExit('Expected legacy empty-slice cleanup to crash; got '+str(result.returncode))
+print('Confirmed legacy empty-slice invalid free; production zero-length cleanup completes')
 PY

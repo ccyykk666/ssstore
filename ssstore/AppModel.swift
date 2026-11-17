@@ -70,7 +70,10 @@ final class AppModel: ObservableObject {
                 do { _ = try PairingRecord.kind(of: Data(contentsOf: pairingURL)) }
                 catch { hasPairing = false; message = error.localizedDescription }
             }
-            if let data = try? Data(contentsOf: inspectionReceiptsURL) { inspectionReceipts = (try? JSONDecoder().decode([String: InspectionReceipt].self, from: data)) ?? [:] }
+            if let data = try? Data(contentsOf: inspectionReceiptsURL) {
+                let saved = (try? JSONDecoder().decode([String: InspectionReceipt].self, from: data)) ?? [:]
+                inspectionReceipts = saved.filter { InspectionOperation(rawValue: String($0.key.split(separator: "|", maxSplits: 1).first ?? "")) != nil }
+            }
         } catch { message = "读取本地记录失败：\(error.localizedDescription)" }
         if ignoredApps.names.keys.contains(where: { ignoredApps.applications?[$0]?.localIconKey == nil }),
            let data = try? Data(contentsOf: folder.appendingPathComponent("device-inventory.json")),
@@ -123,7 +126,7 @@ final class AppModel: ObservableObject {
             }
             // The final inventory includes InstallationProxy's version metadata.
             // Merge it before starting version queries, even if a UI callback is queued.
-            merge(try InventoryParser.parse(data), origin: "本机读取")
+            merge(try InventoryParser.parse(data), origin: "本机读取", complete: true)
         } catch { message = error.localizedDescription; return false }
         return true
     }
@@ -144,14 +147,12 @@ final class AppModel: ObservableObject {
     }
 
     func inspect(_ operation: InspectionOperation, bundleID: String = "", path: String = "/",
-                 source: String? = nil, domain: Int = 1, groupID: String = "", entryDetails: Bool = false) async throws -> (InspectionResult, URL) {
+                 source: String? = nil) async throws -> (InspectionResult, URL) {
         func failure(_ text: String) -> NSError { NSError(domain: "ssstore.Inspection", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
         guard !busy else { throw failure("请等待当前操作完成。") }
         guard hasPairing else { throw failure("请先创建或导入配对文件。") }
         guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
-        let needsApp = operation.requiresApp && !(operation == .coreFiles && domain != 1)
-        guard !needsApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
-        guard operation != .coreFiles || domain != 2 || !groupID.isEmpty else { throw failure("请输入 App Group 标识。") }
+        guard !operation.requiresApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
         busy = true; activity = "正在读取：\(operation.title)…"
         defer { busy = false; activity = "" }
         let pairingPath = pairingURL.path
@@ -163,8 +164,7 @@ final class AppModel: ObservableObject {
             let data: Data = try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
-                        let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue,
-                                                      "domain": domain, "groupID": groupID, "entryDetails": entryDetails]
+                        let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue]
                         continuation.resume(returning: try DeviceInspector.run(pairingPath: pairingPath, host: address, port: number,
                             operation: operation.rawValue, options: options, outputDirectory: folder.path))
                     } catch { continuation.resume(throwing: error) }
@@ -187,17 +187,6 @@ final class AppModel: ObservableObject {
             return (result, reportURL)
         } catch {
             logger.warning("Device inspection failed operation=\(operation.rawValue) bundle=\(bundleID) source=\(source ?? operation.rawValue): \(DiagnosticLog.errorDetails(error))")
-            let nativeError = error as NSError
-            if nativeError.domain == "ssstore.AppFiles" {
-                let keys = ["installationLookupSucceeded", "applicationFound", "fileSharingEnabled", "getTaskAllow", "installationLookupError"]
-                let context = keys.compactMap { key in nativeError.userInfo[key].map { "\(key)=\($0)" } }.joined(separator: " ")
-                logger.info("App file access diagnostic bundle=\(bundleID) \(DiagnosticLog.redact(context))")
-            }
-            if nativeError.domain == "ssstore.ServiceDiscovery" {
-                let requested = nativeError.userInfo["requestedService"] as? String ?? "unknown"
-                let related = nativeError.userInfo["availableRelatedServices"] as? [String] ?? []
-                logger.info("Device service unavailable requested=\(requested) related=\(related.joined(separator: ","))")
-            }
             inspectionReceipts[key] = InspectionReceipt(success: false, message: error.localizedDescription)
             saveInspectionReceipts()
             throw error
@@ -215,7 +204,7 @@ final class AppModel: ObservableObject {
 
     var protectedCacheFiles: [URL] {
         let icons = records.compactMap { localIconURL(for: $0.installed) }
-        let ignoredIcons = ignoredApps.bundleIDs.compactMap { ignoredApps.application(for: $0) }
+        let ignoredIcons = ignoredApps.visibleBundleIDs.compactMap { ignoredApps.application(for: $0) }
             .compactMap { localIconURL(for: $0) }
         let reports = inspectionReceipts.values.compactMap { $0.reportPath }
             .map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
@@ -333,9 +322,10 @@ final class AppModel: ObservableObject {
         return try Data(contentsOf: url)
     }
 
-    private func merge(_ apps: [InstalledApp], origin: String) {
+    private func merge(_ apps: [InstalledApp], origin: String, complete: Bool = false) {
         let previousIgnored = ignoredApps
-        ignoredApps.captureMetadata(from: apps)
+        if complete { ignoredApps.reconcileInstalledApps(apps) }
+        else { ignoredApps.captureMetadata(from: apps) }
         if ignoredApps != previousIgnored { saveIgnoredApps() }
         let previous = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
         records = ignoredApps.visible(apps.map { app in
@@ -358,7 +348,7 @@ final class AppModel: ObservableObject {
     }
 
     func restoreApp(_ id: String) {
-        guard !busy, ignoredApps.names[id] != nil else { return }
+        guard !busy, ignoredApps.visibleBundleIDs.contains(id) else { return }
         let record = AppRecord(installed: ignoredApps.application(for: id))
         ignoredApps.restore(id)
         saveIgnoredApps()

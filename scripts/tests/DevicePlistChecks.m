@@ -23,6 +23,14 @@ static plist_t Fixture(void) {
 int main(int argc, const char **argv) {
     @autoreleasepool {
         plist_t node = Fixture();
+        if (argc > 1 && strcmp(argv[1], "--legacy-empty-array") == 0) {
+            volatile uintptr_t sentinel = _Alignof(plist_t);
+            plist_t *empty = (plist_t *)sentinel;
+            // Reproduce the previous C cleanup for Rust's empty Box<[plist_t]>.
+            idevice_plist_array_free(empty, 0);
+            free(empty);
+            return 0;
+        }
         if (argc > 1 && strcmp(argv[1], "--legacy-xml") == 0) {
             char *xml = NULL; uint32_t size = 0;
             // Deliberately isolate the old abort in a child process. This is the
@@ -41,8 +49,16 @@ int main(int argc, const char **argv) {
             Check([value[@"Processes"] count] == 2, @"Nested array changed");
         }
         Check(SSDevicePlistValue(NULL) == NSNull.null, @"Missing node must remain null");
+        for (NSUInteger i = 0; i < 200; i++) {
+            SSDevicePlistArrayFree(NULL, 0);
+            SSDevicePlistArrayFree((plist_t *)(uintptr_t)_Alignof(plist_t), 0);
+            SSDeviceArrayStorageFree((void *)(uintptr_t)_Alignof(char *), 0);
+            plist_t *single = malloc(sizeof(plist_t));
+            single[0] = plist_new_dict();
+            SSDevicePlistArrayFree(single, 1);
+        }
         plist_free(node);
-        puts("Device plist: UID, unsigned integers, NaN, non-XML text, binary NULs and repeated conversion passed");
+        puts("Device plist: binary conversion and repeated null/empty-sentinel/nonempty-array cleanup passed");
     }
     return 0;
 }

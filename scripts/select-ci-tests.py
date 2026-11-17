@@ -12,6 +12,8 @@ STORE = "Vendor/Asspp/"
 CHECK_INPUTS = {
     "performance": (
         "ssstore/Bridge/DevicePlist.h",
+        "ssstore/Bridge/DeviceInspector.m",
+        "ssstore/Bridge/DeviceScanner.m",
         "scripts/check-device-plist.sh",
         "scripts/tests/DevicePlistChecks.m",
         "scripts/prepare-performance-devicekit.py",

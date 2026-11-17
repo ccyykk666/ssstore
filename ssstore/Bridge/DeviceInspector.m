@@ -44,14 +44,10 @@ static NSDictionary *IFile(NSData *data, NSString *name, NSString *folder, NSErr
     if (![data writeToFile:path options:NSDataWritingAtomic | NSDataWritingFileProtectionComplete error:error]) return nil;
     return @{@"path":path, @"name":name.lastPathComponent};
 }
-static void IFreePlists(plist_t *nodes, size_t count) {
-    if (nodes) { idevice_plist_array_free(nodes, count); free(nodes); }
-}
 static void IFreeStrings(char **strings, size_t count) {
     if (!strings) return;
     for (size_t i = 0; i < count; i++) idevice_string_free(strings[i]);
-    // Pinned v0.1.68 allocates these outer slices using Rust's Apple system allocator.
-    free(strings);
+    SSDeviceArrayStorageFree(strings, count);
 }
 
 @interface InspectionConnection : NSObject {
@@ -67,88 +63,6 @@ static void IFreeStrings(char **strings, size_t count) {
     rp_pairing_file_free(remotePair);
 }
 @end
-
-// House Arrest uses the installation database, whereas CoreDevice's index can
-// also contain internal/system entries that House Arrest cannot resolve. On an
-// authorization/lookup failure, query the SAME database before explaining it.
-static NSError *IApplicationFileFailure(InspectionConnection *c, NSString *bundle, NSString *source, NSError *underlying) {
-    struct InstallationProxyClientHandle *client = NULL;
-    plist_t *apps = NULL; size_t count = 0;
-    NSDictionary *application = nil;
-    BOOL checked = NO;
-    IdeviceFfiError *failure = installation_proxy_connect_rsd(c->adapter, c->handshake, &client);
-    if (!failure) {
-        const char *identifier = bundle.UTF8String;
-        failure = installation_proxy_get_apps(client, "Any", &identifier, 1, (void **)&apps, &count);
-        if (!failure) {
-            checked = YES;
-            for (size_t i = 0; i < count; i++) {
-                id candidate = IPlist(apps[i]);
-                if ([candidate isKindOfClass:NSDictionary.class] && [candidate[@"CFBundleIdentifier"] isEqualToString:bundle]) {
-                    application = candidate; break;
-                }
-            }
-        }
-    }
-    NSError *lookupError = nil;
-    ICheck(failure, @"核对安装清单", &lookupError);
-    IFreePlists(apps, count); installation_proxy_client_free(client);
-    BOOL documents = [source isEqualToString:@"documents"];
-    // Lookup frequently omits Info.plist declarations. Absence is unknown,
-    // never an explicit false value (nil.boolValue would silently yield NO).
-    id sharingValue = application[@"UIFileSharingEnabled"];
-    NSNumber *sharing = [sharingValue isKindOfClass:NSNumber.class] ? sharingValue : nil;
-    id entitlements = application[@"Entitlements"];
-    id debuggingValue = [entitlements isKindOfClass:NSDictionary.class] ? entitlements[@"get-task-allow"] : nil;
-    NSNumber *debugging = [debuggingValue isKindOfClass:NSNumber.class] ? debuggingValue : nil;
-    NSString *description;
-    if (checked && !application) {
-        description = @"系统安装清单未找到此应用。请返回刷新应用列表；已卸载或卸载保留数据的应用需要先重新安装。";
-    } else if (application && documents && sharing && !sharing.boolValue) {
-        description = @"此应用未开启文件共享，iOS 拒绝访问共享文档。";
-    } else if (application && !documents) {
-        description = @"应用已安装，但 iOS 未能打开其完整容器，可能受到容器权限限制。开启开发者模式不会自动开放所有应用的沙盒，具体错误已记入日志。";
-    } else if (application) {
-        description = sharing ? @"应用已安装并声明了文件共享，但系统文件服务未能打开其共享文档。可尝试开发者文件目录，具体错误已记入日志。"
-            : @"应用已安装，但系统文件服务未能打开其共享文档。设备未返回文件共享声明，不能判断该功能是否启用。可尝试开发者文件目录。";
-    } else {
-        description = @"无法核对应用安装状态，且系统文件服务未能打开此目录。具体错误已记入日志。";
-    }
-    NSMutableDictionary *details = [@{NSLocalizedDescriptionKey:description,
-        NSUnderlyingErrorKey:underlying, @"bundleID":bundle, @"source":source,
-        @"installationLookupSucceeded":@(checked), @"applicationFound":@(application != nil)} mutableCopy];
-    if (lookupError) details[@"installationLookupError"] = lookupError.localizedDescription;
-    if (application) {
-        details[@"fileSharingEnabled"] = (id)sharing ?: @"unknown";
-        details[@"getTaskAllow"] = (id)debugging ?: @"unknown";
-    }
-    return [NSError errorWithDomain:@"ssstore.AppFiles" code:underlying.code userInfo:details];
-}
-
-static BOOL IRequireFileService(InspectionConnection *connection, NSError **error) {
-    const char *name = "com.apple.coredevice.fileservice.control";
-    bool available = false;
-    if (!ICheck(rsd_service_available(connection->handshake, name, &available), @"查询文件服务", error)) return NO;
-    if (available) return YES;
-    struct CRsdServiceArray *services = NULL;
-    IdeviceFfiError *failure = rsd_get_services(connection->handshake, &services);
-    NSMutableArray *related = [NSMutableArray array];
-    if (failure) idevice_error_free(failure);
-    else if (services) {
-        for (size_t i = 0; i < services->count; i++) {
-            NSString *candidate = IString(services->services[i].name);
-            if ([candidate hasPrefix:@"com.apple.coredevice.fileservice"] || [candidate hasPrefix:@"com.apple.instruments."]) {
-                [related addObject:candidate];
-            }
-        }
-    }
-    rsd_free_services(services);
-    [related sortUsingSelector:@selector(compare:)];
-    if (error) *error = [NSError errorWithDomain:@"ssstore.ServiceDiscovery" code:21 userInfo:@{
-        NSLocalizedDescriptionKey:@"当前设备连接未公布 CoreDevice 文件服务，尚未进入应用目录授权。可在“广播服务”和“已挂载开发镜像”中查看设备能力。",
-        @"requestedService":IString(name), @"availableRelatedServices":related}];
-    return NO;
-}
 
 #define REQUIRE(call, stage) if (!ICheck((call), (stage), error)) return nil
 #define CONNECT(base, handle) base##_connect_rsd(c->adapter, c->handshake, &(handle))
@@ -172,25 +86,18 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
     struct SpringBoardServicesClientHandle *spring = NULL;
     struct MisagentClientHandle *misagent = NULL;
     struct AfcClientHandle *afc = NULL;
-    struct HouseArrestClientHandle *house = NULL;
     struct CrashReportCopyMobileHandle *crash = NULL;
     struct ScreenshotrClientHandle *shot = NULL;
     struct LockdowndClientHandle *lockdown = NULL;
     struct DiagnosticsRelayClientHandle *diagnostics = NULL;
     struct AppServiceHandle *appService = NULL;
     struct ConfigurationServiceHandle *config = NULL;
-    struct RemoteServerHandle *server = NULL;
-    struct DeviceInfoHandle *device = NULL;
-    struct ApplicationListingHandle *appListing = NULL;
-    struct ScreenshotClientHandle *dvtShot = NULL;
     struct ImageMounterHandle *mounter = NULL;
     struct CompanionProxyClientHandle *companion = NULL;
-    struct FileServiceHandle *fileService = NULL;
     struct AfcFileHandle *fileHandle = NULL;
     struct CRsdServiceArray *services = NULL;
     struct AppListEntryC *nativeApps = NULL; uintptr_t nativeCount = 0;
     struct ProcessTokenC *processes = NULL; uintptr_t processCount = 0;
-    struct IdeviceRunningProcess **dvtProcesses = NULL; uintptr_t dvtCount = 0;
     plist_t plist = NULL, query = NULL; plist_t *nodes = NULL; size_t nodeCount = 0;
     uint8_t **profileData = NULL; size_t *profileLengths = NULL, profileCount = 0;
     char **strings = NULL; size_t stringCount = 0;
@@ -207,18 +114,15 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
             PROBE_SERVICE(springboard_services, spring, springboard_services_free, @"SpringBoard");
             PROBE_SERVICE(misagent, misagent, misagent_client_free, @"描述文件");
             PROBE_SERVICE(afc_client, afc, afc_client_free, @"AFC 文件");
-            PROBE_SERVICE(house_arrest_client, house, house_arrest_client_free, @"共享文档");
             PROBE_SERVICE(crash_report_client, crash, crash_report_client_free, @"崩溃报告");
             PROBE_SERVICE(screenshotr, shot, screenshotr_client_free, @"截图");
             PROBE_SERVICE(lockdownd, lockdown, lockdownd_client_free, @"设备资料");
             PROBE_SERVICE(diagnostics_relay_client, diagnostics, diagnostics_relay_client_free, @"诊断");
             PROBE_SERVICE(app_service, appService, app_service_free, @"CoreDevice 应用");
             PROBE_SERVICE(configuration_service, config, configuration_service_free, @"显示配置");
-            PROBE_SERVICE(file_service, fileService, file_service_free, @"CoreDevice 文件");
             PROBE_SERVICE(image_mounter, mounter, image_mounter_free, @"开发镜像");
             PROBE_SERVICE(companion_proxy, companion, companion_proxy_client_free, @"伴侣设备");
-            PROBE_SERVICE(remote_server, server, remote_server_free, @"开发服务");
-            value = rows; message = @"连接结果不代表已获全部读取权限。";
+            value = rows;
         }
         else if ([op isEqualToString:@"services"]) {
             REQUIRE(rsd_get_services(c->handshake, &services), @"发现服务");
@@ -230,17 +134,11 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
                 [rows addObject:@{@"name":IString(s->name), @"port":@(s->port), @"requiredEntitlement":IString(s->entitlement),
                                  @"remoteXPC":@(s->uses_remote_xpc), @"features":features, @"version":@(s->service_version)}];
             }
-            value = rows; message = @"广播服务的读取权限需单独验证。";
-        } else if ([@[@"appDetails", @"appCapabilities", @"appStorage", @"allStorage", @"installedApps"] containsObject:op]) {
+            value = rows;
+        } else if ([@[@"appDetails", @"appCapabilities", @"appStorage", @"allStorage"] containsObject:op]) {
             REQUIRE(CONNECT(installation_proxy, installation), @"连接应用信息服务");
             query = plist_new_dict(); plist_dict_set_item(query, "ApplicationType", plist_new_string("Any"));
-            if ([op isEqualToString:@"installedApps"]) {
-                plist_t attrs = plist_new_array();
-                for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName", @"Path"]) {
-                    plist_array_append_item(attrs, plist_new_string(key.UTF8String));
-                }
-                plist_dict_set_item(query, "ReturnAttributes", attrs);
-            } else if ([op isEqualToString:@"appStorage"] || [op isEqualToString:@"allStorage"]) {
+            if ([op isEqualToString:@"appStorage"] || [op isEqualToString:@"allStorage"]) {
                 plist_t attrs = plist_new_array();
                 for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName", @"StaticDiskUsage", @"DynamicDiskUsage"]) {
                     plist_array_append_item(attrs, plist_new_string(key.UTF8String));
@@ -384,56 +282,6 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
             }
             value = rows;
         }
-        else if ([op hasPrefix:@"dvt"]) {
-            REQUIRE(remote_server_connect_rsd(c->adapter, c->handshake, &server), @"连接开发服务");
-            if ([op isEqualToString:@"dvtApps"]) {
-                REQUIRE(application_listing_new(server, &appListing), @"创建开发应用查询");
-                REQUIRE(application_listing_get_apps(appListing, &nodes, &nodeCount), @"读取开发应用列表");
-                NSMutableArray *rows = [NSMutableArray array];
-                for (size_t i = 0; i < nodeCount; i++) [rows addObject:IPlist(nodes[i])];
-                value = rows;
-            } else if ([op isEqualToString:@"dvtScreenshot"]) {
-                REQUIRE(screenshot_client_new(server, &dvtShot), @"创建开发截图服务");
-                REQUIRE(screenshot_client_take_screenshot(dvtShot, &bytes, &byteCount), @"获取开发截图");
-                NSDictionary *file = IFile([NSData dataWithBytes:bytes length:byteCount], @"dvt-screenshot.png", folder, error);
-                if (!file) return nil; [files addObject:file]; value = @{@"字节数":@(byteCount)};
-            } else {
-                REQUIRE(device_info_new(server, &device), @"创建设备信息查询");
-                if ([op isEqualToString:@"dvtProcesses"]) {
-                    REQUIRE(device_info_running_processes(device, &dvtProcesses, &dvtCount), @"读取运行进程");
-                    NSMutableArray *rows = [NSMutableArray array];
-                    for (uintptr_t i = 0; i < dvtCount; i++) {
-                        struct IdeviceRunningProcess *p = dvtProcesses[i];
-                        [rows addObject:@{@"pid":@(p->pid), @"name":IString(p->name), @"realAppName":IString(p->real_app_name),
-                            @"isApplication":@(p->is_application), @"startPageCount":@(p->start_page_count)}];
-                    }
-                    value = rows;
-                } else if ([op isEqualToString:@"dvtKernel"]) {
-                    char *name = NULL; REQUIRE(device_info_mach_kernel_name(device, &name), @"读取内核名称");
-                    value = IString(name); idevice_string_free(name);
-                } else if ([op isEqualToString:@"dvtAttributes"]) {
-                    NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
-                    for (NSString *kind in @[@"process", @"system"]) {
-                        char **names = NULL; uintptr_t count = 0;
-                        IdeviceFfiError *failure = [kind isEqualToString:@"process"] ? device_info_sysmon_process_attributes(device, &names, &count)
-                            : device_info_sysmon_system_attributes(device, &names, &count);
-                        NSError *local = nil;
-                        if (ICheck(failure, @"读取采样字段", &local)) {
-                            NSMutableArray *rows = [NSMutableArray array];
-                            for (uintptr_t i = 0; i < count; i++) [rows addObject:IString(names[i])];
-                            attributes[kind] = rows;
-                        } else { attributes[kind] = local.localizedDescription; }
-                        device_info_string_array_free(names, count);
-                    }
-                    value = attributes;
-                } else {
-                    if ([op isEqualToString:@"dvtHardware"]) { REQUIRE(device_info_hardware_information(device, &plist), @"读取硬件信息"); }
-                    else if ([op isEqualToString:@"dvtNetwork"]) { REQUIRE(device_info_network_information(device, &plist), @"读取网络信息"); }
-                    else { IError(error, @"未知开发服务读取操作。"); return nil; }
-                    value = IPlist(plist);
-                }
-            }
-        }
         else if ([op isEqualToString:@"configuration"]) {
             REQUIRE(configuration_service_connect_rsd(c->adapter, c->handshake, &config), @"连接显示配置服务");
             NSMutableDictionary *fields = [NSMutableDictionary dictionary]; NSError *local = nil;
@@ -456,7 +304,7 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
             else fields[@"降低透明度"] = local.localizedDescription;
             if (ICheck(configuration_service_get_show_borders(config, &enabled), @"布局调试边框", &local)) fields[@"布局调试边框"] = @(enabled);
             else fields[@"布局调试边框"] = local.localizedDescription;
-            value = fields; message = @"读取失败的字段会显示错误原因。";
+            value = fields;
         }
         else if ([@[@"developerMode", @"mountedImages"] containsObject:op]) {
             REQUIRE(CONNECT(image_mounter, mounter), @"连接开发镜像服务");
@@ -468,6 +316,7 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
                 NSMutableArray *rows = [NSMutableArray array];
                 for (size_t i = 0; i < nodeCount; i++) [rows addObject:IPlist(nodes[i])];
                 value = rows;
+                if (rows.count == 0) message = @"未挂载开发镜像";
             }
         }
         else if ([op isEqualToString:@"companion"]) {
@@ -477,110 +326,59 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
             for (size_t i = 0; i < stringCount; i++) [rows addObject:IString(strings[i])];
             value = rows;
         }
-        else if ([@[@"documents", @"container", @"media", @"crashes", @"filesystemInfo", @"coreFiles", @"fileInfo", @"fileRead"] containsObject:op]) {
+        else if ([@[@"media", @"crashes", @"filesystemInfo", @"fileInfo", @"fileRead"] containsObject:op]) {
             NSString *source = [options[@"source"] isKindOfClass:NSString.class] ? options[@"source"] : op;
-            if ([source isEqualToString:@"coreFiles"]) {
-                if ([op isEqualToString:@"fileRead"] || [op isEqualToString:@"fileInfo"]) {
-                    IError(error, @"此入口仅浏览目录。文件属性和导出请使用共享文档或应用容器。"); return nil;
+            if ([source isEqualToString:@"crashes"]) {
+                REQUIRE(CONNECT(crash_report_client, crash), @"连接崩溃报告服务");
+                IdeviceFfiError *failure = crash_report_client_to_afc(crash, &afc);
+                crash = NULL; REQUIRE(failure, @"打开报告目录");
+            } else {
+                REQUIRE(CONNECT(afc_client, afc), @"连接 AFC 文件服务");
+            }
+            if ([op isEqualToString:@"filesystemInfo"]) {
+                struct AfcDeviceInfo info = {0};
+                REQUIRE(afc_get_device_info(afc, &info), @"读取文件系统容量");
+                value = @{@"型号":IString(info.model), @"总字节数":@(info.total_bytes), @"可用字节数":@(info.free_bytes), @"块大小":@(info.block_size)};
+                afc_device_info_free(&info);
+            } else if ([@[@"fileInfo", @"fileRead"] containsObject:op]) {
+                struct AfcFileInfo info = {0};
+                REQUIRE(afc_get_file_info(afc, remotePath.UTF8String, &info), @"读取文件属性");
+                BOOL isDirectory = [IString(info.st_ifmt) isEqualToString:@"S_IFDIR"];
+                BOOL isRegular = [IString(info.st_ifmt) isEqualToString:@"S_IFREG"];
+                value = @{@"path":remotePath, @"isDirectory":@(isDirectory), @"size":@(info.size), @"blocks":@(info.blocks),
+                    @"createdAt":[NSDate dateWithTimeIntervalSince1970:info.creation], @"modifiedAt":[NSDate dateWithTimeIntervalSince1970:info.modified],
+                    @"type":IString(info.st_ifmt), @"links":IString(info.st_nlink), @"linkTarget":IString(info.st_link_target)};
+                size_t fileSize = info.size;
+                afc_file_info_free(&info);
+                if ([op isEqualToString:@"fileRead"]) {
+                    if (isDirectory) { IError(error, @"此项为目录，请打开目录。"); return nil; }
+                    if (!isRegular) { IError(error, @"此类型不支持内容读取，请查看文件属性。"); return nil; }
+                    const NSUInteger limit = 32 * 1024 * 1024;
+                    if (fileSize > limit) { IError(error, @"文件过大。"); return nil; }
+                    REQUIRE(afc_file_open(afc, remotePath.UTF8String, AfcRdOnly, &fileHandle), @"只读打开文件");
+                    NSMutableData *data = [NSMutableData data];
+                    while (YES) {
+                        uint8_t *chunk = NULL; size_t length = 0;
+                        IdeviceFfiError *failure = afc_file_read(fileHandle, &chunk, 64 * 1024, &length);
+                        if (!ICheck(failure, @"读取文件", error)) { if (chunk) afc_file_read_data_free(chunk, length); return nil; }
+                        if (data.length + length > limit) { if (chunk) afc_file_read_data_free(chunk, length); IError(error, @"文件过大。"); return nil; }
+                        if (length) [data appendBytes:chunk length:length];
+                        if (chunk) afc_file_read_data_free(chunk, length);
+                        if (!length) break;
+                    }
+                    NSDictionary *file = IFile(data, remotePath.lastPathComponent.length ? remotePath.lastPathComponent : @"export.bin", folder, error);
+                    if (!file) return nil; [files addObject:file];
                 }
-                if (!IRequireFileService(c, error)) return nil;
-                REQUIRE(file_service_connect_rsd(c->adapter, c->handshake, &fileService), @"连接 CoreDevice 文件服务");
-                int domain = [options[@"domain"] intValue];
-                if (domain != 2 && domain != 3 && domain != 5) domain = 1;
-                NSString *identifier = domain == 2 ? options[@"groupID"] : domain == 1 ? bundle : nil;
-                REQUIRE(file_service_create_session(fileService, (enum IdeviceFileServiceDomain)domain, identifier.UTF8String, NULL), @"建立文件读取会话");
-                NSString *relative = [remotePath hasPrefix:@"/"] ? [remotePath substringFromIndex:1] : remotePath;
-                REQUIRE(file_service_retrieve_directory_list(fileService, relative.length ? relative.UTF8String : ".", &strings, &stringCount), @"读取 CoreDevice 目录");
+            } else {
+                REQUIRE(afc_list_directory(afc, remotePath.UTF8String, &strings, &stringCount), @"读取目录");
                 for (size_t i = 0; i < stringCount; i++) {
                     NSString *name = IString(strings[i]);
-                    if ([name isEqualToString:@"."] || [name isEqualToString:@".."]) continue;
-                    [entries addObject:@{@"name":name, @"path":[remotePath stringByAppendingPathComponent:name]}];
+                    if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."] || [name containsString:@"/"]) continue;
+                    NSString *child = [remotePath stringByAppendingPathComponent:name];
+                    NSMutableDictionary *entry = [@{@"name":name, @"path":child} mutableCopy];
+                    [entries addObject:entry];
                 }
-                file_service_free_directory_list(strings, stringCount); strings = NULL; stringCount = 0;
-                value = @{@"路径":remotePath, @"文件域":@(domain), @"标识":identifier ?: @"此文件域不需要标识"};
-                message = @"读取文件请使用共享文档或应用容器。";
-            } else {
-                if ([@[@"documents", @"container"] containsObject:source]) {
-                    if (!bundle.length) { IError(error, @"请选择应用。"); return nil; }
-                    REQUIRE(CONNECT(house_arrest_client, house), @"连接应用文件服务");
-                    IdeviceFfiError *failure = [source isEqualToString:@"documents"] ? house_arrest_vend_documents(house, bundle.UTF8String, &afc)
-                        : house_arrest_vend_container(house, bundle.UTF8String, &afc);
-                    house = NULL; // Vend consumes the client on both success and failure.
-                    NSError *accessError = nil;
-                    if (!ICheck(failure, @"打开应用授权目录", &accessError)) {
-                        if (error) {
-                            NSString *description = accessError.localizedDescription;
-                            BOOL permissionFailure = [description containsString:@"InstallationLookupFailed"] ||
-                                [description containsString:@"ApplicationLookupFailed"] ||
-                                [description containsString:@"PermissionDenied"] || [description containsString:@"NotAllowed"];
-                            *error = permissionFailure ? IApplicationFileFailure(c, bundle, source, accessError) : accessError;
-                        }
-                        return nil;
-                    }
-                } else if ([source isEqualToString:@"crashes"]) {
-                    REQUIRE(CONNECT(crash_report_client, crash), @"连接崩溃报告服务");
-                    IdeviceFfiError *failure = crash_report_client_to_afc(crash, &afc);
-                    crash = NULL; REQUIRE(failure, @"打开报告目录");
-                } else {
-                    REQUIRE(CONNECT(afc_client, afc), @"连接 AFC 文件服务");
-                }
-                if ([op isEqualToString:@"filesystemInfo"]) {
-                    struct AfcDeviceInfo info = {0};
-                    REQUIRE(afc_get_device_info(afc, &info), @"读取文件系统容量");
-                    value = @{@"型号":IString(info.model), @"总字节数":@(info.total_bytes), @"可用字节数":@(info.free_bytes), @"块大小":@(info.block_size)};
-                    afc_device_info_free(&info);
-                } else if ([@[@"fileInfo", @"fileRead"] containsObject:op]) {
-                    struct AfcFileInfo info = {0};
-                    REQUIRE(afc_get_file_info(afc, remotePath.UTF8String, &info), @"读取文件属性");
-                    BOOL isDirectory = [IString(info.st_ifmt) isEqualToString:@"S_IFDIR"];
-                    BOOL isRegular = [IString(info.st_ifmt) isEqualToString:@"S_IFREG"];
-                    value = @{@"path":remotePath, @"isDirectory":@(isDirectory), @"size":@(info.size), @"blocks":@(info.blocks),
-                        @"createdAt":[NSDate dateWithTimeIntervalSince1970:info.creation], @"modifiedAt":[NSDate dateWithTimeIntervalSince1970:info.modified],
-                        @"type":IString(info.st_ifmt), @"links":IString(info.st_nlink), @"linkTarget":IString(info.st_link_target)};
-                    size_t fileSize = info.size;
-                    afc_file_info_free(&info);
-                    if ([op isEqualToString:@"fileRead"]) {
-                        if (isDirectory) { IError(error, @"此项为目录，请打开目录。"); return nil; }
-                        if (!isRegular) { IError(error, @"此类型不支持内容读取，请查看文件属性。"); return nil; }
-                        const NSUInteger limit = 32 * 1024 * 1024;
-                        if (fileSize > limit) { IError(error, @"文件过大。"); return nil; }
-                        REQUIRE(afc_file_open(afc, remotePath.UTF8String, AfcRdOnly, &fileHandle), @"只读打开文件");
-                        NSMutableData *data = [NSMutableData data];
-                        while (YES) {
-                            uint8_t *chunk = NULL; size_t length = 0;
-                            IdeviceFfiError *failure = afc_file_read(fileHandle, &chunk, 64 * 1024, &length);
-                            if (!ICheck(failure, @"读取文件", error)) { if (chunk) afc_file_read_data_free(chunk, length); return nil; }
-                            if (data.length + length > limit) { if (chunk) afc_file_read_data_free(chunk, length); IError(error, @"文件过大。"); return nil; }
-                            if (length) [data appendBytes:chunk length:length];
-                            if (chunk) afc_file_read_data_free(chunk, length);
-                            if (!length) break;
-                        }
-                        NSDictionary *file = IFile(data, remotePath.lastPathComponent.length ? remotePath.lastPathComponent : @"export.bin", folder, error);
-                        if (!file) return nil; [files addObject:file];
-                        message = @"文件已读取，可预览或导出。";
-                    }
-                } else {
-                    REQUIRE(afc_list_directory(afc, remotePath.UTF8String, &strings, &stringCount), @"读取目录");
-                    for (size_t i = 0; i < stringCount; i++) {
-                        NSString *name = IString(strings[i]);
-                        if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."] || [name containsString:@"/"]) continue;
-                        NSString *child = [remotePath stringByAppendingPathComponent:name];
-                        NSMutableDictionary *entry = [@{@"name":name, @"path":child} mutableCopy];
-                        if ([options[@"entryDetails"] boolValue] && entries.count < 128) {
-                            struct AfcFileInfo info = {0};
-                            IdeviceFfiError *failure = afc_get_file_info(afc, child.UTF8String, &info);
-                            if (failure) idevice_error_free(failure);
-                            else {
-                                NSString *type = IString(info.st_ifmt);
-                                entry[@"isDirectory"] = @([type isEqualToString:@"S_IFDIR"]);
-                                entry[@"size"] = @(info.size); entry[@"type"] = type;
-                                afc_file_info_free(&info);
-                            }
-                        }
-                        [entries addObject:entry];
-                    }
-                    value = @{@"路径":remotePath, @"条目数":@(entries.count)};
-                }
+                value = @{@"路径":remotePath, @"条目数":@(entries.count)};
             }
         }
         else {
@@ -592,17 +390,15 @@ static BOOL IRequireFileService(InspectionConnection *connection, NSError **erro
         if (fileHandle) { IdeviceFfiError *e = afc_file_close(fileHandle); if (e) idevice_error_free(e); }
         if (bytes) idevice_data_free(bytes, byteCount);
         IFreeStrings(strings, stringCount);
-        IFreePlists(nodes, nodeCount); plist_free(plist); plist_free(query);
+        SSDevicePlistArrayFree(nodes, nodeCount); plist_free(plist); plist_free(query);
         misagent_free_profiles(profileData, profileLengths, profileCount);
         rsd_free_services(services);
         app_service_free_app_list(nativeApps, nativeCount); app_service_free_process_list(processes, processCount);
-        device_info_running_processes_free(dvtProcesses, dvtCount);
         installation_proxy_client_free(installation); springboard_services_free(spring); misagent_client_free(misagent);
-        afc_client_free(afc); house_arrest_client_free(house); crash_report_client_free(crash); screenshotr_client_free(shot);
+        afc_client_free(afc); crash_report_client_free(crash); screenshotr_client_free(shot);
         lockdownd_client_free(lockdown); diagnostics_relay_client_free(diagnostics); app_service_free(appService);
-        configuration_service_free(config); application_listing_free(appListing); device_info_free(device);
-        screenshot_client_free(dvtShot); remote_server_free(server); image_mounter_free(mounter);
-        companion_proxy_client_free(companion); file_service_free(fileService);
+        configuration_service_free(config); image_mounter_free(mounter);
+        companion_proxy_client_free(companion);
     }
 }
 @end

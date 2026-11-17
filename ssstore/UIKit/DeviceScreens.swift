@@ -59,7 +59,6 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
             NativeSection(title: "下载管理", rows: [
                 NativeRow(title: clearingCache ? "正在清理缓存…" : (cacheStatus.isEmpty ? "清理缓存" : cacheStatus),
                     color: .systemBlue, action: working || model.busy ? nil : { [weak self] in self?.clearCache() }),
-                link("日志") { [weak self] in guard let self else { return }; push(NativeLogs(model)) },
                 NativeRow(title: "删除全部下载", color: .systemRed, action: { [weak self] in
                     self?.confirm("删除全部下载？") { Downloads.this.removeAll() }
                 }),
@@ -74,8 +73,8 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
                 }),
             ]),
         ]
-        if !model.ignoredApps.names.isEmpty { sections.append(NativeSection(rows: [link("已忽略应用") { [weak self] in guard let self else { return }; push(NativeIgnored(model)) }])) }
-        sections.append(NativeSection(title: "关于", rows: [link("开源许可") { [weak self] in guard let self else { return }; let text = ["AssppLicense", "AssppWebLicense", "IDeviceLicense"].compactMap { Bundle.main.url(forResource: $0, withExtension: "txt") }.compactMap { try? String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n\n"); push(NativeText(model, title: "开源许可", text: text)) }, NativeRow(title: "ssstore", detail: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")]))
+        if !model.ignoredApps.visibleBundleIDs.isEmpty { sections.append(NativeSection(rows: [link("已忽略应用") { [weak self] in guard let self else { return }; push(NativeIgnored(model)) }])) }
+        sections.append(NativeSection(title: "关于", rows: [link("日志") { [weak self] in guard let self else { return }; push(NativeLogs(model)) }, link("开源许可") { [weak self] in guard let self else { return }; let text = ["AssppLicense", "AssppWebLicense", "IDeviceLicense"].compactMap { Bundle.main.url(forResource: $0, withExtension: "txt") }.compactMap { try? String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n\n"); push(NativeText(model, title: "开源许可", text: text)) }, NativeRow(title: "ssstore", detail: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")]))
         return sections
     }
     private func clearCache() {
@@ -98,42 +97,34 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
 @MainActor
 final class NativeIgnored: NativePage {
     private var ids: [String] = []
-    private var attemptedIconRepair = false
+    private var refreshedInventory = false
     init(_ model: AppModel) { super.init(model, title: "已忽略应用") }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
-        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .refresh, primaryAction: UIAction { [weak self] _ in self?.repairIcons() })
+        navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .refresh, primaryAction: UIAction { [weak self] _ in self?.refreshInventory() })
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if !attemptedIconRepair, model.hasPairing, !model.busy,
-           ids.contains(where: { model.localIconURL(for: model.ignoredApps.application(for: $0)) == nil && model.ignoredApps.iconURLs?[$0] == nil }) {
-            repairIcons()
-        }
+        if !refreshedInventory { refreshInventory() }
     }
-    private func repairIcons() {
+    private func refreshInventory() {
         guard !working, !model.busy, model.hasPairing else { return }
-        attemptedIconRepair = true
-        // Refresh local metadata/icons only. Ignored applications stay excluded
-        // from the visible inventory and never enter store version queries.
+        refreshedInventory = true
         run { [self] in _ = await model.scan() }
     }
     override func rows() -> [NativeSection] {
-        ids = model.ignoredApps.names.keys.sorted()
+        ids = model.ignoredApps.visibleBundleIDs.sorted()
+        if ids.isEmpty { return [NativeSection(rows: [NativeRow(title: "暂无已忽略应用", color: .secondaryLabel)])] }
         return [NativeSection(rows: ids.map { id in NativeRow(title: model.ignoredApps.names[id] ?? id, detail: id, icon: model.localIconURL(for: model.ignoredApps.application(for: id)) ?? model.ignoredApps.iconURLs?[id], compact: true) })]
     }
     override func reload() {
         guard isViewLoaded else { return }
         navigationItem.rightBarButtonItem?.isEnabled = !working && !model.busy && model.hasPairing
-        let remaining = model.ignoredApps.bundleIDs
-        if ids.count == remaining.count + 1, let removed = ids.firstIndex(where: { !remaining.contains($0) }) {
-            sections = rows()
-            tableView.deleteRows(at: [IndexPath(row: removed, section: 0)], with: .fade)
-        } else { super.reload() }
+        super.reload()
     }
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard !model.busy else { return nil }
+        guard !working, !model.busy, ids.indices.contains(indexPath.row) else { return nil }
         let id = ids[indexPath.row]
         let restore = UIContextualAction(style: .normal, title: "恢复") { [weak self] _, _, completion in
             guard let self else { completion(false); return }
@@ -302,8 +293,6 @@ final class NativeInspection: NativePage {
     let operation: InspectionOperation
     var bundle: String
     var path: String
-    var domain = 1
-    var groupID = ""
     var source: String?
     var result: InspectionResult?
     var report: URL?
@@ -313,23 +302,19 @@ final class NativeInspection: NativePage {
     override func rows() -> [NativeSection] {
         var controls: [NativeRow] = []
         if !operation.note.isEmpty { controls.append(NativeRow(title: operation.note)) }
-        if operation.requiresApp && !(operation == .coreFiles && domain != 1) {
+        if operation.requiresApp {
             controls.append(NativeRow(title: "应用", detail: model.records.first(where: { $0.id == bundle })?.installed.name ?? (bundle.isEmpty ? "请选择" : bundle), action: { [weak self] in guard let self else { return }; let include = UserDefaults.standard.bool(forKey: "includeSystemApps"); let apps = model.records.filter { include || !$0.installed.isSystem }; let picker = NativeChoices(model, title: "选择应用", items: apps.map { ($0.id, $0.installed.name) }) { [weak self] in self?.bundle = $0; self?.result = nil; self?.reload() }; picker.compact = true; picker.icons = Dictionary(uniqueKeysWithValues: apps.compactMap { record in self.model.localIconURL(for: record.installed).map { (record.id, $0) } }); push(picker) }))
         }
         if operation.isBrowser || operation.isFileHelper { controls.append(NativeRow(title: "路径", detail: path, action: { [weak self] in guard let self else { return }; edit("路径", value: path) { [weak self] in self?.path = $0; self?.result = nil; self?.reload() } })) }
-        if operation == .coreFiles {
-            controls.append(link("文件域：\(domain)") { [weak self] in guard let self else { return }; push(NativeChoices(model, title: "文件域", items: [("1", "应用数据"), ("2", "App Group"), ("3", "临时目录"), ("5", "崩溃日志")]) { [weak self] in self?.domain = Int($0) ?? 1; self?.result = nil; self?.reload() }) })
-            if domain == 2 { controls.append(link("App Group：\(groupID)") { [weak self] in guard let self else { return }; edit("App Group", value: groupID) { [weak self] in self?.groupID = $0; self?.reload() } }) }
-        }
-        controls.append(link(working ? "正在读取…" : "读取") { [weak self] in self?.read() })
+        controls.append(NativeRow(title: working ? "正在读取…" : "读取", color: .systemBlue, action: working || model.busy ? nil : { [weak self] in self?.read() }))
         var sections = [NativeSection(rows: controls)]
         if let failure { sections.append(NativeSection(rows: [NativeRow(title: failure, color: .systemOrange)])) }
         if let result {
             if !result.entries.isEmpty {
                 sections.append(NativeSection(title: "目录", rows: result.entries.map { entry in NativeRow(title: entry.name, action: { [weak self] in
                     guard let self else { return }
-                    let page = NativeInspection(model, operation: operation == .coreFiles ? operation : .fileInfo, bundle: bundle, path: entry.path, source: operation.rawValue)
-                    page.domain = domain; page.groupID = groupID; push(page); page.read()
+                    let page = NativeInspection(model, operation: .fileInfo, bundle: bundle, path: entry.path, source: operation.rawValue)
+                    push(page); page.read()
                 }) }))
             }
             if operation == .fileInfo {
@@ -338,17 +323,23 @@ final class NativeInspection: NativePage {
                 } else { sections.append(NativeSection(rows: [link("读取文件") { [weak self] in guard let self else { return }; let page = NativeInspection(model, operation: .fileRead, bundle: bundle, path: path, source: source); push(page); page.read() }])) }
             }
             if !result.files.isEmpty { sections.append(NativeSection(title: "文件", rows: result.files.flatMap { file in [link(file.name) { [weak self] in self?.preview(URL(fileURLWithPath: file.path)) }, link("导出 \(file.name)") { [weak self] in self?.share(URL(fileURLWithPath: file.path)) }] })) }
-            sections.append(NativeSection(rows: valueRows(result.value)))
+            if let message = result.message, result.files.isEmpty, result.entries.isEmpty {
+                sections.append(NativeSection(rows: [NativeRow(title: message, color: .secondaryLabel)]))
+            }
+            let values = valueRows(result.value)
+            if !values.isEmpty { sections.append(NativeSection(rows: values)) }
+            else if result.message == nil, result.files.isEmpty, result.entries.isEmpty {
+                sections.append(NativeSection(rows: [NativeRow(title: "暂无数据", color: .secondaryLabel)]))
+            }
             if let report { sections.append(NativeSection(rows: [link("导出 JSON 报告") { [weak self] in self?.share(report) }])) }
         }
-        sections.append(NativeSection(title: "服务", rows: [NativeRow(title: operation.service)]))
         return sections
     }
     func valueRows(_ value: InspectionValue) -> [NativeRow] { NativeValues.makeRows(value, owner: self) }
     func read() {
         guard !working else { return }; working = true; failure = nil; result = nil; report = nil; reload()
         Task { [self] in
-            do { let output = try await model.inspect(operation, bundleID: bundle, path: path, source: source, domain: domain, groupID: groupID); result = output.0; report = output.1 }
+            do { let output = try await model.inspect(operation, bundleID: bundle, path: path, source: source); result = output.0; report = output.1 }
             catch { failure = error.localizedDescription }
             working = false; reload()
         }
