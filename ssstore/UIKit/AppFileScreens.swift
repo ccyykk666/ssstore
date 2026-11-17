@@ -30,7 +30,7 @@ final class NativeAppFilesHome: NativePage {
         guard !working else { return }
         run { [self] in
             do {
-                applications = PerformanceApplication.fromInstalledApplications(try await model.inspect(.appDetails).0.value)
+                applications = PerformanceApplication.fromInstalledApplications(try await model.inspect(.installedApps).0.value)
             } catch {
                 if model.records.isEmpty { _ = await model.scan() }
                 applications = model.records.map { PerformanceApplication(bundleID: $0.id, name: $0.installed.name) }

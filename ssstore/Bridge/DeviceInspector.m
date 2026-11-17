@@ -200,10 +200,16 @@ static NSError *IApplicationFileFailure(InspectionConnection *c, NSString *bundl
                                  @"remoteXPC":@(s->uses_remote_xpc), @"features":features, @"version":@(s->service_version)}];
             }
             value = rows; message = @"广播服务的读取权限需单独验证。";
-        } else if ([@[@"appDetails", @"appCapabilities", @"appStorage", @"allStorage"] containsObject:op]) {
+        } else if ([@[@"appDetails", @"appCapabilities", @"appStorage", @"allStorage", @"installedApps"] containsObject:op]) {
             REQUIRE(CONNECT(installation_proxy, installation), @"连接应用信息服务");
             query = plist_new_dict(); plist_dict_set_item(query, "ApplicationType", plist_new_string("Any"));
-            if ([op isEqualToString:@"appStorage"] || [op isEqualToString:@"allStorage"]) {
+            if ([op isEqualToString:@"installedApps"]) {
+                plist_t attrs = plist_new_array();
+                for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName", @"Path"]) {
+                    plist_array_append_item(attrs, plist_new_string(key.UTF8String));
+                }
+                plist_dict_set_item(query, "ReturnAttributes", attrs);
+            } else if ([op isEqualToString:@"appStorage"] || [op isEqualToString:@"allStorage"]) {
                 plist_t attrs = plist_new_array();
                 for (NSString *key in @[@"CFBundleIdentifier", @"CFBundleDisplayName", @"CFBundleName", @"StaticDiskUsage", @"DynamicDiskUsage"]) {
                     plist_array_append_item(attrs, plist_new_string(key.UTF8String));

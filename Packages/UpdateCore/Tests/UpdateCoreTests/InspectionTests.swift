@@ -2,6 +2,15 @@ import XCTest
 @testable import UpdateCore
 
 final class InspectionTests: XCTestCase {
+    func testApplicationInventoryCanLoadBeforeSelectingAnApplication() {
+        XCTAssertFalse(InspectionOperation.installedApps.requiresApp)
+        XCTAssertEqual(InspectionOperation.installedApps.service, InspectionOperation.appDetails.service)
+        XCTAssertFalse(InspectionOperation.menu.contains(.installedApps))
+        // Keep the existing single-app tools scoped to the selected application.
+        XCTAssertTrue(InspectionOperation.appDetails.requiresApp)
+        XCTAssertTrue(InspectionOperation.documents.requiresApp)
+        XCTAssertTrue(InspectionOperation.container.requiresApp)
+    }
     func testDeviceResultPreservesNestedValuesAndBinaryDescription() throws {
         let data = Data(#"{"value":{"enabled":true,"bytes":1234,"Entitlements":{"application-identifier":"TEAM.app"},"binary":{"类型":"二进制","字节数":20},"absent":null},"files":[{"name":"report.ips","path":"/cache/report.ips"}],"entries":[{"name":"Documents","path":"/Documents"}],"message":null}"#.utf8)
         var result = try JSONDecoder().decode(InspectionResult.self, from: data)

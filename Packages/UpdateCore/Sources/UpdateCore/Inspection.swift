@@ -8,13 +8,14 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
     case coreApps, coreProcesses, coreFiles, configuration
     case dvtApps, dvtProcesses, dvtHardware, dvtNetwork, dvtKernel, dvtAttributes, dvtScreenshot
     case developerMode, mountedImages, companion
-    case fileInfo, fileRead
+    case fileInfo, fileRead, installedApps
 
     public var id: String { rawValue }
     public var title: String {
         switch self {
         case .services: return "广播服务"
         case .probe: return "连接测试"
+        case .installedApps: return "已安装应用清单"
         case .appDetails: return "应用信息"
         case .appCapabilities: return "应用能力与共享声明"
         case .appStorage: return "应用存储空间"
@@ -61,7 +62,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
     public var group: String {
         switch self {
         case .services, .probe: return "服务发现"
-        case .appDetails, .appCapabilities, .appStorage, .allStorage: return "应用与存储"
+        case .appDetails, .appCapabilities, .appStorage, .allStorage, .installedApps: return "应用与存储"
         case .profiles: return "签名与描述文件"
         case .documents, .container, .media, .crashes, .filesystemInfo, .coreFiles, .fileInfo, .fileRead: return "文件与报告"
         case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation, .screenshot: return "图标与屏幕"
@@ -77,7 +78,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
     public var service: String {
         switch self {
         case .services, .probe: return "RSD"
-        case .appDetails, .appCapabilities, .appStorage, .allStorage: return "com.apple.mobile.installation_proxy.shim.remote"
+        case .appDetails, .appCapabilities, .appStorage, .allStorage, .installedApps: return "com.apple.mobile.installation_proxy.shim.remote"
         case .profiles: return "com.apple.misagent.shim.remote"
         case .documents, .container: return "com.apple.mobile.house_arrest.shim.remote"
         case .media, .filesystemInfo, .fileInfo, .fileRead: return "com.apple.afc.shim.remote"
@@ -108,7 +109,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Sendable {
         default: return ""
         }
     }
-    public static var menu: [Self] { allCases.filter { !$0.isFileHelper } }
+    public static var menu: [Self] { allCases.filter { !$0.isFileHelper && $0 != .installedApps } }
     public static var groups: [String] { menu.reduce(into: []) { if !$0.contains($1.group) { $0.append($1.group) } } }
 }
 
