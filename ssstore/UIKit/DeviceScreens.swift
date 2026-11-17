@@ -75,7 +75,7 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
             ]),
         ]
         if !model.ignoredApps.names.isEmpty { sections.append(NativeSection(rows: [link("已忽略应用") { [weak self] in guard let self else { return }; push(NativeIgnored(model)) }])) }
-        sections.append(NativeSection(title: "关于", rows: [link("开源许可") { [weak self] in guard let self else { return }; let text = ["AssppLicense", "AssppWebLicense"].compactMap { Bundle.main.url(forResource: $0, withExtension: "txt") }.compactMap { try? String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n\n"); push(NativeText(model, title: "开源许可", text: text)) }, NativeRow(title: "ssstore", detail: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")]))
+        sections.append(NativeSection(title: "关于", rows: [link("开源许可") { [weak self] in guard let self else { return }; let text = ["AssppLicense", "AssppWebLicense", "IDeviceLicense"].compactMap { Bundle.main.url(forResource: $0, withExtension: "txt") }.compactMap { try? String(contentsOf: $0, encoding: .utf8) }.joined(separator: "\n\n"); push(NativeText(model, title: "开源许可", text: text)) }, NativeRow(title: "ssstore", detail: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "")]))
         return sections
     }
     private func clearCache() {
@@ -425,7 +425,7 @@ final class NativeExtractedFile: NativePage {
         }
     }
     override func rows() -> [NativeSection] {
-        var rows = [link("预览") { [weak self] in guard let self else { return }; preview(file) }, link("导出") { [weak self] in guard let self else { return }; share(file) }]
+        var rows = [link("查看内容") { [weak self] in guard let self else { return }; push(NativeFileContents(model: model, file: file, name: file.lastPathComponent)) }, link("预览") { [weak self] in guard let self else { return }; preview(file) }, link("导出") { [weak self] in guard let self else { return }; share(file) }]
         if let size { rows.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
         if let plist { rows.append(NativeRow(title: plist)) }
         return [NativeSection(rows: rows)]

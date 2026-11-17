@@ -4,16 +4,31 @@ public struct PerformanceProcess: Codable, Equatable, Sendable, Identifiable {
     public let pid: String
     public var id: String { pid }
     public let name: String
-    /// DVT cpuUsage is percent of one core; multi-threaded processes can exceed 100%.
+    /// Percent of one core. Multi-threaded processes can exceed 100%.
     public let cpuPercent: Double?
     public let memoryBytes: Double?
+    public let bundleID: String?
+    public let executablePath: String?
+    public let networkReceived: Double?
+    public let networkSent: Double?
+    public let diskRead: Double?
+    public let diskWritten: Double?
+    public init(pid: String, name: String, cpuPercent: Double? = nil, memoryBytes: Double? = nil,
+                bundleID: String? = nil, executablePath: String? = nil,
+                networkReceived: Double? = nil, networkSent: Double? = nil,
+                diskRead: Double? = nil, diskWritten: Double? = nil) {
+        self.pid = pid; self.name = name; self.cpuPercent = cpuPercent; self.memoryBytes = memoryBytes
+        self.bundleID = bundleID; self.executablePath = executablePath
+        self.networkReceived = networkReceived; self.networkSent = networkSent
+        self.diskRead = diskRead; self.diskWritten = diskWritten
+    }
 }
 
 public struct PerformanceSnapshot: Codable, Equatable, Sendable {
     public let capturedAt: Date
     public let uptime: Double
     public var cpuPercent: Double?
-    public var corePercent: [Double]
+    public var corePercent: [Double?]
     public var memoryTotal: Double?
     public var memoryFree: Double?
     public var memoryUsed: Double?
@@ -25,7 +40,8 @@ public struct PerformanceSnapshot: Codable, Equatable, Sendable {
     public var diskWritten: Double?
     public var thermalState: String?
     public var processes: [PerformanceProcess]
-    public var summary: Self { var value = self; value.processes = []; return value }
+    public var applications: [PerformanceApplication]? = nil
+    public var summary: Self { var value = self; value.processes = []; value.applications = nil; return value }
 }
 
 public struct PerformanceRecording: Codable, Sendable {
@@ -33,8 +49,14 @@ public struct PerformanceRecording: Codable, Sendable {
     public let latest: PerformanceSnapshot?
     public let history: [PerformanceSnapshot]
     public let rawSample: InspectionValue?
-    public init(capturedAt: Date, latest: PerformanceSnapshot?, history: [PerformanceSnapshot], rawSample: InspectionValue?) {
+    public let scope: PerformanceScope?
+    public let readings: [PerformanceReading]?
+    public let currentReading: PerformanceReading?
+    public init(capturedAt: Date, latest: PerformanceSnapshot?, history: [PerformanceSnapshot], rawSample: InspectionValue?,
+                scope: PerformanceScope? = nil, readings: [PerformanceReading]? = nil, currentReading: PerformanceReading? = nil) {
         self.capturedAt = capturedAt; self.latest = latest; self.history = history; self.rawSample = rawSample
+        self.scope = scope; self.readings = readings
+        self.currentReading = currentReading
     }
 }
 
@@ -61,13 +83,21 @@ public struct PerformanceReducer: Sendable {
         let hardware: InspectionValue
         let hasProcesses: Bool
         let processes: [Process]
+        let applications: [PerformanceApplication]?
         struct Process: Decodable { let pid: String; let values: [String: InspectionValue] }
     }
     private var system: [String: InspectionValue] = [:]
     private var cpu: [String: InspectionValue] = [:]
     private var processes: [PerformanceProcess] = []
     private var systemAt = -Double.infinity, cpuAt = -Double.infinity, processesAt = -Double.infinity
-    private var sawCPU = false, sawProcesses = false
+    private var sawCPU = false
+    private struct ProcessRates: Sendable {
+        var identity: String
+        var age: Double?
+        var receive = PerformanceCounter(), send = PerformanceCounter()
+        var read = PerformanceCounter(), write = PerformanceCounter()
+    }
+    private var processRates: [String: ProcessRates] = [:]
     private var receive = PerformanceCounter(), send = PerformanceCounter()
     private var read = PerformanceCounter(), write = PerformanceCounter()
     private var rates: (Double?, Double?, Double?, Double?) = (nil, nil, nil, nil)
@@ -93,19 +123,40 @@ public struct PerformanceReducer: Sendable {
             sawCPU = true
         }
         if sample.hasProcesses {
+            let active = Set(sample.processes.map(\.pid))
+            processRates = processRates.filter { active.contains($0.key) }
             processes = sample.processes.map { entry in
-                PerformanceProcess(pid: entry.pid,
+                let path = entry.values["executablePath"]?.string
+                let identity = (path ?? "") + "|" + (entry.values["procStartAbsTime"]?.text ?? "")
+                let age = entry.values.numeric("procAge")
+                let previous = processRates[entry.pid]
+                let ageReset: Bool
+                if let age, let previousAge = previous?.age { ageReset = age < previousAge } else { ageReset = false }
+                let same = previous?.identity == identity && !ageReset
+                var counters = same ? previous! : ProcessRates(identity: identity, age: age)
+                counters.age = age
+                let received = counters.receive.rate(value: entry.values.numeric("netBytesIn"), uptime: time)
+                let sent = counters.send.rate(value: entry.values.numeric("netBytesOut"), uptime: time)
+                let read = counters.read.rate(value: entry.values.numeric("diskBytesRead"), uptime: time)
+                let written = counters.write.rate(value: entry.values.numeric("diskBytesWritten"), uptime: time)
+                processRates[entry.pid] = counters
+                let direct = entry.values["bundleIdentifier"]?.string
+                let bundle = (direct?.isEmpty == false ? direct : nil) ??
+                    PerformanceApplication.bundleID(forExecutable: path, applications: sample.applications ?? [])
+                return PerformanceProcess(pid: entry.pid,
                     name: entry.values["name"]?.string ?? entry.values["procName"]?.string ?? "PID \(entry.pid)",
-                    cpuPercent: sawProcesses ? entry.values.numeric("cpuUsage") : nil,
-                    memoryBytes: entry.values.numeric("physFootprint", "memResidentSize"))
+                    cpuPercent: same ? entry.values.numeric("cpuUsage") : nil,
+                    memoryBytes: entry.values.numeric("physFootprint", "memResidentSize"),
+                    bundleID: bundle, executablePath: path,
+                    networkReceived: received, networkSent: sent, diskRead: read, diskWritten: written)
             }
-            processesAt = time; sawProcesses = true
+            processesAt = time
         }
         let freshSystem = time - systemAt <= 3 ? system : [:]
         let freshCPU = time - cpuAt <= 3 ? cpu : [:]
         let hardware: [String: InspectionValue]
         if case .object(let values) = sample.hardware { hardware = values } else { hardware = [:] }
-        let total = freshSystem.numeric("physMemSize") ?? hardware.numeric("physicalMemory", "physicalMemorySize")
+        let total = (freshSystem.numeric("physMemSize") ?? hardware.numeric("physicalMemory", "physicalMemorySize")).flatMap { $0 > 0 ? $0 : nil }
         let pageSize = freshSystem.numeric("vmPageSize") ?? hardware.numeric("pageSize")
         var free = freshSystem.numeric("memFreeBytes")
         if free == nil, let count = freshSystem.numeric("vmFreeCount"), let pageSize, pageSize > 0 { free = count * pageSize }
@@ -115,9 +166,9 @@ public struct PerformanceReducer: Sendable {
         if used == nil, let total, let free { used = max(0, total - free); estimated = true }
         let pressure = freshSystem["memoryPressure"]?.displayValue
         let thermal = freshSystem["thermalState"]?.displayValue ?? freshSystem["thermalPressure"]?.displayValue
-        let cores: [Double]
+        let cores: [Double?]
         if case .array(let values)? = freshCPU["CPU_CoreLoads"] {
-            cores = values.compactMap(\.finiteNumber)
+            cores = values.map(\.finiteNumber)
         } else { cores = [] }
         let fresh = time - systemAt <= 3
         return PerformanceSnapshot(capturedAt: Date(timeIntervalSince1970: sample.timestamp), uptime: time,
@@ -125,7 +176,7 @@ public struct PerformanceReducer: Sendable {
             memoryTotal: total, memoryFree: free, memoryUsed: used, memoryEstimated: estimated,
             memoryPressure: pressure, networkReceived: fresh ? rates.0 : nil, networkSent: fresh ? rates.1 : nil,
             diskRead: fresh ? rates.2 : nil, diskWritten: fresh ? rates.3 : nil, thermalState: thermal,
-            processes: time - processesAt <= 3 ? processes : [])
+            processes: time - processesAt <= 3 ? processes : [], applications: sample.applications)
     }
 }
 

@@ -11,6 +11,13 @@ final class PerformanceMonitor {
     private(set) var latest: PerformanceSnapshot?
     private(set) var history: [PerformanceSnapshot] = []
     private(set) var raw: Data?
+    private(set) var scope: PerformanceScope = .device
+    private(set) var reading: PerformanceReading?
+    private(set) var readings: [PerformanceReading] = []
+    private let background = InstallBackgroundExecution()
+    private var deadline: Task<Void, Never>?
+    private var beganAt = 0.0
+    var supportsBackground: Bool { background.isContinued }
     var onChange: (() -> Void)?
     private var relay: PerformanceRelay?
     private var recording: Task<Void, Never>?
@@ -21,12 +28,16 @@ final class PerformanceMonitor {
     init() {
         backgroundObserver = NotificationCenter.default.addObserver(forName: UIApplication.didEnterBackgroundNotification,
             object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.stop(message: "已停止：App 进入后台") }
+                Task { @MainActor in
+                    guard let self, !self.supportsBackground else { return }
+                    self.stop(message: "已停止：系统未允许后台采样")
+                }
             }
     }
     deinit {
         relay?.cancel()
         recording?.cancel()
+        deadline?.cancel()
         if let backgroundObserver { NotificationCenter.default.removeObserver(backgroundObserver) }
     }
     func start(_ model: AppModel) {
@@ -40,11 +51,21 @@ final class PerformanceMonitor {
         self.relay = relay
         let token = UUID(); session = token
         let pairing = model.pairingURL.path
-        latest = nil; history = []; raw = nil
+        latest = nil; history = []; raw = nil; reading = nil; readings = []
         state = .connecting; status = "正在连接开发者性能服务…"
         recording = Task { [weak self] in
             do {
                 let localPort = try await relay.open()
+                guard let owner = self else { relay.cancel(); return }
+                _ = try await owner.background.beginMonitoring(id: token) { [weak self] in
+                    self?.stop(message: "采样已停止：系统后台任务结束")
+                }
+                owner.beganAt = ProcessInfo.processInfo.systemUptime
+                owner.deadline = Task { [weak self] in
+                    do { try await Task.sleep(nanoseconds: 300_000_000_000) } catch { return }
+                    self?.stop(message: "本次 5 分钟采样已完成")
+                }
+                owner.onChange?()
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     DispatchQueue.global(qos: .utility).async {
                         var reducer = PerformanceReducer()
@@ -60,7 +81,14 @@ final class PerformanceMonitor {
                                             self.latest = snapshot; self.raw = data
                                             self.history.append(snapshot.summary)
                                             if self.history.count > 120 { self.history.removeFirst(self.history.count - 120) }
-                                            self.state = .running; self.status = "正在采样 · 每秒更新"; self.onChange?()
+                                            let reading = PerformanceReading(snapshot: snapshot, scope: self.scope)
+                                            self.reading = reading; self.readings.append(reading.summary)
+                                            if self.readings.count > 120 { self.readings.removeFirst(self.readings.count - 120) }
+                                            let elapsed = max(0, min(300, snapshot.uptime - self.beganAt))
+                                            let cpu = reading.cpuPercent.map { String(format: "CPU %.1f%%", $0) } ?? "等待 CPU"
+                                            let memory = reading.memoryBytes.map { ByteCountFormatter.string(fromByteCount: Int64(min($0, Double(Int64.max / 2))), countStyle: .memory) } ?? "等待内存"
+                                            self.background.update(completed: Int64(elapsed / 300 * 1000), name: self.scope.title + "性能监控", subtitle: cpu + " · " + memory)
+                                            self.state = .running; self.status = "实时采样中"; self.onChange?()
                                         }
                                     } catch {
                                         decodingError = error
@@ -85,6 +113,8 @@ final class PerformanceMonitor {
             }
             relay.cancel()
             guard let self, self.session == token else { return }
+            self.deadline?.cancel(); self.deadline = nil
+            self.background.finish(success: self.latest != nil && self.state != .failed)
             if self.state == .stopping { self.state = .stopped }
             self.relay = nil; self.recording = nil; self.onChange?()
         }
@@ -96,13 +126,21 @@ final class PerformanceMonitor {
         relay?.cancel(); onChange?()
     }
     private func fail(_ text: String) { state = .failed; status = text; onChange?() }
+    func select(_ scope: PerformanceScope) {
+        guard self.scope != scope else { return }
+        self.scope = scope; readings = []
+        reading = latest.map { PerformanceReading(snapshot: $0, scope: scope) }
+        if let reading { readings = [reading.summary] }
+        onChange?()
+    }
     func export() throws -> URL {
         let folder = temporaryDirectory.appendingPathComponent("performance-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let report = PerformanceRecording(capturedAt: Date(), latest: latest, history: history,
-            rawSample: raw.flatMap { try? JSONDecoder().decode(InspectionValue.self, from: $0) })
+        let report = PerformanceRecording(capturedAt: Date(), latest: scope.isDevice ? latest : nil,
+            history: scope.isDevice ? history : [], rawSample: scope.isDevice ? raw.flatMap { try? JSONDecoder().decode(InspectionValue.self, from: $0) } : nil,
+            scope: scope, readings: readings, currentReading: reading)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; encoder.dateEncodingStrategy = .iso8601
-        let url = folder.appendingPathComponent("整机性能记录.json")
+        let url = folder.appendingPathComponent("性能记录.json")
         try encoder.encode(report).write(to: url, options: [.atomic, .completeFileProtection])
         return url
     }

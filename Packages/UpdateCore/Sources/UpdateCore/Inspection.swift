@@ -157,6 +157,9 @@ public struct RemoteInspectionEntry: Codable, Identifiable, Sendable {
     public var name: String
     public var path: String
     public var id: String { path }
+    public var isDirectory: Bool?
+    public var size: Int64?
+    public var type: String?
 }
 public struct InspectionResult: Codable, Sendable {
     public var value: InspectionValue

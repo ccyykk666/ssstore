@@ -51,6 +51,33 @@ static NSArray *PNames(char **names, uintptr_t count) {
     for (uintptr_t i = 0; i < count; i++) [result addObject:names[i] ? [NSString stringWithUTF8String:names[i]] : @""];
     return result;
 }
+static NSArray *PApplications(struct AppServiceHandle *service) {
+    struct AppListEntryC *apps = NULL; uintptr_t count = 0;
+    IdeviceFfiError *failure = app_service_list_apps(service, 1, 1, 1, 1, 1, &apps, &count);
+    NSMutableArray *result = [NSMutableArray array];
+    if (failure) idevice_error_free(failure);
+    else for (uintptr_t i = 0; i < count; i++) {
+        struct AppListEntryC *app = &apps[i];
+        if (!app->bundle_identifier || !app->path) continue;
+        [result addObject:@{@"bundleID":[NSString stringWithUTF8String:app->bundle_identifier] ?: @"",
+            @"name":app->name ? ([NSString stringWithUTF8String:app->name] ?: @"") : @"",
+            @"path":[NSString stringWithUTF8String:app->path] ?: @""}];
+    }
+    app_service_free_app_list(apps, count);
+    return result;
+}
+static NSDictionary *PExecutablePaths(struct AppServiceHandle *service) {
+    struct ProcessTokenC *processes = NULL; uintptr_t count = 0;
+    IdeviceFfiError *failure = app_service_list_processes(service, &processes, &count);
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    if (failure) idevice_error_free(failure);
+    else for (uintptr_t i = 0; i < count; i++) {
+        if (processes[i].executable_url) result[[NSString stringWithFormat:@"%u", processes[i].pid]] =
+            [NSString stringWithUTF8String:processes[i].executable_url] ?: @"";
+    }
+    app_service_free_process_list(processes, count);
+    return result;
+}
 
 @implementation DevicePerformance
 + (BOOL)streamPairingPath:(NSString *)path host:(NSString *)host port:(uint16_t)port
@@ -66,6 +93,7 @@ static NSArray *PNames(char **names, uintptr_t count) {
     struct RemoteServerHandle *server = NULL;
     struct DeviceInfoHandle *device = NULL;
     struct SysmontapHandle *tap = NULL;
+    struct AppServiceHandle *appService = NULL;
     char **processNames = NULL, **systemNames = NULL;
     uintptr_t processCount = 0, systemCount = 0;
     struct IdeviceRunningProcess **running = NULL; uintptr_t runningCount = 0;
@@ -77,6 +105,11 @@ static NSArray *PNames(char **names, uintptr_t count) {
         if (!PCheck(tunnel_create_rppairing((const idevice_sockaddr *)&address, sizeof(address), "ssstore-performance",
                     pairing, NULL, NULL, &adapter, &handshake), @"连接性能通道", error)) return NO;
         if (isCancelled()) return YES;
+        NSArray *applications = @[];
+        IdeviceFfiError *optionalService = app_service_connect_rsd(adapter, handshake, &appService);
+        if (optionalService) { idevice_error_free(optionalService); app_service_free(appService); appService = NULL; }
+        else applications = PApplications(appService);
+        NSTimeInterval lastApplicationRefresh = NSProcessInfo.processInfo.systemUptime;
         if (!PCheck(remote_server_connect_rsd(adapter, handshake, &server), @"连接开发者性能服务", error)) return NO;
         if (!PCheck(device_info_new(server, &device), @"读取采样能力", error)) return NO;
         if (!PCheck(device_info_sysmon_process_attributes(device, &processNames, &processCount), @"读取进程采样字段", error)) return NO;
@@ -112,16 +145,24 @@ static NSArray *PNames(char **names, uintptr_t count) {
                 NSMutableArray *rows = [NSMutableArray array];
                 id rawProcesses = PPlist(processes);
                 if ([rawProcesses isKindOfClass:NSDictionary.class]) {
+                    // Resolve each fresh process sample against fresh executable
+                    // paths. Never keep a PID-to-application map across samples.
+                    NSDictionary *paths = appService ? PExecutablePaths(appService) : @{};
+                    if (appService && NSProcessInfo.processInfo.systemUptime - lastApplicationRefresh >= 10) {
+                        applications = PApplications(appService);
+                        lastApplicationRefresh = NSProcessInfo.processInfo.systemUptime;
+                    }
                     for (NSString *pid in rawProcesses) {
                         NSMutableDictionary *values = [PAttributes(processKeys, rawProcesses[pid]) mutableCopy];
                         if (!values[@"name"] && labels[[pid description]]) values[@"name"] = labels[[pid description]];
+                        if (paths[[pid description]]) values[@"executablePath"] = paths[[pid description]];
                         [rows addObject:@{@"pid":[pid description], @"values":values}];
                     }
                 }
                 NSDictionary *payload = @{@"timestamp":@(NSDate.date.timeIntervalSince1970),
                     @"uptime":@(NSProcessInfo.processInfo.systemUptime), @"system":PAttributes(systemKeys, PPlist(system)),
                     @"cpu":PPlist(cpu), @"processes":rows, @"hasProcesses":@([rawProcesses isKindOfClass:NSDictionary.class]),
-                    @"hardware":PPlist(hardware)};
+                    @"hardware":PPlist(hardware), @"applications":applications};
                 NSData *data = [NSJSONSerialization dataWithJSONObject:PJSON(payload) options:0 error:error];
                 plist_free(processes); processes = NULL; plist_free(system); system = NULL; plist_free(cpu); cpu = NULL;
                 if (!data) return NO;
@@ -135,6 +176,7 @@ static NSArray *PNames(char **names, uintptr_t count) {
         plist_free(processes); plist_free(system); plist_free(cpu); plist_free(hardware);
         device_info_running_processes_free(running, runningCount);
         sysmontap_free(tap); device_info_free(device); remote_server_free(server);
+        app_service_free(appService);
         rsd_handshake_free(handshake); adapter_free(adapter); rp_pairing_file_free(pairing);
         device_info_string_array_free(processNames, processCount); device_info_string_array_free(systemNames, systemCount);
     }

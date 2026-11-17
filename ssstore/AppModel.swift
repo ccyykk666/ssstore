@@ -144,7 +144,7 @@ final class AppModel: ObservableObject {
     }
 
     func inspect(_ operation: InspectionOperation, bundleID: String = "", path: String = "/",
-                 source: String? = nil, domain: Int = 1, groupID: String = "") async throws -> (InspectionResult, URL) {
+                 source: String? = nil, domain: Int = 1, groupID: String = "", entryDetails: Bool = false) async throws -> (InspectionResult, URL) {
         func failure(_ text: String) -> NSError { NSError(domain: "ssstore.Inspection", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
         guard !busy else { throw failure("请等待当前操作完成。") }
         guard hasPairing else { throw failure("请先创建或导入配对文件。") }
@@ -164,7 +164,7 @@ final class AppModel: ObservableObject {
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
                         let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue,
-                                                      "domain": domain, "groupID": groupID]
+                                                      "domain": domain, "groupID": groupID, "entryDetails": entryDetails]
                         continuation.resume(returning: try DeviceInspector.run(pairingPath: pairingPath, host: address, port: number,
                             operation: operation.rawValue, options: options, outputDirectory: folder.path))
                     } catch { continuation.resume(throwing: error) }

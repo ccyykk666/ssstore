@@ -469,8 +469,21 @@ static void IFreeStrings(char **strings, size_t count) {
                     REQUIRE(afc_list_directory(afc, remotePath.UTF8String, &strings, &stringCount), @"读取目录");
                     for (size_t i = 0; i < stringCount; i++) {
                         NSString *name = IString(strings[i]);
-                        if ([name isEqualToString:@"."] || [name isEqualToString:@".."]) continue;
-                        [entries addObject:@{@"name":name, @"path":[remotePath stringByAppendingPathComponent:name]}];
+                        if (!name.length || [name isEqualToString:@"."] || [name isEqualToString:@".."] || [name containsString:@"/"]) continue;
+                        NSString *child = [remotePath stringByAppendingPathComponent:name];
+                        NSMutableDictionary *entry = [@{@"name":name, @"path":child} mutableCopy];
+                        if ([options[@"entryDetails"] boolValue] && entries.count < 128) {
+                            struct AfcFileInfo info = {0};
+                            IdeviceFfiError *failure = afc_get_file_info(afc, child.UTF8String, &info);
+                            if (failure) idevice_error_free(failure);
+                            else {
+                                NSString *type = IString(info.st_ifmt);
+                                entry[@"isDirectory"] = @([type isEqualToString:@"S_IFDIR"]);
+                                entry[@"size"] = @(info.size); entry[@"type"] = type;
+                                afc_file_info_free(&info);
+                            }
+                        }
+                        [entries addObject:entry];
                     }
                     value = @{@"路径":remotePath, @"条目数":@(entries.count)};
                 }

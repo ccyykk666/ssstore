@@ -16,6 +16,8 @@ CHECK_INPUTS = {
         "ssstore/Bridge/DevicePerformance.h",
         "ssstore/Bridge/DevicePerformance.m",
         "scripts/tests/PerformanceRelayChecks.swift",
+        "scripts/prepare-performance-devicekit.py",
+        "scripts/patches/",
     ),
     "native_sheet": (
         "ssstore/UIKit/NativeInterface.swift",
@@ -39,6 +41,8 @@ CHECK_INPUTS = {
         "ssstore/UIKit/ToolScreens.swift",
         "ssstore/Bridge/DevicePerformance.h",
         "ssstore/Bridge/DevicePerformance.m",
+        "ssstore/UIKit/PerformanceDashboard.swift",
+        "ssstore/UIKit/AppFileScreens.swift",
     ),
     "downloads": (
         STORE + "Asspp/Backend/AppStore/AppStore.swift",

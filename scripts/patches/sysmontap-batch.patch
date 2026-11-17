@@ -1,0 +1,19 @@
+--- a/idevice/src/services/dvt/sysmontap.rs
++++ b/idevice/src/services/dvt/sysmontap.rs
+@@ -128,14 +128,8 @@
+                 _ => continue,
+             };
+ 
+-            for row in rows {
+-                if let Some(dict) = row.into_dictionary()
+-                    && (dict.contains_key("Processes")
+-                        || dict.contains_key("System")
+-                        || dict.contains_key("SystemCPUUsage"))
+-                {
+-                    return Ok(parse_sample_dict(dict));
+-                }
++            if let Some(sample) = ssstore_parse_batch(rows) {
++                return Ok(sample);
+             }
+         }
+     }

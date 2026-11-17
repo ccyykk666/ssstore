@@ -8,6 +8,8 @@ The device transport links the published **idevice v0.1.68** Apple XCFramework f
 
 Pinned release asset: `idevice-xcframework-v0.1.68.zip`.
 
+The iOS arm64 slice is rebuilt from upstream commit `d32c8189c51c2789496b0768039419c3705498c3` with the reviewed patch in `scripts/patches/sysmontap-batch.patch` and its companion Rust helper. This preserves all system and process rows in a sysmontap batch rather than discarding rows after the first. The source archive and original module are SHA-256 checked, the Cargo lockfile and Rust 1.94.0 toolchain are pinned, and regression tests run before building the slice. Other XCFramework slices retain the pinned published binary. The upstream MIT notice is included as `ssstore/Resources/IDeviceLicense.txt` and shown in the app's open-source licenses.
+
 SHA-256: `c9eccdd1942de756d746a2569d93302774ab0eff1cff314ec8118f768b3d8dc7`.
 
 [Antrag](https://github.com/claration/antrag), [IDeviceKit](https://github.com/claration/idevicekit), [SideStore](https://github.com/SideStore/SideStore), and [SideInstaller](https://github.com/FrizzleM/SideInstaller) were research references. Their application source code is not vendored into this repository. The local app and C bridge call the published idevice interface directly rather than linking IDeviceKit or copying Antrag's interface.

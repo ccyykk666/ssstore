@@ -18,6 +18,34 @@ final class InstallBackgroundExecution {
         return identifier == nil ? "none" : "waiting-for-grant"
     }
 
+    var isContinued: Bool { task != nil }
+
+    func beginMonitoring(id: UUID, onStop: @escaping () -> Void) async throws -> Bool {
+        guard #available(iOS 26.0, *) else { return false }
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                var resolved = false
+                do {
+                    try start(id: id, name: "性能监控", subtitle: "正在连接采样服务…", purpose: "performance", onReady: {
+                        guard !resolved else { return }; resolved = true; continuation.resume()
+                    }, onStop: {
+                        onStop()
+                        guard !resolved else { return }; resolved = true
+                        continuation.resume(throwing: CancellationError())
+                    })
+                } catch {
+                    guard !resolved else { return }; resolved = true; continuation.resume(throwing: error)
+                }
+            }
+            return task != nil
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            finish(success: false)
+            logger.warning("Performance background execution unavailable: \(DiagnosticLog.errorDetails(error))")
+            return false
+        }
+    }
+
     /// Pairing can still run in the foreground when continued execution is
     /// unavailable. The caller exposes the limited short-task budget to the user.
     func beginPairing(id: UUID, name: String, onStop: @escaping () -> Void) async throws -> Bool {
@@ -60,7 +88,7 @@ final class InstallBackgroundExecution {
         }
     }
 
-    func start(id: UUID, name: String, subtitle: String = "等待系统下载本机安装包…", onReady: @escaping () -> Void,
+    func start(id: UUID, name: String, subtitle: String = "等待系统下载本机安装包…", purpose: String = "installation", onReady: @escaping () -> Void,
                onStop: @escaping () -> Void) throws {
         finish(success: false)
         guard UIApplication.shared.applicationState == .active else {
@@ -69,10 +97,10 @@ final class InstallBackgroundExecution {
         if #available(iOS 26.0, *) {
             guard let bundleID = Bundle.main.bundleIdentifier,
                   let permitted = Bundle.main.object(forInfoDictionaryKey: "BGTaskSchedulerPermittedIdentifiers") as? [String],
-                  permitted.contains(bundleID + ".installation.*") else {
+                  permitted.contains(bundleID + "." + purpose + ".*") else {
                 throw InstallBackgroundError.message("安装后台任务标识不匹配，请保留原 Bundle ID 或同步修改后台任务标识后重新签名。")
             }
-            let requestID = bundleID + ".installation." + UUID().uuidString
+            let requestID = bundleID + "." + purpose + "." + UUID().uuidString
             identifier = requestID
             let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: requestID, using: .main) { [weak self] incoming in
                 MainActor.assumeIsolated {

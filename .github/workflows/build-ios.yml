@@ -9,6 +9,8 @@ on:
       - 'Vendor/**'
       - 'project.yml'
       - 'scripts/build-ipa.sh'
+      - 'scripts/prepare-performance-devicekit.py'
+      - 'scripts/patches/**'
       - 'scripts/*kbsync*'
       - 'scripts/select-ci-tests.py'
       - 'scripts/tests/**'
@@ -87,7 +89,9 @@ jobs:
           key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
       - name: Test UpdateCore
         if: needs.checks.outputs.core == 'true'
-        run: swift test --package-path Packages/UpdateCore
+        run: |
+          set -o pipefail
+          swift test --package-path Packages/UpdateCore 2>&1 | python3 scripts/report-build-errors.py
       - name: Check performance transport cancellation
         if: needs.checks.outputs.performance == 'true'
         timeout-minutes: 2
@@ -109,6 +113,27 @@ jobs:
         if: needs.checks.outputs.kbsync == 'true'
         timeout-minutes: 8
         run: bash scripts/check-kbsync.sh
+      - name: Install pinned Rust toolchain for the performance dependency
+        run: |
+          if ! command -v rustup >/dev/null; then
+            brew install rustup
+            export PATH="$(brew --prefix rustup)/bin:$PATH"
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup target add --toolchain 1.94.0 aarch64-apple-ios
+          dirname "$(command -v rustup)" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          echo "RUSTUP_TOOLCHAIN=1.94.0" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/PerformanceCargo
+            build/PerformanceDeviceKit
+          key: performance-devicekit-rust194-${{ runner.arch }}-${{ hashFiles('scripts/prepare-performance-devicekit.py', 'scripts/patches/**') }}
+          restore-keys: performance-devicekit-rust194-${{ runner.arch }}-
       - name: Build IPA
         run: bash scripts/build-ipa.sh
       - name: Preserve release crash symbols
