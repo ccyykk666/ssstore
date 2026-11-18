@@ -112,7 +112,7 @@ enum StoreDownloadService {
                 logger.info("Store download [\(trace)]: catalog version=\(effectiveVersion)")
             }
             var bag: Bag.BagOutput?
-            let response = try await StoreDownloadProtocol.fetchWithFallback(version: effectiveVersion) { endpoint, requestedVersion in
+            let response = try await StoreDownloadProtocol.fetchWithFallback(version: effectiveVersion, hasUpdateEndpoint: { bag?.updateEndpoint != nil }) { endpoint, requestedVersion in
                 if endpoint == .redownload {
                     bag = try? await Bag.fetchBag(redirectConfiguration: .disallow)
                     try Task.checkCancellation()
@@ -124,8 +124,8 @@ enum StoreDownloadService {
                 }
                 return try await fetch(session: session, endpoint: endpoint, advertised: advertised, account: &account,
                     appID: app.id, version: requestedVersion, trace: trace)
-            } onFallback: { reason in
-                logger.info("Store download [\(trace)]: trying \(reason == "empty-redownload-http500" ? "update" : "redownload"), reason=\(reason)")
+            } onFallback: { endpoint, reason in
+                logger.info("Store download [\(trace)]: trying \(endpoint.rawValue), reason=\(reason)")
             }
             // Let the download caller handle missing licenses.
             if StoreDownloadProtocol.failureCode(response) == "9610" {
@@ -224,7 +224,9 @@ enum StoreDownloadService {
                 if response.statusCode == 403 {
                     let bodyKind = data.isEmpty ? "empty" : (plist == nil ? "non-plist" : "plist")
                     logger.error("Store download [\(trace)]: HTTP denial endpoint=\(endpoint.rawValue) host=\(url.host ?? "unknown") status=403 response=\(bodyKind)")
-                    throw StoreDownloadError.serviceResponse(403, endpoint.rawValue)
+                    let canTryUpdate = endpoint == .redownload && data.isEmpty
+                        && response.value(forHTTPHeaderField: "WWW-Authenticate") == nil
+                    throw StoreDownloadError.serviceResponse(403, endpoint.rawValue, canTryUpdate: canTryUpdate)
                 }
                 if data.isEmpty {
                     throw StoreDownloadError.emptyResponse(response.statusCode)

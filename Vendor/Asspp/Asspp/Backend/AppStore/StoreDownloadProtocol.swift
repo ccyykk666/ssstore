@@ -3,7 +3,7 @@ import Foundation
 enum StoreDownloadError: LocalizedError {
     case invalidRedirect
     case response(Int)
-    case serviceResponse(Int, String)
+    case serviceResponse(Int, String, canTryUpdate: Bool = false)
     case emptyResponse(Int)
     case invalidPackage
     case versionMismatch(String, String)
@@ -20,7 +20,7 @@ enum StoreDownloadError: LocalizedError {
             String(localized: "Apple returned an invalid download redirect.")
         case let .response(status), let .emptyResponse(status):
             String(localized: "Apple's download service returned an invalid response (HTTP \(status)).")
-        case let .serviceResponse(status, endpoint):
+        case let .serviceResponse(status, endpoint, _):
             String(localized: "Apple rejected the \(endpoint) request (HTTP \(status)).")
         case .invalidPackage:
             String(localized: "Apple returned incomplete or mismatched package information.")
@@ -224,8 +224,9 @@ enum StoreDownloadProtocol {
     /// Each endpoint is attempted at most once with the same version ID.
     static func fetchWithFallback(
         version: String,
+        hasUpdateEndpoint: () -> Bool,
         fetch: (Endpoint, String) async throws -> [String: Any],
-        onFallback: (String) -> Void,
+        onFallback: (Endpoint, String) -> Void,
     ) async throws -> [String: Any] {
         guard !version.isEmpty else { throw StoreDownloadError.catalogUnavailable }
         try Task.checkCancellation()
@@ -238,12 +239,19 @@ enum StoreDownloadProtocol {
             reason = "device-verification"
         }
         try Task.checkCancellation()
-        onFallback(reason)
+        onFallback(.redownload, reason)
         do {
             return try await fetch(.redownload, version)
-        } catch StoreDownloadError.emptyResponse(500) {
+        } catch let failure as StoreDownloadError {
+            let reason: String
+            switch failure {
+            case .emptyResponse(500): reason = "empty-redownload-http500"
+            case .serviceResponse(403, "redownload", true): reason = "empty-redownload-http403"
+            default: throw failure
+            }
+            guard hasUpdateEndpoint() else { throw failure }
             try Task.checkCancellation()
-            onFallback("empty-redownload-http500")
+            onFallback(.update, reason)
             return try await fetch(.update, version)
         }
     }

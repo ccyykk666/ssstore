@@ -248,7 +248,7 @@ class AppPackageArchive {
         if case ApplePackageError.licenseRequired = error { return true }
         guard let error = error as? StoreDownloadError else { return false }
         switch error {
-        case let .response(status), let .emptyResponse(status), let .serviceResponse(status, _):
+        case let .response(status), let .emptyResponse(status), let .serviceResponse(status, _, _):
             return [401, 403, 429].contains(status)
         case .rejected, .actionRequired: return true
         default: return false

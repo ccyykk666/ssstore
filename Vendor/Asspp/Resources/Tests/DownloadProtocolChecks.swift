@@ -76,57 +76,74 @@ struct DownloadProtocolChecks {
         // A transport 403 remains 403; it never becomes a missing-license recovery.
         var deniedCalls = 0
         do {
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "123") { _, _ in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "123", hasUpdateEndpoint: { true }) { _, _ in
                 deniedCalls += 1
                 throw StoreDownloadError.serviceResponse(403, "volumeStore")
-            } onFallback: { _ in fatalError("403 must not blindly retry other endpoints") }
+            } onFallback: { _, _ in fatalError("403 must not blindly retry other endpoints") }
             fatalError("Ignored HTTP 403")
-        } catch StoreDownloadError.serviceResponse(403, "volumeStore") {}
+        } catch StoreDownloadError.serviceResponse(403, "volumeStore", false) {}
         precondition(deniedCalls == 1)
 
         let empty: [String: Any] = ["songList": [], "status": 0, "jingleDocType": "purchaseSuccess"]
         let success: [String: Any] = ["songList": [["metadata": ["softwareVersionBundleId": "example.app"]]]]
         var requests: [(StoreDownloadProtocol.Endpoint, String)] = []
-        let result = try await StoreDownloadProtocol.fetchWithFallback(version: "890598805") { endpoint, version in
+        let result = try await StoreDownloadProtocol.fetchWithFallback(version: "890598805", hasUpdateEndpoint: { true }) { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .volumeStore ? empty : success
-        } onFallback: { precondition($0 == "empty-songList") }
+        } onFallback: { _, reason in precondition(reason == "empty-songList") }
         precondition(requests.map(\.0) == [.volumeStore, .redownload])
         precondition(requests.allSatisfy { $0.1 == "890598805" })
         _ = try StoreDownloadProtocol.packageItem(result, bundleID: "example.app")
 
         // Preserve historical IDs on both endpoints; numeric 5002 is retryable.
         requests = []
-        _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
+        _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345", hasUpdateEndpoint: { true }) { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .volumeStore ? ["failureType": 5002] : success
-        } onFallback: { precondition($0 == "failure-5002") }
+        } onFallback: { _, reason in precondition(reason == "failure-5002") }
         precondition(requests.count == 2 && requests.allSatisfy { $0.1 == "12345" })
 
-        // An empty HTTP 500 from redownload gets one update request with the same version.
-        requests = []
-        _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
-            requests.append((endpoint, version))
-            switch endpoint {
-            case .volumeStore: return empty
-            case .redownload: throw StoreDownloadError.emptyResponse(500)
-            case .update: return success
+        for (failure, expectedReason) in [
+            (StoreDownloadError.emptyResponse(500), "empty-redownload-http500"),
+            (.serviceResponse(403, "redownload", canTryUpdate: true), "empty-redownload-http403"),
+        ] {
+            requests = []
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345", hasUpdateEndpoint: { true }) { endpoint, version in
+                requests.append((endpoint, version))
+                switch endpoint {
+                case .volumeStore: return empty
+                case .redownload: throw failure
+                case .update: return success
+                }
+            } onFallback: { endpoint, reason in
+                if endpoint == .update { precondition(reason == expectedReason) }
             }
-        } onFallback: { _ in }
-        precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
-        precondition(requests.allSatisfy { $0.1 == "12345" })
+            precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
+            precondition(requests.allSatisfy { $0.1 == "12345" })
+        }
+
+        requests = []
+        do {
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345", hasUpdateEndpoint: { false }) { endpoint, version in
+                requests.append((endpoint, version))
+                if endpoint == .volumeStore { return empty }
+                throw StoreDownloadError.serviceResponse(403, "redownload", canTryUpdate: true)
+            } onFallback: { endpoint, _ in precondition(endpoint == .redownload) }
+            fatalError("Ignored HTTP 403 when Apple advertised no update endpoint")
+        } catch StoreDownloadError.serviceResponse(403, "redownload", true) {}
+        precondition(requests.map(\.0) == [.volumeStore, .redownload])
 
         // Other failures do not qualify, and a failed update never loops.
         for failure in [StoreDownloadError.serviceResponse(403, "redownload"), .response(500), .emptyResponse(503), .emptyResponse(500)] {
             requests = []
             do {
-                _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
+                _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345", hasUpdateEndpoint: { true }) { endpoint, version in
                     requests.append((endpoint, version))
                     if endpoint == .volumeStore {
                         return empty
                     }
                     throw failure
-                } onFallback: { _ in }
+                } onFallback: { _, _ in }
                 fatalError("Ignored a failed download response")
             } catch {
                 if case StoreDownloadError.emptyResponse(500) = failure {
@@ -140,10 +157,10 @@ struct DownloadProtocolChecks {
         // A missing version ID fails before any endpoint request.
         requests = []
         do {
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "") { endpoint, version in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "", hasUpdateEndpoint: { true }) { endpoint, version in
                 requests.append((endpoint, version))
                 return empty
-            } onFallback: { _ in fatalError("Unexpected fallback") }
+            } onFallback: { _, _ in fatalError("Unexpected fallback") }
             fatalError("Ignored missing version")
         } catch StoreDownloadError.catalogUnavailable {}
         precondition(requests.isEmpty)
@@ -156,19 +173,19 @@ struct DownloadProtocolChecks {
                          ["status": -1], ["songList": "malformed"]]
         {
             requests = []
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "890598805") { endpoint, version in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "890598805", hasUpdateEndpoint: { true }) { endpoint, version in
                 requests.append((endpoint, version))
                 return response
-            } onFallback: { _ in fatalError("Unexpected fallback") }
+            } onFallback: { _, _ in fatalError("Unexpected fallback") }
             precondition(requests.count == 1)
         }
 
         // Even when both endpoints are empty, there is no retry loop.
         requests = []
-        let stillEmpty = try await StoreDownloadProtocol.fetchWithFallback(version: "123") { endpoint, version in
+        let stillEmpty = try await StoreDownloadProtocol.fetchWithFallback(version: "123", hasUpdateEndpoint: { true }) { endpoint, version in
             requests.append((endpoint, version))
             return empty
-        } onFallback: { _ in }
+        } onFallback: { _, _ in }
         precondition(requests.count == 2)
         do {
             _ = try StoreDownloadProtocol.packageItem(stillEmpty, bundleID: "example.app")
@@ -332,20 +349,20 @@ struct DownloadProtocolChecks {
 
         for headerOnly in [false, true] {
             var requests: [(StoreDownloadProtocol.Endpoint, String)] = []
-            let result = try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id") { endpoint, version in
+            let result = try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id", hasUpdateEndpoint: { true }) { endpoint, version in
                 requests.append((endpoint, version))
                 if endpoint == .volumeStore && headerOnly { throw StoreDownloadError.deviceVerificationRequired }
                 return challenge
-            } onFallback: { precondition($0 == "device-verification") }
+            } onFallback: { _, reason in precondition(reason == "device-verification") }
             precondition(requests.count == 2 && requests[0].0 == .volumeStore && requests[1].0 == .redownload)
             precondition(requests.allSatisfy { $0.1 == "historical-id" })
             precondition(StoreDownloadProtocol.requiresDeviceVerification(result))
         }
         let cancelled = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id") { _, _ in
+            return try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id", hasUpdateEndpoint: { true }) { _, _ in
                 fatalError("A cancelled request must not start")
-            } onFallback: { _ in fatalError("A cancelled request must not fall back") }
+            } onFallback: { _, _ in fatalError("A cancelled request must not fall back") }
         }
         do { _ = try await cancelled.value; fatalError("Lost cancellation") } catch is CancellationError {}
         print("Machine provisioning classification and bounded compatibility checks passed.")
