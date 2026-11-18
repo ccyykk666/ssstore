@@ -2,6 +2,7 @@
 import bz2
 import hashlib
 import json
+import lzma
 from pathlib import Path
 import shutil
 import struct
@@ -188,7 +189,22 @@ def main():
     shutil.copy(ROOT / "scripts/kbsync-index.html", RUNTIME / "index.html")
     shutil.copy(upstream / "vendor/unicorn.wasm", RUNTIME / "unicorn.wasm")
     for spec in MANIFEST["assets"]:
-        shutil.copy(CACHE / spec["name"], RUNTIME / spec["name"])
+        raw = RUNTIME / spec["name"]
+        packed = raw.with_suffix(raw.suffix + ".xz")
+        if packed.exists():
+            try:
+                data = lzma.decompress(packed.read_bytes(), format=lzma.FORMAT_XZ)
+            except lzma.LZMAError:
+                data = b""
+            if verified(data, spec["strippedSize"], spec["strippedSha256"]):
+                raw.unlink(missing_ok=True)
+                continue
+        data = (CACHE / spec["name"]).read_bytes()
+        packed.write_bytes(lzma.compress(
+            data, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
+            filters=[{"id": lzma.FILTER_LZMA2, "preset": 6, "dict_size": 1 << 21}],
+        ))
+        raw.unlink(missing_ok=True)
     # Include the complete corresponding interpreter source, patch and notices.
     shutil.copytree(SOURCE, RUNTIME / "sources", dirs_exist_ok=True)
     (RUNTIME / "provenance.json").write_text(json.dumps(MANIFEST, indent=2))

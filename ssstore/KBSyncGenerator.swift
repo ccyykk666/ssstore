@@ -1,3 +1,4 @@
+import Compression
 import Foundation
 import Security
 import WebKit
@@ -185,17 +186,75 @@ final class KBSyncGenerator: NSObject, WKScriptMessageHandler, WKNavigationDeleg
     }
 }
 
-private final class BundledKBSyncResources: NSObject, WKURLSchemeHandler {
+private actor KBSyncResourceReader {
+    private struct Manifest: Decodable {
+        struct Asset: Decodable {
+            let name: String
+            let strippedSize: Int
+        }
+
+        let assets: [Asset]
+    }
+
     private let root: URL
-    private let names: Set<String> = ["index.html", "runtime.js", "worker.js", "unicorn.wasm", "CommerceKit", "CommerceCore", "CoreFP", "CoreFP.icxs", "storeagent"]
+    private lazy var manifest: Manifest? = {
+        guard let data = try? Data(contentsOf: root.appendingPathComponent("provenance.json")) else { return nil }
+        return try? JSONDecoder().decode(Manifest.self, from: data)
+    }()
 
     init(root: URL) { self.root = root }
 
+    func load(_ name: String) throws -> Data {
+        try Task.checkCancellation()
+        let url = root.appendingPathComponent(name)
+        switch name {
+        case "index.html", "runtime.js", "worker.js", "unicorn.wasm":
+            return try Data(contentsOf: url, options: .mappedIfSafe)
+        default:
+            guard let size = manifest?.assets.first(where: { $0.name == name })?.strippedSize,
+                  (1...20 * 1024 * 1024).contains(size)
+            else { throw KBSyncPreparationError.unavailable }
+            let compressed = try Data(contentsOf: url.appendingPathExtension("xz"), options: .mappedIfSafe)
+            guard !compressed.isEmpty else { throw KBSyncPreparationError.unavailable }
+            // A buffer with one extra byte lets us reject truncated output.
+            var decoded = Data(count: size + 1)
+            let written = decoded.withUnsafeMutableBytes { destination in
+                compressed.withUnsafeBytes { source in
+                    compression_decode_buffer(
+                        destination.bindMemory(to: UInt8.self).baseAddress!, destination.count,
+                        source.bindMemory(to: UInt8.self).baseAddress!, source.count, nil, COMPRESSION_LZMA
+                    )
+                }
+            }
+            guard written == size else { throw KBSyncPreparationError.unavailable }
+            decoded.removeLast()
+            return decoded
+        }
+    }
+}
+
+@MainActor
+private final class BundledKBSyncResources: NSObject, WKURLSchemeHandler {
+    private let reader: KBSyncResourceReader
+    private let names: Set<String> = ["index.html", "runtime.js", "worker.js", "unicorn.wasm", "CommerceKit", "CommerceCore", "CoreFP", "CoreFP.icxs", "storeagent"]
+    private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+
+    init(root: URL) { reader = KBSyncResourceReader(root: root) }
+
     func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
         guard let url = urlSchemeTask.request.url, url.host == "local", url.query == nil,
-              url.pathComponents.count == 2, names.contains(url.lastPathComponent),
-              let data = try? Data(contentsOf: root.appendingPathComponent(url.lastPathComponent))
+              url.pathComponents.count == 2, names.contains(url.lastPathComponent)
         else { urlSchemeTask.didFailWithError(KBSyncPreparationError.unavailable); return }
+        let id = ObjectIdentifier(urlSchemeTask)
+        tasks[id] = Task { [weak self, reader] in
+            let data = try? await reader.load(url.lastPathComponent)
+            guard !Task.isCancelled, let self, self.tasks.removeValue(forKey: id) != nil else { return }
+            guard let data else { urlSchemeTask.didFailWithError(KBSyncPreparationError.unavailable); return }
+            self.respond(to: urlSchemeTask, url: url, data: data)
+        }
+    }
+
+    private func respond(to urlSchemeTask: WKURLSchemeTask, url: URL, data: Data) {
         let type: String
         switch url.pathExtension {
         case "html": type = "text/html; charset=utf-8"
@@ -210,7 +269,9 @@ private final class BundledKBSyncResources: NSObject, WKURLSchemeHandler {
         urlSchemeTask.didFinish()
     }
 
-    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
+        tasks.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
+    }
 }
 
 /// Serialize the interpreter; reuse proofs across launches for the same identity.
