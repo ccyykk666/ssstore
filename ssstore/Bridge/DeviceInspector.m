@@ -3,7 +3,13 @@
 #import "DevicePlist.h"
 #import <UIKit/UIKit.h>
 #import <Security/Security.h>
+#import <TargetConditionals.h>
 #include <arpa/inet.h>
+
+#if TARGET_OS_IOS && !TARGET_OS_SIMULATOR
+extern IdeviceFfiError *ssstore_dvt_take_rsd_screenshot(struct AdapterHandle *,
+    struct RsdHandshakeHandle *, uint8_t **, size_t *);
+#endif
 
 static void IError(NSError **error, NSString *text) {
     if (error) *error = [NSError errorWithDomain:@"ssstore.Inspection" code:1 userInfo:@{NSLocalizedDescriptionKey:text}];
@@ -115,7 +121,7 @@ static void IFreeStrings(char **strings, size_t count) {
             PROBE_SERVICE(misagent, misagent, misagent_client_free, @"描述文件");
             PROBE_SERVICE(afc_client, afc, afc_client_free, @"AFC 文件");
             PROBE_SERVICE(crash_report_client, crash, crash_report_client_free, @"崩溃报告");
-            PROBE_SERVICE(screenshotr, shot, screenshotr_client_free, @"截图");
+            PROBE_SERVICE(screenshotr, shot, screenshotr_client_free, @"旧版截图");
             PROBE_SERVICE(lockdownd, lockdown, lockdownd_client_free, @"设备资料");
             PROBE_SERVICE(diagnostics_relay_client, diagnostics, diagnostics_relay_client_free, @"诊断");
             PROBE_SERVICE(app_service, appService, app_service_free, @"CoreDevice 应用");
@@ -236,14 +242,30 @@ static void IFreeStrings(char **strings, size_t count) {
             }
         }
         else if ([op isEqualToString:@"screenshot"]) {
-            REQUIRE(CONNECT(screenshotr, shot), @"连接截图服务");
-            struct ScreenshotData image = {0};
-            REQUIRE(screenshotr_take_screenshot(shot, &image), @"读取截图");
-            NSData *data = [NSData dataWithBytes:image.data length:image.length];
-            screenshotr_screenshot_free(image);
-            UIImage *decoded = [UIImage imageWithData:data];
-            if (decoded) data = UIImagePNGRepresentation(decoded);
-            NSDictionary *file = IFile(data, decoded ? @"screenshot.png" : @"screenshot.bin", folder, error);
+            bool legacy = false;
+            REQUIRE(rsd_service_available(c->handshake, "com.apple.screenshotr.shim.remote", &legacy), @"查询截图服务");
+            NSData *data;
+            if (legacy) {
+                REQUIRE(CONNECT(screenshotr, shot), @"连接旧版截图服务");
+                struct ScreenshotData image = {0};
+                REQUIRE(screenshotr_take_screenshot(shot, &image), @"读取截图");
+                data = image.length ? [NSData dataWithBytes:image.data length:image.length] : nil;
+                screenshotr_screenshot_free(image);
+            } else {
+#if TARGET_OS_IOS && !TARGET_OS_SIMULATOR
+                bool instruments = false;
+                REQUIRE(rsd_service_available(c->handshake, "com.apple.instruments.dtservicehub", &instruments), @"查询 Instruments 服务");
+                if (!instruments) { IError(error, @"当前设备连接未提供截图服务。"); return nil; }
+                REQUIRE(ssstore_dvt_take_rsd_screenshot(c->adapter, c->handshake, &bytes, &byteCount), @"Instruments 截图");
+                data = [NSData dataWithBytes:bytes length:byteCount];
+#else
+                IError(error, @"Instruments 截图需要在真机上运行。"); return nil;
+#endif
+            }
+            UIImage *decoded = data.length ? [UIImage imageWithData:data] : nil;
+            data = decoded ? UIImagePNGRepresentation(decoded) : nil;
+            if (data.length == 0) { IError(error, @"设备未返回可预览的截图。"); return nil; }
+            NSDictionary *file = IFile(data, @"screenshot.png", folder, error);
             if (!file) return nil; [files addObject:file]; value = @{@"字节数":@(data.length)};
         }
         else if ([@[@"deviceInfo", @"batteryInfo", @"diskInfo"] containsObject:op]) {

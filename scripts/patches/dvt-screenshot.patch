@@ -1,0 +1,107 @@
+--- a/idevice/src/services/dvt/screenshot.rs
++++ b/idevice/src/services/dvt/screenshot.rs
+@@ -65,3 +65,63 @@
+         }
+     }
+ }
++
++#[cfg(all(feature = "rsd", not(target_arch = "wasm32")))]
++pub async fn take_rsd_screenshot(
++    provider: &mut impl crate::provider::RsdProvider,
++    handshake: &mut crate::services::rsd::RsdHandshake,
++    timeout: std::time::Duration,
++) -> Result<Vec<u8>, IdeviceError> {
++    let deadline = tokio::time::Instant::now() + timeout;
++    let mut server = screenshot_stage(deadline, "连接 Instruments 服务", handshake.connect(provider)).await?;
++    capture_screenshot(&mut server, deadline).await
++}
++
++#[cfg(all(feature = "rsd", not(target_arch = "wasm32")))]
++async fn capture_screenshot(
++    server: &mut RemoteServerClient<Box<dyn ReadWrite>>,
++    deadline: tokio::time::Instant,
++) -> Result<Vec<u8>, IdeviceError> {
++    let caps = crate::plist!(dict {
++        "com.apple.private.DTXBlockCompression": 0i64,
++        "com.apple.private.DTXConnection": 1i64,
++    });
++    // Send the host hello before waiting for the peer, as the DTX provider does.
++    screenshot_stage(
++        deadline,
++        "协商 Instruments 截图连接",
++        server.perform_handshake(Some(caps), deadline.saturating_duration_since(tokio::time::Instant::now())),
++    ).await?;
++    let mut client = screenshot_stage(deadline, "建立截图通道", ScreenshotClient::new(server)).await?;
++    screenshot_stage(deadline, "读取截图", client.take_screenshot()).await
++}
++
++#[cfg(all(feature = "rsd", not(target_arch = "wasm32")))]
++async fn screenshot_stage<T>(
++    deadline: tokio::time::Instant,
++    name: &str,
++    operation: impl std::future::Future<Output = Result<T, IdeviceError>>,
++) -> Result<T, IdeviceError> {
++    let failure = |detail: &str| IdeviceError::InternalError(format!("{name}：{detail}"));
++    match tokio::time::timeout_at(deadline, operation).await {
++        Ok(Ok(value)) => Ok(value),
++        Ok(Err(IdeviceError::Timeout)) | Err(_) => Err(failure("超时")),
++        Ok(Err(error)) => Err(failure(&error.to_string())),
++    }
++}
++
++#[cfg(all(test, feature = "rsd", not(target_arch = "wasm32")))]
++#[tokio::test]
++async fn ssstore_screenshot_sends_hello_and_times_out_when_peer_is_silent() {
++    use tokio::{io::AsyncReadExt, time::{Duration, Instant}};
++    let (connection, mut peer) = tokio::io::duplex(4096);
++    let mut server = RemoteServerClient::with_label(connection, "screenshot-fixture");
++    let deadline = Instant::now() + Duration::from_millis(400);
++    let result = capture_screenshot(&mut server, deadline).await;
++    assert!(result.unwrap_err().to_string().contains("协商 Instruments 截图连接"));
++    drop(server);
++    let mut sent = Vec::new();
++    tokio::time::timeout(Duration::from_secs(2), peer.read_to_end(&mut sent)).await.unwrap().unwrap();
++    let hello = b"_notifyOfPublishedCapabilities:";
++    assert!(sent.windows(hello.len()).any(|bytes| bytes == hello));
++}
+--- a/ffi/src/dvt/screenshot.rs
++++ b/ffi/src/dvt/screenshot.rs
+@@ -111,3 +111,38 @@
+         Err(e) => ffi_err!(e),
+     }
+ }
++
++/// Captures one screenshot over the existing authenticated RSD tunnel.
++#[cfg(all(feature = "core_device_proxy", feature = "rsd"))]
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn ssstore_dvt_take_rsd_screenshot(
++    provider: *mut crate::core_device_proxy::AdapterHandle,
++    handshake: *mut crate::rsd::RsdHandshakeHandle,
++    data: *mut *mut u8,
++    len: *mut usize,
++) -> *mut IdeviceFfiError {
++    if provider.is_null() || handshake.is_null() || data.is_null() || len.is_null() {
++        return ffi_err!(idevice::IdeviceError::FfiInvalidArg);
++    }
++    let result = crate::run_sync_local(async {
++        idevice::dvt::screenshot::take_rsd_screenshot(
++            unsafe { &mut (*provider).0 },
++            unsafe { &mut (*handshake).0 },
++            std::time::Duration::from_secs(15),
++        ).await
++    });
++    match result {
++        Ok(image) if !image.is_empty() && image.len() <= 32 * 1024 * 1024 => {
++            let image = Box::leak(image.into_boxed_slice());
++            unsafe {
++                *data = image.as_mut_ptr();
++                *len = image.len();
++            }
++            null_mut()
++        }
++        Ok(_) => ffi_err!(idevice::IdeviceError::UnexpectedResponse(
++            "screenshot data is empty or exceeds 32 MiB".into()
++        )),
++        Err(error) => ffi_err!(error),
++    }
++}

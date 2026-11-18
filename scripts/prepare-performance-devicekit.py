@@ -1,4 +1,4 @@
-"""Build pinned idevice with the RSD discovery compatibility fix."""
+"""Build pinned idevice with RSD discovery and one-shot screenshot patches."""
 import hashlib
 import os
 from pathlib import Path
@@ -28,7 +28,7 @@ def run(*args, **kwargs):
 
 def main():
     os.chdir(ROOT)
-    patches = [ROOT / "scripts/patches/rsd-discovery.patch"]
+    patches = [ROOT / "scripts/patches" / name for name in ("rsd-discovery.patch", "dvt-screenshot.patch")]
     digest = hashlib.sha256(COMMIT.encode() + b"".join(p.read_bytes() for p in patches)).hexdigest()
     cache = ROOT / "build/PerformanceDeviceKit"
     library = cache / f"{digest}.a"
@@ -55,14 +55,15 @@ def main():
                 rsd_module = roots[0] / "idevice/src/services/rsd.rs"
                 if hashlib.sha256(rsd_module.read_bytes()).hexdigest() != "bdb483a6bbc30b586e4d2d04190d432219059149298c2bca85f9033042bd03f7":
                     raise ValueError("Pinned RSD discovery source mismatch")
-                run("patch", "-p1", "-i", patches[0], cwd=roots[0], stdin=subprocess.DEVNULL)
+                for patch in patches:
+                    run("patch", "-p1", "-i", patch, cwd=roots[0], stdin=subprocess.DEVNULL)
                 roots[0].rename(source)
         env = os.environ.copy()
         env["CARGO_TARGET_DIR"] = str(ROOT / "build/PerformanceCargo")
         env["RUSTUP_TOOLCHAIN"] = "1.94.0"
         env["RUSTC"] = subprocess.check_output(["rustup", "which", "--toolchain", "1.94.0", "rustc"], text=True).strip()
         run("rustup", "run", "1.94.0", "cargo", "test", "--manifest-path", source / "Cargo.toml", "--locked", "-p", "idevice", "--lib",
-            "--no-default-features", "--features", "rsd,ring", "ssstore_rsd", env=env)
+            "--no-default-features", "--features", "rsd,ring,dvt", "ssstore_", env=env)
         sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], text=True).strip()
         env.update(BINDGEN_EXTRA_CLANG_ARGS=f"--sysroot={sdk}", IPHONEOS_DEPLOYMENT_TARGET="17.0")
         run("rustup", "run", "1.94.0", "cargo", "build", "--manifest-path", source / "Cargo.toml", "--locked", "-p", "idevice-ffi",
@@ -72,7 +73,7 @@ def main():
         shutil.copyfile(built, staged); staged.replace(library)
     destination = ROOT / "Packages/DeviceKit/IDevice.xcframework/ios-arm64/libidevice_ffi.a"
     shutil.copyfile(library, destination)
-    print("Prepared pinned idevice iOS slice with RSD discovery compatibility", flush=True)
+    print("Prepared pinned idevice iOS slice with RSD discovery and screenshot support", flush=True)
 
 if __name__ == "__main__":
     try:

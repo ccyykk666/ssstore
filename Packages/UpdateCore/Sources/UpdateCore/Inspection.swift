@@ -71,7 +71,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .media, .filesystemInfo, .fileInfo, .fileRead: return "com.apple.afc.shim.remote"
         case .crashes: return "com.apple.crashreportcopymobile.shim.remote"
         case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation: return "com.apple.springboardservices.shim.remote"
-        case .screenshot: return "com.apple.mobile.screenshotr.shim.remote"
+        case .screenshot: return "com.apple.screenshotr.shim.remote / com.apple.instruments.dtservicehub"
         case .deviceInfo, .batteryInfo, .diskInfo: return "com.apple.mobile.lockdown.remote.trusted"
         case .diagnostics, .batteryDiagnostics, .nandDiagnostics, .wifiDiagnostics, .mobileGestalt, .ioRegistry: return "com.apple.mobile.diagnostics_relay.shim.remote"
         case .coreApps, .coreProcesses: return "com.apple.coredevice.appservice"
