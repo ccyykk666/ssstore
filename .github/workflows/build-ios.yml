@@ -54,9 +54,11 @@ jobs:
         with:
           fetch-depth: 0
       - name: Verify Xcode 27 and iOS 27 SDK
+        id: xcode
         run: |
-          xcodebuild -version
-          xcode_version=$(xcodebuild -version | head -n 1)
+          xcode_info=$(xcodebuild -version)
+          printf '%s\n' "$xcode_info"
+          xcode_version=${xcode_info%%$'\n'*}
           case "$xcode_version" in
             "Xcode 27"*) ;;
             *) echo "Expected Xcode 27" >&2; exit 1 ;;
@@ -67,6 +69,9 @@ jobs:
             27.*) ;;
             *) echo "Expected an iOS 27 SDK" >&2; exit 1 ;;
           esac
+          sdk_build=$(xcrun --sdk iphoneos --show-sdk-build-version)
+          fingerprint=$(printf '%s\n' "$xcode_info" "$sdk_version" "$sdk_build" | shasum -a 256 | cut -d' ' -f1)
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
       - name: Check App Swift syntax
         run: python3 scripts/check-swift-syntax.py
       - name: Install XcodeGen
@@ -107,7 +112,17 @@ jobs:
         if: needs.checks.outputs.kbsync == 'true'
         timeout-minutes: 8
         run: bash scripts/check-kbsync.sh
+      - name: Locate compiled device library
+        id: device-library
+        run: echo "path=$(python3 scripts/prepare-performance-devicekit.py --cache-path)" >> "$GITHUB_OUTPUT"
+      - name: Restore compiled device library
+        uses: actions/cache/restore@v4
+        id: device-library-cache
+        with:
+          path: ${{ steps.device-library.outputs.path }}
+          key: idevice-ios-library-v1-${{ runner.arch }}-${{ steps.xcode.outputs.fingerprint }}-${{ hashFiles('scripts/prepare-performance-devicekit.py', 'scripts/patches/**') }}
       - name: Install pinned Rust toolchain for device data services
+        if: steps.device-library-cache.outputs.cache-hit != 'true'
         run: |
           if ! command -v rustup >/dev/null; then
             brew install rustup
@@ -121,6 +136,7 @@ jobs:
           echo "RUSTUP_TOOLCHAIN=1.94.0" >> "$GITHUB_ENV"
       - uses: actions/cache/restore@v4
         id: performance-cache
+        if: steps.device-library-cache.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -134,7 +150,7 @@ jobs:
           bash scripts/prepare-devicekit.sh
           python3 scripts/prepare-performance-devicekit.py
       - uses: actions/cache/save@v4
-        if: steps.performance-cache.outputs.cache-hit != 'true'
+        if: steps.device-library-cache.outputs.cache-hit != 'true' && steps.performance-cache.outputs.cache-hit != 'true'
         with:
           path: |
             ~/.cargo/registry
@@ -142,10 +158,24 @@ jobs:
             build/PerformanceCargo
             build/PerformanceDeviceKit
           key: ${{ steps.performance-cache.outputs.cache-primary-key }}
+      - name: Save compiled device library
+        if: steps.device-library-cache.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.device-library.outputs.path }}
+          key: ${{ steps.device-library-cache.outputs.cache-primary-key }}
       - name: Check device plist conversion and legacy crash regression
         if: needs.checks.outputs.performance == 'true'
         run: bash scripts/check-device-plist.sh
+      - name: Restore Xcode compilation cache
+        uses: actions/cache/restore@v4
+        id: xcode-compilation-cache
+        with:
+          path: build/XcodeCompilationCache
+          key: ios-compile-v1-${{ runner.arch }}-${{ steps.xcode.outputs.fingerprint }}-${{ hashFiles('Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Build IPA
+        env:
+          SSSTORE_XCODE_CACHE_DIR: build/XcodeCompilationCache
         run: bash scripts/build-ipa.sh
       - name: Preserve release crash symbols
         uses: actions/upload-artifact@v4
@@ -161,6 +191,12 @@ jobs:
           name: ssstore-unsigned
           path: dist/*.ipa
           if-no-files-found: error
+      - name: Save Xcode compilation cache
+        if: steps.xcode-compilation-cache.outputs.cache-hit != 'true' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: build/XcodeCompilationCache
+          key: ${{ steps.xcode-compilation-cache.outputs.cache-primary-key }}
 
   native-sheet:
     needs: checks

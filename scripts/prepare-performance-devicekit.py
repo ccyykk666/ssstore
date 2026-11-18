@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import urllib.request
 import re
@@ -13,7 +14,11 @@ from collections import deque
 ROOT = Path(__file__).resolve().parents[1]
 COMMIT = "d32c8189c51c2789496b0768039419c3705498c3"
 SOURCE_SHA256 = "f037aa4bcb31b161b9ed97aeb223374736a3bdead2dfcc7c9b0bff1b81483a0d"
+PATCHES = [ROOT / "scripts/patches" / name for name in ("rsd-discovery.patch", "dvt-screenshot.patch")]
 
+def cached_library():
+    digest = hashlib.sha256(COMMIT.encode() + b"".join(path.read_bytes() for path in PATCHES)).hexdigest()
+    return ROOT / "build/PerformanceDeviceKit" / f"{digest}.a"
 def run(*args, **kwargs):
     process = subprocess.Popen(list(map(str, args)), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **kwargs)
     tail = deque(maxlen=30)
@@ -28,10 +33,8 @@ def run(*args, **kwargs):
 
 def main():
     os.chdir(ROOT)
-    patches = [ROOT / "scripts/patches" / name for name in ("rsd-discovery.patch", "dvt-screenshot.patch")]
-    digest = hashlib.sha256(COMMIT.encode() + b"".join(p.read_bytes() for p in patches)).hexdigest()
-    cache = ROOT / "build/PerformanceDeviceKit"
-    library = cache / f"{digest}.a"
+    library = cached_library()
+    cache = library.parent
     cache.mkdir(parents=True, exist_ok=True)
     if not library.exists():
         archive = cache / "source.tar.gz"
@@ -45,7 +48,7 @@ def main():
             pending_archive.replace(archive)
         if hashlib.sha256(archive.read_bytes()).hexdigest() != SOURCE_SHA256:
             raise ValueError("Pinned idevice source archive checksum mismatch")
-        source = cache / f"source-{digest}"
+        source = cache / f"source-{library.stem}"
         if not source.exists():
             with tempfile.TemporaryDirectory(prefix="extract-", dir=cache) as temporary:
                 stage = Path(temporary)
@@ -55,7 +58,7 @@ def main():
                 rsd_module = roots[0] / "idevice/src/services/rsd.rs"
                 if hashlib.sha256(rsd_module.read_bytes()).hexdigest() != "bdb483a6bbc30b586e4d2d04190d432219059149298c2bca85f9033042bd03f7":
                     raise ValueError("Pinned RSD discovery source mismatch")
-                for patch in patches:
+                for patch in PATCHES:
                     run("patch", "-p1", "-i", patch, cwd=roots[0], stdin=subprocess.DEVNULL)
                 roots[0].rename(source)
         env = os.environ.copy()
@@ -77,7 +80,10 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        if sys.argv[1:] == ["--cache-path"]:
+            print(cached_library().relative_to(ROOT))
+        else:
+            main()
     except Exception as error:
         message = re.sub(r"https?://\S+", "<URL redacted>", str(error))[:3000]
         message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")

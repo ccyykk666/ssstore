@@ -15,9 +15,19 @@ xcodegen generate
 mkdir -p ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 cp Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved \
   ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+build_settings=(CODE_SIGNING_ALLOWED=NO)
+if [[ -n "${SSSTORE_XCODE_CACHE_DIR:-}" ]]; then
+  mkdir -p "$SSSTORE_XCODE_CACHE_DIR"
+  cache_directory="$(cd "$SSSTORE_XCODE_CACHE_DIR" && pwd)"
+  build_settings+=(
+    COMPILATION_CACHE_ENABLE_CACHING=YES
+    COMPILATION_CACHE_ENABLE_DIAGNOSTIC_REMARKS=YES
+    "COMPILATION_CACHE_CAS_PATH=$cache_directory"
+  )
+fi
 xcodebuild -project ssstore.xcodeproj -scheme ssstore \
   -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-  -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build 2>&1 | python3 scripts/report-build-errors.py
+  -derivedDataPath build/DerivedData "${build_settings[@]}" build 2>&1 | python3 scripts/report-build-errors.py
 
 app="$PWD/build/DerivedData/Build/Products/Release-iphoneos/ssstore.app"
 if [[ ! -d "$app" ]]; then
