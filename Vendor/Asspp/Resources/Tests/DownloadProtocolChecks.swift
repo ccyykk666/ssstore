@@ -31,72 +31,12 @@ struct DownloadProtocolChecks {
             fatalError("Repeated expiry must reach the caller")
         } catch {}
         precondition(sessionAttempts == 2 && sessionRefreshes == 1, "Refresh must never loop")
-        for failure in [StoreDownloadError.serviceResponse(403, "ent/download"), .rejected("9610", "license"), .rejected("2042", "other")] {
+        for failure in [StoreDownloadError.serviceResponse(403, "volumeStore"), .rejected("9610", "license"), .rejected("2042", "other")] {
             do {
                 let _: String = try await StoreDownloadProtocol.retryExpiredSession { throw failure }
                     refresh: { fatalError("Unrelated failures must not authenticate") }
                 fatalError("Expected the original failure")
             } catch {}
-        }
-        let ent = "https://downloaddispatch.itunes.apple.com" + StoreDownloadProtocol.entPath
-        for bag in [["volumeStoreDownloadProduct": ent], ["urlBag": ["volumeStoreDownloadProduct": ent]],
-                    ["urlBag": ["loc-volumeStoreDownloadProduct": ent]]] as [[String: Any]] {
-            precondition(StoreDownloadProtocol.entEndpoint(in: bag)?.absoluteString == ent)
-        }
-        for bad in [ent + "?q=1", ent + "#fragment", ent.replacingOccurrences(of: "https:", with: "http:"),
-                    ent.replacingOccurrences(of: ".com/", with: ".com.attacker.invalid/"),
-                    ent.replacingOccurrences(of: "//", with: "//user:token@"), ent + "/"] {
-            precondition(StoreDownloadProtocol.entEndpoint(in: ["volumeStoreDownloadProduct": bad]) == nil)
-        }
-        let preferred = try StoreDownloadProtocol.entRequest(endpoint: URL(string: ent)!, appID: 123,
-            guid: "001122334455", dsid: "123456789", store: "143465-1,34", token: "synthetic-token",
-            version: "historical-id", blob: "synthetic-blob")
-        precondition(preferred.value(forHTTPHeaderField: "X-Token") == "synthetic-token")
-        precondition(preferred.value(forHTTPHeaderField: "User-Agent") == StoreProtocol.userAgent)
-        precondition(preferred.value(forHTTPHeaderField: "User-Agent")?.hasPrefix("Configurator/2.18 ") == true)
-        precondition(preferred.value(forHTTPHeaderField: "X-Apple-Store-Front") == "143465-1")
-        let payload = StoreProtocol.plist(preferred.httpBody!)!
-        precondition(payload["externalVersionId"] as? String == "historical-id" && payload["appExtVrsId"] == nil)
-        precondition(payload["salableAdamId"] as? String == "123")
-        precondition(payload["kbsync"] as? String == "synthetic-blob")
-        precondition(payload["serialNumber"] as? String == Data([0x54, 0xc8, 0xb0, 0xa9, 0x88, 0x22, 0x33, 0x44, 0x55]).base64EncodedString())
-        var calls: [String] = []
-        var generated = 0
-        _ = try await StoreDownloadProtocol.preferredDownload(cached: "old") {
-            generated += 1; return "fresh"
-        } invalidate: { precondition($0 == "old") } fetch: { blob in
-            calls.append(blob)
-            if blob == "old" { throw StoreDownloadError.serviceResponse(403, "ent/download") }
-            return [:]
-        }
-        precondition(calls == ["old", "fresh"] && generated == 1)
-        for error in [StoreDownloadError.rejected("9610", ""), .rejected("2034", ""), .rejected("2042", ""),
-                      .serviceResponse(429, "ent/download")] {
-            do {
-                _ = try await StoreDownloadProtocol.preferredDownload(cached: "cached") {
-                    fatalError("Regenerated for an explicit verdict")
-                } invalidate: { _ in fatalError("Invalidated unrelated verdict") } fetch: { _ in throw error }
-                fatalError("Lost explicit verdict")
-            } catch {}
-        }
-        var freshAttempts = 0
-        do {
-            _ = try await StoreDownloadProtocol.preferredDownload(cached: nil) { "fresh" }
-                invalidate: { _ in fatalError("Invalidated fresh blob") }
-                fetch: { _ in freshAttempts += 1; throw StoreDownloadError.serviceResponse(403, "ent/download") }
-            fatalError("Lost fresh 403")
-        } catch StoreDownloadError.serviceResponse(403, "ent/download") {}
-        precondition(freshAttempts == 1)
-        let item: [String: Any] = ["URL": "https://example.invalid/package", "metadata": [
-            "itemId": 123, "softwareVersionBundleId": "example.app", "softwareVersionExternalIdentifier": "historical-id",
-        ]]
-        try StoreDownloadProtocol.validateEntResponse(["songList": [item]], appID: 123, bundleID: "example.app", version: "historical-id")
-        for (appID, bundleID, version) in [(Int64(999), "example.app", "historical-id"),
-                                         (123, "other.app", "historical-id"), (123, "example.app", "latest")] {
-            do {
-                try StoreDownloadProtocol.validateEntResponse(["songList": [item]], appID: appID, bundleID: bundleID, version: version)
-                fatalError("Accepted wrong preferred app/version")
-            } catch StoreDownloadError.invalidPackage {}
         }
         // Domain cookies from login may retain the leading dot. They must reach the wire.
         let storeURL = URL(string: "https://p71-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct")!
@@ -139,25 +79,20 @@ struct DownloadProtocolChecks {
             _ = try await StoreDownloadProtocol.fetchWithFallback(version: "123") { _, _ in
                 deniedCalls += 1
                 throw StoreDownloadError.serviceResponse(403, "volumeStore")
-            } resolveVersion: { fatalError("403 must not trigger a catalog lookup") }
-                onFallback: { _ in fatalError("403 must not blindly retry other endpoints") }
+            } onFallback: { _ in fatalError("403 must not blindly retry other endpoints") }
             fatalError("Ignored HTTP 403")
         } catch StoreDownloadError.serviceResponse(403, "volumeStore") {}
         precondition(deniedCalls == 1)
 
         let empty: [String: Any] = ["songList": [], "status": 0, "jingleDocType": "purchaseSuccess"]
         let success: [String: Any] = ["songList": [["metadata": ["softwareVersionBundleId": "example.app"]]]]
-        var requests: [(StoreDownloadProtocol.Endpoint, String?)] = []
-        var lookups = 0
-        let result = try await StoreDownloadProtocol.fetchWithFallback(version: nil) { endpoint, version in
+        var requests: [(StoreDownloadProtocol.Endpoint, String)] = []
+        let result = try await StoreDownloadProtocol.fetchWithFallback(version: "890598805") { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .volumeStore ? empty : success
-        } resolveVersion: {
-            lookups += 1
-            return "890598805"
         } onFallback: { precondition($0 == "empty-songList") }
-        precondition(requests.count == 2 && requests[0].0 == .volumeStore && requests[0].1 == nil)
-        precondition(requests[1].0 == .redownload && requests[1].1 == "890598805" && lookups == 1)
+        precondition(requests.map(\.0) == [.volumeStore, .redownload])
+        precondition(requests.allSatisfy { $0.1 == "890598805" })
         _ = try StoreDownloadProtocol.packageItem(result, bundleID: "example.app")
 
         // Preserve historical IDs on both endpoints; numeric 5002 is retryable.
@@ -165,8 +100,7 @@ struct DownloadProtocolChecks {
         _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .volumeStore ? ["failureType": 5002] : success
-        } resolveVersion: { fatalError("Replaced the requested historical version") }
-            onFallback: { precondition($0 == "failure-5002") }
+        } onFallback: { precondition($0 == "failure-5002") }
         precondition(requests.count == 2 && requests.allSatisfy { $0.1 == "12345" })
 
         // An empty HTTP 500 from redownload gets one update request with the same version.
@@ -178,12 +112,12 @@ struct DownloadProtocolChecks {
             case .redownload: throw StoreDownloadError.emptyResponse(500)
             case .update: return success
             }
-        } resolveVersion: { fatalError("Replaced the requested historical version") } onFallback: { _ in }
+        } onFallback: { _ in }
         precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
         precondition(requests.allSatisfy { $0.1 == "12345" })
 
         // Other failures do not qualify, and a failed update never loops.
-        for failure in [StoreDownloadError.response(500), .emptyResponse(503), .emptyResponse(500)] {
+        for failure in [StoreDownloadError.serviceResponse(403, "redownload"), .response(500), .emptyResponse(503), .emptyResponse(500)] {
             requests = []
             do {
                 _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
@@ -192,7 +126,7 @@ struct DownloadProtocolChecks {
                         return empty
                     }
                     throw failure
-                } resolveVersion: { fatalError("Unexpected lookup") } onFallback: { _ in }
+                } onFallback: { _ in }
                 fatalError("Ignored a failed download response")
             } catch {
                 if case StoreDownloadError.emptyResponse(500) = failure {
@@ -203,16 +137,16 @@ struct DownloadProtocolChecks {
             }
         }
 
-        // A catalog failure never issues an unpinned fallback request.
+        // A missing version ID fails before any endpoint request.
         requests = []
         do {
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: nil) { endpoint, version in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "") { endpoint, version in
                 requests.append((endpoint, version))
                 return empty
-            } resolveVersion: { throw StoreDownloadError.catalogUnavailable } onFallback: { _ in }
-            fatalError("Ignored catalog failure")
+            } onFallback: { _ in fatalError("Unexpected fallback") }
+            fatalError("Ignored missing version")
         } catch StoreDownloadError.catalogUnavailable {}
-        precondition(requests.count == 1)
+        precondition(requests.isEmpty)
 
         // Successful, rejected and malformed primary responses are not retried.
         for response in [success, ["failureType": "9610"], ["failureType": 2034],
@@ -222,11 +156,10 @@ struct DownloadProtocolChecks {
                          ["status": -1], ["songList": "malformed"]]
         {
             requests = []
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: nil) { endpoint, version in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(version: "890598805") { endpoint, version in
                 requests.append((endpoint, version))
                 return response
-            } resolveVersion: { fatalError("Unexpected catalog request") }
-                onFallback: { _ in fatalError("Unexpected fallback") }
+            } onFallback: { _ in fatalError("Unexpected fallback") }
             precondition(requests.count == 1)
         }
 
@@ -235,7 +168,7 @@ struct DownloadProtocolChecks {
         let stillEmpty = try await StoreDownloadProtocol.fetchWithFallback(version: "123") { endpoint, version in
             requests.append((endpoint, version))
             return empty
-        } resolveVersion: { fatalError("Unexpected lookup") } onFallback: { _ in }
+        } onFallback: { _ in }
         precondition(requests.count == 2)
         do {
             _ = try StoreDownloadProtocol.packageItem(stillEmpty, bundleID: "example.app")
@@ -260,11 +193,19 @@ struct DownloadProtocolChecks {
         }
 
         let primary = "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct"
+        func downloadRequest(_ url: String) throws -> URLRequest {
+            try StoreDownloadProtocol.request(url: URL(string: url)!, body: Data(), userAgent: "fixture-user-agent",
+                dsid: "123456789", storefront: "143465-1,34", token: "fixture-token", cookies: [])
+        }
         for url in [primary, "https://downloaddispatch.itunes.apple.com/r/redownload?guid=fixture",
                     "https://downloaddispatch.itunes.apple.com/up/updateProduct?guid=fixture",
                     "https://p71-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/redownloadProduct"]
         {
-            _ = try StoreDownloadProtocol.validatedURL(URL(string: url)!)
+            let request = try downloadRequest(url)
+            precondition(request.httpMethod == "POST" && request.url?.absoluteString == url)
+            precondition(request.value(forHTTPHeaderField: "X-Token") == "fixture-token")
+            precondition(request.value(forHTTPHeaderField: "X-Apple-Store-Front") == "143465-1,34")
+            precondition(request.value(forHTTPHeaderField: "X-Dsid") == "123456789")
         }
         for url in [primary.replacingOccurrences(of: "https:", with: "http:"),
                     primary.replacingOccurrences(of: "p25-buy.itunes.apple.com", with: "p25-buy.itunes.apple.com.attacker.invalid"),
@@ -273,7 +214,7 @@ struct DownloadProtocolChecks {
                     primary + "#fragment", primary.replacingOccurrences(of: ".com/", with: ".com:8080/")]
         {
             do {
-                _ = try StoreDownloadProtocol.validatedURL(URL(string: url)!)
+                _ = try downloadRequest(url)
                 fatalError("Accepted a credential redirect outside the download endpoints")
             } catch StoreDownloadError.invalidRedirect {}
         }
@@ -383,62 +324,28 @@ struct DownloadProtocolChecks {
             let response: [String: Any] = ["failureType": code, "customerMessage": "AMD-Action:ent/download:SP"]
             precondition(!StoreDownloadProtocol.requiresDeviceVerification(response, actionHeader: "SP"))
             precondition(StoreDownloadProtocol.fallbackReason(response) == nil)
-            _ = try await StoreDownloadProtocol.preferredOrCompatibility { response }
-                compatibility: { fatalError("An account/license verdict must not try another transport") }
             do {
                 _ = try StoreDownloadProtocol.packageItem(response, bundleID: "example.app")
                 fatalError("Lost explicit account/license verdict")
             } catch StoreDownloadError.rejected(let received, _) { precondition(received == code) }
         }
 
-        var compatibilityCalls = 0
-        _ = try await StoreDownloadProtocol.preferredOrCompatibility {
-            try await StoreDownloadProtocol.preferredDownload(cached: "existing-blob") {
-                fatalError("SP does not invalidate the account's kbsync")
-            } invalidate: { _ in fatalError("SP is not a cached-blob rejection") }
-                fetch: { _ in throw StoreDownloadError.deviceVerificationRequired }
-        } compatibility: {
-            compatibilityCalls += 1
-            return ["marker": "ok"]
-        }
-        precondition(compatibilityCalls == 1)
-
-        compatibilityCalls = 0
-        let repeated = try await StoreDownloadProtocol.preferredOrCompatibility { challenge }
-            compatibility: { compatibilityCalls += 1; return challenge }
-        precondition(compatibilityCalls == 1)
-        do {
-            _ = try StoreDownloadProtocol.packageItem(repeated, bundleID: "example.app")
-            fatalError("A repeated challenge must stop rather than loop")
-        } catch StoreDownloadError.deviceVerificationRequired {}
-        compatibilityCalls = 0
-        do {
-            _ = try await StoreDownloadProtocol.preferredOrCompatibility {
-                throw StoreDownloadError.deviceVerificationRequired
-            } compatibility: {
-                compatibilityCalls += 1
-                throw StoreDownloadError.deviceVerificationRequired
-            }
-            fatalError("Lost final provisioning error")
-        } catch StoreDownloadError.deviceVerificationRequired {}
-        precondition(compatibilityCalls == 1)
-
         for headerOnly in [false, true] {
-            var requests: [(StoreDownloadProtocol.Endpoint, String?)] = []
+            var requests: [(StoreDownloadProtocol.Endpoint, String)] = []
             let result = try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id") { endpoint, version in
                 requests.append((endpoint, version))
                 if endpoint == .volumeStore && headerOnly { throw StoreDownloadError.deviceVerificationRequired }
                 return challenge
-            } resolveVersion: { fatalError("A fallback must preserve the pinned historical version") }
-                onFallback: { precondition($0 == "device-verification") }
+            } onFallback: { precondition($0 == "device-verification") }
             precondition(requests.count == 2 && requests[0].0 == .volumeStore && requests[1].0 == .redownload)
             precondition(requests.allSatisfy { $0.1 == "historical-id" })
             precondition(StoreDownloadProtocol.requiresDeviceVerification(result))
         }
         let cancelled = Task {
             withUnsafeCurrentTask { $0?.cancel() }
-            return try await StoreDownloadProtocol.preferredOrCompatibility { challenge }
-                compatibility: { fatalError("A cancelled request must not fall back") }
+            return try await StoreDownloadProtocol.fetchWithFallback(version: "historical-id") { _, _ in
+                fatalError("A cancelled request must not start")
+            } onFallback: { _ in fatalError("A cancelled request must not fall back") }
         }
         do { _ = try await cancelled.value; fatalError("Lost cancellation") } catch is CancellationError {}
         print("Machine provisioning classification and bounded compatibility checks passed.")
