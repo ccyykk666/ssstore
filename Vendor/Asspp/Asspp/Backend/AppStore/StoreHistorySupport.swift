@@ -26,6 +26,47 @@ actor StorePreparedDownloadCache<Value> {
     }
 }
 
+/// Public endpoint configuration only; never retains account headers or replies.
+actor StoreBagCache {
+    private struct Entry {
+        let endpoint: URL?
+        let expires: Date
+    }
+    private struct Pending {
+        let id: UUID
+        let task: Task<URL?, Error>
+    }
+    private var entries: [String: Entry] = [:]
+    private var pending: [String: Pending] = [:]
+    private let lifetime: TimeInterval
+
+    init(lifetime: TimeInterval = 900) { self.lifetime = lifetime }
+
+    func endpoint(for guid: String, now: Date = Date(),
+                  load: @escaping @Sendable () async throws -> URL?) async throws -> URL? {
+        let key = guid.lowercased()
+        if let entry = entries[key], entry.expires > now {
+            try Task.checkCancellation()
+            return entry.endpoint
+        }
+        let job: Pending
+        if let existing = pending[key] { job = existing }
+        else {
+            job = Pending(id: UUID(), task: Task { try await load() })
+            pending[key] = job
+        }
+        let result = await job.task.result
+        if pending[key]?.id == job.id {
+            pending.removeValue(forKey: key)
+            if case let .success(endpoint) = result {
+                entries[key] = Entry(endpoint: endpoint, expires: now.addingTimeInterval(lifetime))
+            }
+        }
+        try Task.checkCancellation()
+        return try result.get()
+    }
+}
+
 enum StoreHistorySupport {
     static func removeLegacyCache(in directory: URL) throws {
         guard FileManager.default.fileExists(atPath: directory.path),

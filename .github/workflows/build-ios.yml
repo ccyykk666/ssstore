@@ -11,6 +11,7 @@ on:
       - 'scripts/build-ipa.sh'
       - 'scripts/prepare-performance-devicekit.py'
       - 'scripts/patches/**'
+      - 'scripts/*kbsync*'
       - 'scripts/select-ci-tests.py'
       - 'scripts/tests/**'
       - 'tests/native-sheet/**'
@@ -28,6 +29,7 @@ jobs:
       core: ${{ steps.checks.outputs.core }}
       downloads: ${{ steps.checks.outputs.downloads }}
       localization: ${{ steps.checks.outputs.localization }}
+      kbsync: ${{ steps.checks.outputs.kbsync }}
       performance: ${{ steps.checks.outputs.performance }}
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +80,18 @@ jobs:
         with:
           path: build/DerivedData/SourcePackages
           key: xcode27-store-spm-${{ hashFiles('Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+      - uses: actions/cache@v4
+        id: kbsync-cache
+        with:
+          path: build/KBSyncCache
+          key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
+      - name: Prepare local kbsync runtime
+        run: python3 scripts/prepare-kbsync.py
+      - uses: actions/cache/save@v4
+        if: steps.kbsync-cache.outputs.cache-hit != 'true'
+        with:
+          path: build/KBSyncCache
+          key: kbsync-assets-${{ hashFiles('scripts/kbsync-manifest.json') }}
       - name: Test UpdateCore
         if: needs.checks.outputs.core == 'true'
         run: |
@@ -94,6 +108,10 @@ jobs:
       - name: Check store localization
         if: needs.checks.outputs.localization == 'true'
         run: bash Vendor/Asspp/Resources/Scripts/check.downloads.sh localization
+      - name: Check local WebKit kbsync generation
+        if: needs.checks.outputs.kbsync == 'true'
+        timeout-minutes: 8
+        run: bash scripts/check-kbsync.sh
       - name: Locate compiled device library
         id: device-library
         run: echo "path=$(python3 scripts/prepare-performance-devicekit.py --cache-path)" >> "$GITHUB_OUTPUT"

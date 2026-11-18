@@ -41,7 +41,7 @@ settings:
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "93"
+    CURRENT_PROJECT_VERSION: "94"
   configs:
     Release:
       ASSETCATALOG_COMPILER_OPTIMIZATION: space
@@ -66,6 +66,9 @@ targets:
           - Interface
           - Backend/DeviceCTL
           - Interface/Download/DeviceCTLInstallSection.swift
+      - path: build/KBSyncRuntime
+        type: folder
+        buildPhase: resources
     info:
       path: ssstore/Info.plist
       properties:
