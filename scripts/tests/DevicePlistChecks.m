@@ -26,6 +26,43 @@ static CGImageRef IconFixture(BOOL visible, BOOL artwork, size_t size) {
     return image;
 }
 
+static CGImageRef IconGridFixture(size_t size, BOOL artwork) {
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(NULL, size, size, 8, size * 4, space, kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    Check(context != NULL, @"Could not create an icon grid fixture");
+    CGContextScaleCTM(context, size, size);
+    CGContextSetRGBFillColor(context, 1, 1, 1, 1);
+    CGContextFillRect(context, CGRectMake(0, 0, 1, 1));
+    CGContextSetRGBStrokeColor(context, .65, .65, .65, 1);
+    CGContextSetLineWidth(context, .007);
+    CGContextAddRect(context, CGRectMake(.0625, .0625, .875, .875));
+    for (unsigned i = 0; i < 3; i++) {
+        double guide = .3125 + .1875 * i;
+        CGContextMoveToPoint(context, guide, 0);
+        CGContextAddLineToPoint(context, guide, 1);
+        CGContextMoveToPoint(context, 0, guide);
+        CGContextAddLineToPoint(context, 1, guide);
+    }
+    CGContextMoveToPoint(context, .0625, .0625);
+    CGContextAddLineToPoint(context, .9375, .9375);
+    CGContextMoveToPoint(context, .0625, .9375);
+    CGContextAddLineToPoint(context, .9375, .0625);
+    const double radii[] = {.1875, .265625, .4375};
+    for (unsigned i = 0; i < sizeof(radii) / sizeof(radii[0]); i++) {
+        double radius = radii[i];
+        CGContextAddEllipseInRect(context, CGRectMake(.5 - radius, .5 - radius, 2 * radius, 2 * radius));
+    }
+    CGContextStrokePath(context);
+    if (artwork) {
+        CGContextSetRGBFillColor(context, .13, .13, .13, 1);
+        CGContextFillEllipseInRect(context, CGRectMake(.18, .33, .64, .36));
+    }
+    CGImageRef image = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    return image;
+}
+
 static void CheckIconPixels(void) {
     CGImageRef invisible = IconFixture(NO, NO, 60);
     CGImageRef placeholder = IconFixture(YES, NO, 60);
@@ -36,11 +73,21 @@ static void CheckIconPixels(void) {
     Check(SSGetIconPixels(placeholder, &pixels), @"The placeholder fixture must have visible pixels");
     Check(SSIconMatchesPixels(pixels, scaled), @"The same placeholder at a different size must match");
     Check(!SSIconMatchesPixels(pixels, artwork), @"An icon with artwork must differ from the placeholder");
+    for (size_t size = 180; size <= 540; size *= 3) {
+        CGImageRef grid = IconGridFixture(size, NO);
+        CGImageRef drawn = IconGridFixture(size, YES);
+        Check(SSGetIconPixels(grid, &pixels) && SSIconHasPlaceholderGrid(&pixels),
+              @"Reject a white app-icon guide grid even when the system placeholder probe has a different image");
+        Check(SSGetIconPixels(drawn, &pixels) && !SSIconHasPlaceholderGrid(&pixels),
+              @"Keep a grayscale icon with distinct artwork");
+        CGImageRelease(drawn);
+        CGImageRelease(grid);
+    }
     CGImageRelease(invisible);
     CGImageRelease(placeholder);
     CGImageRelease(scaled);
     CGImageRelease(artwork);
-    puts("Installed icons: transparent, generic placeholder, and valid artwork fixtures passed");
+    puts("Installed icons: transparent, blank tile, white grid, and valid artwork fixtures passed");
 }
 
 static plist_t Fixture(void) {

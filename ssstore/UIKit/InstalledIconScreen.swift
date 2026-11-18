@@ -103,14 +103,14 @@ final class NativeInstalledIcon: NativePage, UIColorPickerViewControllerDelegate
 
     private var savedDefaultIcons: [(file: URL, source: String)] {
         var images: [(URL, String)] = []
-        if let app = model.records.first(where: { $0.id == bundleID })?.installed,
-           let cached = model.localIconURL(for: app) {
-            images.append((cached, "已缓存的默认图标"))
-        }
         if let receipt = model.inspectionReceipts["icon|\(bundleID)"], receipt.success,
            let reportPath = receipt.reportPath, receipt.date >= (model.scannedAt ?? .distantPast) {
             let folder = URL(fileURLWithPath: reportPath).deletingLastPathComponent()
             images.append((folder.appendingPathComponent("icon.png"), "已保存的配对图标"))
+        }
+        if let app = model.records.first(where: { $0.id == bundleID })?.installed,
+           let cached = model.localIconURL(for: app) {
+            images.append((cached, "已缓存的默认图标"))
         }
         return images
     }
@@ -124,19 +124,18 @@ final class NativeInstalledIcon: NativePage, UIColorPickerViewControllerDelegate
                 output = try await Task.detached(priority: .userInitiated) {
                     let data: Data
                     let source: String
-                    do {
+                    let saved = cached.lazy.compactMap { candidate -> (Data, String)? in
+                        guard let stored = try? Data(contentsOf: candidate.file),
+                              InstalledAppIcon.isUsablePNG(stored) else { return nil }
+                        return (stored, candidate.source)
+                    }
+                    if let first = saved.first {
+                        data = first.0
+                        source = first.1
+                    } else {
                         data = try InstalledAppIcon.readPNG(bundleID: bundleID, resourceName: resourceName,
                                                             appearance: appearance, tint: color)
                         source = "本机系统"
-                    } catch {
-                        let saved = cached.lazy.compactMap { candidate -> (Data, String)? in
-                            guard let stored = try? Data(contentsOf: candidate.file),
-                                  InstalledAppIcon.isUsablePNG(stored) else { return nil }
-                            return (stored, candidate.source)
-                        }
-                        guard let first = saved.first else { throw error }
-                        data = first.0
-                        source = first.1
                     }
                     let folder = temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

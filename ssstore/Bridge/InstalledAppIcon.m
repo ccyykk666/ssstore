@@ -152,7 +152,7 @@ static UIImage *SSUIKitIcon(NSString *bundleID) {
 
 static BOOL SSIsIconArtwork(CGImageRef image, SSSystemIconDescriptor *descriptor) {
     SSIconPixels pixels;
-    if (!SSGetIconPixels(image, &pixels)) return NO;
+    if (!SSGetIconPixels(image, &pixels) || SSIconHasPlaceholderGrid(&pixels)) return NO;
     if (SSIconMatchesPixels(pixels, SSUIKitIcon(SSMissingIconBundleID).CGImage)) return NO;
     SSSystemIconImage *missing = SSPrepareIcon(SSBundleIcon(SSMissingIconBundleID), descriptor);
     if (SSIconMatchesPixels(pixels, SSSystemIconCGImage(missing))) return NO;
