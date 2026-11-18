@@ -1,6 +1,6 @@
 --- a/idevice/src/services/dvt/screenshot.rs
 +++ b/idevice/src/services/dvt/screenshot.rs
-@@ -65,3 +65,63 @@
+@@ -65,3 +65,70 @@
          }
      }
  }
@@ -45,7 +45,12 @@
 +    match tokio::time::timeout_at(deadline, operation).await {
 +        Ok(Ok(value)) => Ok(value),
 +        Ok(Err(IdeviceError::Timeout)) | Err(_) => Err(failure("超时")),
-+        Ok(Err(error)) => Err(failure(&error.to_string())),
++        Ok(Err(IdeviceError::Socket(error))) if error.kind() == std::io::ErrorKind::TimedOut => {
++            Err(failure("超时"))
++        }
++        #[cfg(feature = "xctest")]
++        Ok(Err(IdeviceError::XcTestTimeout(_))) => Err(failure("超时")),
++        Ok(Err(error)) => Err(failure(&format!("{error:?}"))),
 +    }
 +}
 +
@@ -57,7 +62,9 @@
 +    let mut server = RemoteServerClient::with_label(connection, "screenshot-fixture");
 +    let deadline = Instant::now() + Duration::from_millis(400);
 +    let result = capture_screenshot(&mut server, deadline).await;
-+    assert!(result.unwrap_err().to_string().contains("协商 Instruments 截图连接"));
++    let error = result.unwrap_err();
++    assert!(matches!(&error, IdeviceError::InternalError(detail)
++        if detail.contains("协商 Instruments 截图连接") && detail.contains("超时")), "{error:?}");
 +    drop(server);
 +    let mut sent = Vec::new();
 +    tokio::time::timeout(Duration::from_secs(2), peer.read_to_end(&mut sent)).await.unwrap().unwrap();
