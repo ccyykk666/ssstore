@@ -79,7 +79,7 @@ final class NativeProduct: NativePage {
         let descriptionRow = NativeRow(title: app.description, isDescription: true)
         var header = [NativeRow(title: app.name, detail: app.sellerName, icon: URL(string: app.artworkUrl), badge: app.formattedPrice ?? "—", productHeader: true), descriptionRow]
         header.append(link("版本 \(app.version)") { [weak self] in guard let self else { return }; push(NativeHistory(model, archive: AppPackageArchive(accountID: accountID, region: region, package: package))) })
-        header.append(link(working ? "正在请求…" : "下载") { [weak self] in self?.download() })
+        header.append(link(working ? "正在请求…" : "下载最新版") { [weak self] in self?.download() })
         var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+")]
         if let size = app.fileSizeBytes.flatMap(Int64.init) { details.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
         var sections = [NativeSection(rows: header), NativeSection(title: "详情", rows: details), NativeSection(title: "新功能", rows: [NativeRow(title: app.releaseNotes ?? "")])]
@@ -88,10 +88,9 @@ final class NativeProduct: NativePage {
     }
     func download() {
         guard let accountID else { alert("请先添加此地区账户。"); return }
-        if let existing = Downloads.this.downloadRequest(forArchive: package) { push(NativePackage(model, package: existing)); return }
         run { [self] in
-            try await Downloads.this.startDownload(for: package, accountID: accountID)
-            if let request = Downloads.this.downloadRequest(forArchive: package) { push(NativePackage(model, package: request)) }
+            let request = try await Downloads.this.startDownload(for: package, accountID: accountID)
+            push(NativePackage(model, package: request))
         }
     }
 }
@@ -136,10 +135,8 @@ final class NativeHistory: NativePage {
                     confirm("下载 \(package.software.version)？") { [weak self] in self?.run {
                         guard let self else { return }
                         self.archive.cancelHistoryLoading()
-                        if Downloads.this.downloadRequest(forArchive: package) == nil {
-                            try await Downloads.this.startDownload(for: package, accountID: account)
-                        }
-                        if let request = Downloads.this.downloadRequest(forArchive: package) { self.push(NativePackage(self.model, package: request)) }
+                        let request = try await Downloads.this.startDownload(for: package, accountID: account)
+                        self.push(NativePackage(self.model, package: request))
                     } }
                 }, badge: date))
             } else {

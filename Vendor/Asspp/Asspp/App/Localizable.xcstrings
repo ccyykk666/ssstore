@@ -566,6 +566,22 @@
         }
       }
     },
+    "Requested version %@, but Apple returned %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requested version %@, but Apple returned %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求的是版本 %@，Apple 返回了版本 %@。"
+          }
+        }
+      }
+    },
     "Apple returned no downloadable package from either download service. This does not mean the app does not exist. Check this account's license, store region, and the requested version. See Settings > Logs for details." : {
       "localizations" : {
         "en" : {

@@ -58,7 +58,9 @@ class PackageManifest: Identifiable, Codable, Hashable, Equatable {
 
     init(account: AppStore.UserAccount, package: AppStore.AppPackage, downloadOutput: ApplePackage.DownloadOutput) throws {
         self.account = account
-        self.package = package
+        var resolvedPackage = package
+        resolvedPackage.software.version = downloadOutput.bundleShortVersionString
+        self.package = resolvedPackage
         guard let url = URL(string: downloadOutput.downloadURL) else {
             throw NSError(
                 domain: "Asspp.Download",

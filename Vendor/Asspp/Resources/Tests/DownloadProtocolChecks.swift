@@ -318,6 +318,14 @@ struct DownloadProtocolChecks {
             fatalError("Accepted a different historical version")
         } catch StoreDownloadError.invalidPackage {}
 
+        // An earlier “latest” download does not satisfy a new listing, while
+        // a newer response may legitimately arrive after the listing was loaded.
+        precondition(!StoreDownloadProtocol.matchesRequestedRelease("20.9.8", expected: "21.0.0", allowsNewer: true))
+        precondition(StoreDownloadProtocol.matchesRequestedRelease("21.0.0", expected: "21.0.0", allowsNewer: true))
+        precondition(StoreDownloadProtocol.matchesRequestedRelease("21.0.10", expected: "21.0.2", allowsNewer: true))
+        precondition(!StoreDownloadProtocol.matchesRequestedRelease("21.0.10", expected: "21.0.2", allowsNewer: false))
+        precondition(!StoreDownloadProtocol.matchesRequestedRelease("unknown", expected: "21.0.0", allowsNewer: true))
+
         // Ignore extension/Watch metadata; validate the main IPA's actual platform.
         precondition(StoreDownloadProtocol.isMainInfoPlist("Payload/Example.app/Info.plist"))
         for path in ["Payload/Example.app/Watch/Watch.app/Info.plist", "Payload/Example.app/PlugIns/Widget.appex/Info.plist",
@@ -326,20 +334,29 @@ struct DownloadProtocolChecks {
             precondition(!StoreDownloadProtocol.isMainInfoPlist(path))
         }
         for info in [
-            ["CFBundleIdentifier": "example.app", "CFBundleSupportedPlatforms": ["iPhoneOS"]],
-            ["CFBundleIdentifier": "example.app", "DTPlatformName": "iphoneos"],
+            ["CFBundleIdentifier": "example.app", "CFBundleSupportedPlatforms": ["iPhoneOS"], "CFBundleShortVersionString": "21.0.0"],
+            ["CFBundleIdentifier": "example.app", "DTPlatformName": "iphoneos", "CFBundleShortVersionString": "21.0.0"],
         ] as [[String: Any]] {
-            try StoreDownloadProtocol.validatePackageInfo(info, bundleID: "example.app", platform: "iPhoneOS")
+            try StoreDownloadProtocol.validatePackageInfo(info, bundleID: "example.app", platform: "iPhoneOS", version: "21.0.0")
         }
         for info in [
             ["CFBundleIdentifier": "other.app", "CFBundleSupportedPlatforms": ["iPhoneOS"]],
             ["CFBundleIdentifier": "example.app", "CFBundleSupportedPlatforms": ["AppleTVOS"]],
             ["CFBundleIdentifier": "example.app"],
+            ["CFBundleIdentifier": "example.app", "CFBundleSupportedPlatforms": ["iPhoneOS"]],
         ] as [[String: Any]] {
             do {
-                try StoreDownloadProtocol.validatePackageInfo(info, bundleID: "example.app", platform: "iPhoneOS")
+                try StoreDownloadProtocol.validatePackageInfo(info, bundleID: "example.app", platform: "iPhoneOS", version: "21.0.0")
                 fatalError("Accepted mismatched or missing package identity")
             } catch StoreDownloadError.invalidPackage {}
+        }
+        do {
+            let earlier: [String: Any] = ["CFBundleIdentifier": "example.app", "CFBundleSupportedPlatforms": ["iPhoneOS"],
+                                          "CFBundleShortVersionString": "20.9.8"]
+            try StoreDownloadProtocol.validatePackageInfo(earlier, bundleID: "example.app", platform: "iPhoneOS", version: "21.0.0")
+            fatalError("Accepted an earlier IPA as the new release")
+        } catch StoreDownloadError.versionMismatch(let expected, let actual) {
+            precondition(expected == "21.0.0" && actual == "20.9.8")
         }
         let error = NSError(domain: secret, code: 403, userInfo: [NSLocalizedDescriptionKey: secret, NSURLErrorKey: secret])
         precondition(!StoreDiagnostics.errorSummary(error).contains(secret))

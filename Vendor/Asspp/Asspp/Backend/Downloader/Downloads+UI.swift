@@ -58,36 +58,45 @@ extension Downloads {
 }
 
 extension Downloads {
-    func startDownload(for package: AppStore.AppPackage, accountID: String) async throws {
-        if downloadRequest(forArchive: package) != nil { return }
-        let key = [accountID, package.id, package.externalVersionID ?? "", (package.entityType ?? .iPhone).rawValue].joined(separator: "\u{0}")
+    @discardableResult
+    func startDownload(for package: AppStore.AppPackage, accountID: String) async throws -> PackageManifest {
+        if let existing = downloadRequest(forArchive: package, accountID: accountID) { return existing }
+        let key = [accountID, package.id, package.externalVersionID ?? "", package.software.version,
+                   (package.entityType ?? .iPhone).rawValue].joined(separator: "\u{0}")
         if let pending = preparingDownloads[key] { return try await pending.value }
         let pending = Task { try await requestDownload(for: package, accountID: accountID) }
         preparingDownloads[key] = pending
         defer { preparingDownloads.removeValue(forKey: key) }
-        try await pending.value
+        return try await pending.value
     }
 
-    private func requestDownload(for package: AppStore.AppPackage, accountID: String) async throws {
+    private func requestDownload(for package: AppStore.AppPackage, accountID: String) async throws -> PackageManifest {
         do {
-            try await prepareDownload(for: package, accountID: accountID)
+            return try await prepareDownload(for: package, accountID: accountID)
         } catch ApplePackageError.licenseRequired where package.software.price == 0 {
             try await AppStore.this.withAccount(id: accountID) { account in
                 try await ApplePackage.Purchase.purchase(account: &account.account, app: package.software)
             }
-            try await prepareDownload(for: package, accountID: accountID)
+            return try await prepareDownload(for: package, accountID: accountID)
         }
     }
 
-    private func prepareDownload(for package: AppStore.AppPackage, accountID: String) async throws {
+    private func prepareDownload(for package: AppStore.AppPackage, accountID: String) async throws -> PackageManifest {
         try await AppStore.this.withAccount(id: accountID) { account in
             let downloadOutput = try await StoreDownloadService.download(account: &account.account, package: package)
+            let actual = downloadOutput.bundleShortVersionString
+            guard StoreDownloadProtocol.matchesRequestedRelease(actual, expected: package.software.version,
+                                                               allowsNewer: package.externalVersionID == nil) else {
+                throw StoreDownloadError.versionMismatch(package.software.version, actual)
+            }
+            if let existing = self.downloadRequest(forArchive: package, accountID: accountID) { return existing }
             let request = try Downloads.this.add(request: .init(
                 account: account,
                 package: package,
                 downloadOutput: downloadOutput,
             ))
             Downloads.this.resume(request: request)
+            return request
         }
     }
 }

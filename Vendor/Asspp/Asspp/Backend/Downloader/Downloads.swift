@@ -22,7 +22,7 @@ class Downloads {
         .appendingPathComponent("ssstore-transfers", isDirectory: true))
 
     @ObservationIgnored
-    var preparingDownloads: [String: Task<Void, Error>] = [:]
+    var preparingDownloads: [String: Task<PackageManifest, Error>] = [:]
 
     @ObservationIgnored
     private var processingTasks: [UUID: Task<Void, Never>] = [:]
@@ -69,8 +69,27 @@ class Downloads {
         _manifests.save()
     }
 
-    func downloadRequest(forArchive archive: AppStore.AppPackage) -> PackageManifest? {
-        manifests.first { $0.package.id == archive.id && $0.package.externalVersionID == archive.externalVersionID }
+    func downloadRequest(forArchive archive: AppStore.AppPackage, accountID: String) -> PackageManifest? {
+        manifests.lazy.filter { request in
+            let saved = request.package
+            guard request.account.id == accountID,
+                  saved.id == archive.id,
+                  saved.externalVersionID == archive.externalVersionID,
+                  (saved.entityType ?? .iPhone) == (archive.entityType ?? .iPhone),
+                  StoreDownloadProtocol.matchesRequestedRelease(saved.software.version, expected: archive.software.version,
+                                                               allowsNewer: archive.externalVersionID == nil)
+            else { return false }
+            // Older manifests used the UI version as their label, even when the
+            // server's metadata identified a different release.
+            if let metadata = try? PropertyListSerialization.propertyList(from: request.iTunesMetadata, format: nil) as? [String: Any],
+               let actual = metadata["bundleShortVersionString"] as? String, actual != saved.software.version {
+                return false
+            }
+            return !request.completed || FileManager.default.fileExists(atPath: request.targetLocation.path)
+        }.max { left, right in
+            let order = left.package.software.version.compare(right.package.software.version, options: .numeric)
+            return order == .orderedSame ? left.creation < right.creation : order == .orderedAscending
+        }
     }
 
     func add(request: PackageManifest) -> PackageManifest {

@@ -6,6 +6,7 @@ enum StoreDownloadError: LocalizedError {
     case serviceResponse(Int, String)
     case emptyResponse(Int)
     case invalidPackage
+    case versionMismatch(String, String)
     case empty
     case catalogUnavailable
     case actionRequired
@@ -23,6 +24,8 @@ enum StoreDownloadError: LocalizedError {
             String(localized: "Apple rejected the \(endpoint) request (HTTP \(status)).")
         case .invalidPackage:
             String(localized: "Apple returned incomplete or mismatched package information.")
+        case let .versionMismatch(expected, actual):
+            String(localized: "Requested version \(expected), but Apple returned \(actual).")
         case .empty:
             String(localized: "Apple returned no downloadable package from either download service. This does not mean the app does not exist. Check this account's license, store region, and the requested version. See Settings > Logs for details.")
         case .catalogUnavailable:
@@ -176,12 +179,27 @@ enum StoreDownloadProtocol {
             && components[1].hasSuffix(".app") && components[2] == "Info.plist"
     }
 
-    static func validatePackageInfo(_ info: [String: Any], bundleID: String, platform: String) throws {
+    static func matchesRequestedRelease(_ actual: String, expected: String, allowsNewer: Bool) -> Bool {
+        guard !actual.isEmpty, !expected.isEmpty else { return false }
+        if actual == expected { return true }
+        guard allowsNewer, [actual, expected].allSatisfy({ version in
+            version.split(separator: ".", omittingEmptySubsequences: false).allSatisfy {
+                !$0.isEmpty && $0.utf8.allSatisfy { (48...57).contains($0) }
+            }
+        }) else { return false }
+        return actual.compare(expected, options: .numeric) == .orderedDescending
+    }
+
+    static func validatePackageInfo(_ info: [String: Any], bundleID: String, platform: String, version: String) throws {
         let platforms = info["CFBundleSupportedPlatforms"] as? [String] ?? []
         let platformName = info["DTPlatformName"] as? String ?? ""
         guard info["CFBundleIdentifier"] as? String == bundleID,
               platforms.contains(platform) || platformName.lowercased() == platform.lowercased()
         else { throw StoreDownloadError.invalidPackage }
+        guard let actual = info["CFBundleShortVersionString"] as? String, !actual.isEmpty else {
+            throw StoreDownloadError.invalidPackage
+        }
+        guard actual == version else { throw StoreDownloadError.versionMismatch(version, actual) }
     }
 
     struct CatalogVersion {

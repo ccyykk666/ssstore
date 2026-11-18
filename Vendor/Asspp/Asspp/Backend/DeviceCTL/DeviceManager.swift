@@ -154,22 +154,7 @@
             }
             var updatedApp = app.info
             updatedApp.package = .init(software: latest)
-            var request = await Downloads.this.downloadRequest(forArchive: updatedApp.package)
-            if request == nil {
-                try await Downloads.this.startDownload(for: updatedApp.package, accountID: updatedApp.accountID)
-                try await Task.sleep(for: .seconds(1))
-                request = await Downloads.this.downloadRequest(forArchive: updatedApp.package)
-            }
-            guard let request else {
-                logger.warning("failed to download \(updatedApp.id)")
-                throw NSError(
-                    domain: #function,
-                    code: 1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey: "Download failed",
-                    ],
-                )
-            }
+            let request = try await Downloads.this.startDownload(for: updatedApp.package, accountID: updatedApp.accountID)
             app.state = .downloading(request)
             await request.waitForCompletion()
             guard FileManager.default.fileExists(atPath: request.targetLocation.path) else {

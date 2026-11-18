@@ -207,7 +207,7 @@ struct ProductView: View {
 
     var buttons: some View {
         Group {
-            if let req = dvm.downloadRequest(forArchive: archive.package) {
+            if let account, let req = dvm.downloadRequest(forArchive: archive.package, accountID: account.id) {
                 NavigationLink(value: req) {
                     Text("Show Download")
                 }
@@ -215,12 +215,10 @@ struct ProductView: View {
                 AsyncButton {
                     guard let account else { return }
                     do {
-                        try await dvm.startDownload(for: archive.package, accountID: account.id)
+                        let req = try await dvm.startDownload(for: archive.package, accountID: account.id)
                         hint = Hint(message: String(localized: "Download Requested"), color: nil)
-                        if let req = dvm.downloadRequest(forArchive: archive.package) {
-                            if let openDownload { openDownload(req) }
-                            else { navigationPath.append(req) }
-                        }
+                        if let openDownload { openDownload(req) }
+                        else { navigationPath.append(req) }
                     } catch {
                         if case ApplePackageError.licenseRequired = error, archive.package.software.price == 0 {
                             showLicenseAlert = true
