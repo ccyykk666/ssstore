@@ -3,10 +3,10 @@ import XCTest
 
 final class InspectionTests: XCTestCase {
     func testMenuOnlyExposesCurrentOperations() {
-        for removed in ["installedApps", "documents", "container", "coreFiles", "dvtApps", "dvtProcesses", "dvtHardware", "dvtNetwork", "dvtKernel", "dvtAttributes", "dvtScreenshot"] {
+        for removed in ["installedApps", "documents", "container", "coreFiles", "dvtApps", "dvtProcesses", "dvtHardware", "dvtNetwork", "dvtKernel", "dvtAttributes", "dvtScreenshot", "screenshot"] {
             XCTAssertNil(InspectionOperation(rawValue: removed))
         }
-        for kept in [InspectionOperation.appDetails, .appCapabilities, .allStorage, .profiles, .deviceInfo, .icon, .screenshot] {
+        for kept in [InspectionOperation.appDetails, .appCapabilities, .allStorage, .profiles, .deviceInfo, .icon] {
             XCTAssertTrue(InspectionOperation.menu.contains(kept))
         }
         // Keep the existing single-app tools scoped to the selected application.

@@ -3,7 +3,7 @@ import Foundation
 public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, Sendable {
     case services, probe, appDetails, appCapabilities, appStorage, allStorage, profiles
     case media, crashes, filesystemInfo, icon
-    case homeWallpaper, lockWallpaper, iconMetrics, orientation, screenshot
+    case homeWallpaper, lockWallpaper, iconMetrics, orientation
     case deviceInfo, batteryInfo, diskInfo, diagnostics, batteryDiagnostics, nandDiagnostics, wifiDiagnostics, mobileGestalt, ioRegistry
     case coreApps, coreProcesses, configuration
     case developerMode, mountedImages, companion
@@ -27,7 +27,6 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .lockWallpaper: return "锁定屏幕墙纸"
         case .iconMetrics: return "图标布局参数"
         case .orientation: return "屏幕方向"
-        case .screenshot: return "设备截图"
         case .deviceInfo: return "设备信息"
         case .batteryInfo: return "电池信息"
         case .diskInfo: return "存储信息"
@@ -53,7 +52,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .appDetails, .appCapabilities, .appStorage, .allStorage: return "应用与存储"
         case .profiles: return "签名与描述文件"
         case .media, .crashes, .filesystemInfo, .fileInfo, .fileRead: return "文件与报告"
-        case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation, .screenshot: return "图标与屏幕"
+        case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation: return "图标与屏幕"
         case .coreApps, .coreProcesses, .developerMode, .mountedImages: return "开发服务"
         default: return "设备与诊断"
         }
@@ -71,7 +70,6 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .media, .filesystemInfo, .fileInfo, .fileRead: return "com.apple.afc.shim.remote"
         case .crashes: return "com.apple.crashreportcopymobile.shim.remote"
         case .icon, .homeWallpaper, .lockWallpaper, .iconMetrics, .orientation: return "com.apple.springboardservices.shim.remote"
-        case .screenshot: return "com.apple.mobile.screenshotr.shim.remote"
         case .deviceInfo, .batteryInfo, .diskInfo: return "com.apple.mobile.lockdown.remote.trusted"
         case .diagnostics, .batteryDiagnostics, .nandDiagnostics, .wifiDiagnostics, .mobileGestalt, .ioRegistry: return "com.apple.mobile.diagnostics_relay.shim.remote"
         case .coreApps, .coreProcesses: return "com.apple.coredevice.appservice"

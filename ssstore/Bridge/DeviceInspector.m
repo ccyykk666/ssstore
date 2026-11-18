@@ -1,7 +1,6 @@
 #import "DeviceInspector.h"
 @import IDevice;
 #import "DevicePlist.h"
-#import <UIKit/UIKit.h>
 #import <Security/Security.h>
 #include <arpa/inet.h>
 
@@ -87,7 +86,6 @@ static void IFreeStrings(char **strings, size_t count) {
     struct MisagentClientHandle *misagent = NULL;
     struct AfcClientHandle *afc = NULL;
     struct CrashReportCopyMobileHandle *crash = NULL;
-    struct ScreenshotrClientHandle *shot = NULL;
     struct LockdowndClientHandle *lockdown = NULL;
     struct DiagnosticsRelayClientHandle *diagnostics = NULL;
     struct AppServiceHandle *appService = NULL;
@@ -115,7 +113,6 @@ static void IFreeStrings(char **strings, size_t count) {
             PROBE_SERVICE(misagent, misagent, misagent_client_free, @"描述文件");
             PROBE_SERVICE(afc_client, afc, afc_client_free, @"AFC 文件");
             PROBE_SERVICE(crash_report_client, crash, crash_report_client_free, @"崩溃报告");
-            PROBE_SERVICE(screenshotr, shot, screenshotr_client_free, @"截图");
             PROBE_SERVICE(lockdownd, lockdown, lockdownd_client_free, @"设备资料");
             PROBE_SERVICE(diagnostics_relay_client, diagnostics, diagnostics_relay_client_free, @"诊断");
             PROBE_SERVICE(app_service, appService, app_service_free, @"CoreDevice 应用");
@@ -234,17 +231,6 @@ static void IFreeStrings(char **strings, size_t count) {
                 NSDictionary *file = IFile([NSData dataWithBytes:bytes length:byteCount], [op stringByAppendingString:@".png"], folder, error);
                 if (!file) return nil; [files addObject:file]; value = @{@"字节数":@(byteCount)};
             }
-        }
-        else if ([op isEqualToString:@"screenshot"]) {
-            REQUIRE(CONNECT(screenshotr, shot), @"连接截图服务");
-            struct ScreenshotData image = {0};
-            REQUIRE(screenshotr_take_screenshot(shot, &image), @"读取截图");
-            NSData *data = [NSData dataWithBytes:image.data length:image.length];
-            screenshotr_screenshot_free(image);
-            UIImage *decoded = [UIImage imageWithData:data];
-            if (decoded) data = UIImagePNGRepresentation(decoded);
-            NSDictionary *file = IFile(data, decoded ? @"screenshot.png" : @"screenshot.bin", folder, error);
-            if (!file) return nil; [files addObject:file]; value = @{@"字节数":@(data.length)};
         }
         else if ([@[@"deviceInfo", @"batteryInfo", @"diskInfo"] containsObject:op]) {
             REQUIRE(CONNECT(lockdownd, lockdown), @"连接 Lockdown 信息服务");
@@ -395,7 +381,7 @@ static void IFreeStrings(char **strings, size_t count) {
         rsd_free_services(services);
         app_service_free_app_list(nativeApps, nativeCount); app_service_free_process_list(processes, processCount);
         installation_proxy_client_free(installation); springboard_services_free(spring); misagent_client_free(misagent);
-        afc_client_free(afc); crash_report_client_free(crash); screenshotr_client_free(shot);
+        afc_client_free(afc); crash_report_client_free(crash);
         lockdownd_client_free(lockdown); diagnostics_relay_client_free(diagnostics); app_service_free(appService);
         configuration_service_free(config); image_mounter_free(mounter);
         companion_proxy_client_free(companion);
