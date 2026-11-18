@@ -207,10 +207,6 @@ static NSData *SSSystemIconPNG(SSSystemIconImage *image, SSSystemIconDescriptor 
                 png = SSSystemIconPNG([resource imageForSize:CGSizeMake(60, 60) scale:3], descriptor);
                 if (png) return png;
             }
-            if (!resourceName.length) {
-                UIImage *image = SSUIKitIcon(bundleID);
-                if (SSIsIconArtwork(image.CGImage, descriptor)) return UIImagePNGRepresentation(image);
-            }
         } else if (appearance >= SSIconAppearanceDark && appearance <= SSIconAppearanceTintedLight) {
             // The order of capabilities matches the non-default appearance enum values.
             SSIconCapabilities capabilities = SSResourceCapabilities(SSIconResource(icon, resourceName));
@@ -225,6 +221,19 @@ static NSData *SSSystemIconPNG(SSSystemIconImage *image, SSSystemIconDescriptor 
         }
     } @catch (NSException *exception) {
         failure = [NSString stringWithFormat:@"本机图标服务读取失败（%@）。", exception.name];
+    }
+    if (appearance == SSIconAppearanceStandard) {
+        // UIKit resolves the registered app icon by bundle ID independently of
+        // the named asset. The other path may return a placeholder or throw.
+        @try {
+            UIImage *image = SSUIKitIcon(bundleID);
+            if (SSIsIconArtwork(image.CGImage, SSDescriptor(nil))) {
+                NSData *png = UIImagePNGRepresentation(image);
+                if (png) return png;
+            }
+        } @catch (NSException *exception) {
+            failure = [NSString stringWithFormat:@"本机图标服务读取失败（%@）。", exception.name];
+        }
     }
     if (error) *error = [NSError errorWithDomain:@"ssstore.InstalledAppIcon" code:1
                                        userInfo:@{NSLocalizedDescriptionKey:failure}];
