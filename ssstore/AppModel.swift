@@ -143,11 +143,13 @@ final class AppModel: ObservableObject {
     }
 
     func inspect(_ operation: InspectionOperation, bundleID: String = "", path: String = "/",
-                 source: String? = nil) async throws -> (InspectionResult, URL) {
+                 source: String? = nil, localConfigurationTraits: UITraitCollection? = nil) async throws -> (InspectionResult, URL) {
         func failure(_ text: String) -> NSError { NSError(domain: "ssstore.Inspection", code: 1, userInfo: [NSLocalizedDescriptionKey: text]) }
+        let traits = operation == .configuration ? localConfigurationTraits : nil
+        let number = UInt16(port) ?? 0
         guard !busy else { throw failure("请等待当前操作完成。") }
-        guard hasPairing else { throw failure("请先创建或导入配对文件。") }
-        guard let number = UInt16(port), number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
+        guard traits != nil || hasPairing else { throw failure("请先创建或导入配对文件。") }
+        guard traits != nil || number > 0 else { throw failure("端口应在 1 到 65535 之间。") }
         guard !operation.requiresApp || !bundleID.isEmpty else { throw failure("请先选择应用。") }
         busy = true; activity = "正在读取：\(operation.title)…"
         defer { busy = false; activity = "" }
@@ -155,18 +157,23 @@ final class AppModel: ObservableObject {
         let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ssstore-inspection", isDirectory: true).appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let key = operation.rawValue + "|" + bundleID
+        let key = operation.rawValue + "|" + bundleID + (traits == nil ? "" : "|local")
         do {
-            let data: Data = try await withCheckedThrowingContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    do {
-                        let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue]
-                        continuation.resume(returning: try DeviceInspector.run(pairingPath: pairingPath, host: address, port: number,
-                            operation: operation.rawValue, options: options, outputDirectory: folder.path))
-                    } catch { continuation.resume(throwing: error) }
+            var result: InspectionResult
+            if let traits {
+                result = InspectionResult(value: localDisplayConfiguration(traits))
+            } else {
+                let data: Data = try await withCheckedThrowingContinuation { continuation in
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            let options: [String: Any] = ["bundleID": bundleID, "path": path, "source": source ?? operation.rawValue]
+                            continuation.resume(returning: try DeviceInspector.run(pairingPath: pairingPath, host: address, port: number,
+                                operation: operation.rawValue, options: options, outputDirectory: folder.path))
+                        } catch { continuation.resume(throwing: error) }
+                    }
                 }
+                result = try JSONDecoder().decode(InspectionResult.self, from: data)
             }
-            var result = try JSONDecoder().decode(InspectionResult.self, from: data)
             result.capturedAt = ISO8601DateFormatter().string(from: Date())
             result.operation = operation.rawValue
             result.bundleID = bundleID.isEmpty ? nil : bundleID
@@ -187,6 +194,32 @@ final class AppModel: ObservableObject {
             saveInspectionReceipts()
             throw error
         }
+    }
+
+    private func localDisplayConfiguration(_ traits: UITraitCollection) -> InspectionValue {
+        let appearance: String
+        switch traits.userInterfaceStyle {
+        case .light: appearance = "浅色"
+        case .dark: appearance = "深色"
+        default: appearance = "未指定"
+        }
+        let sizeNames: [UIContentSizeCategory: String] = [
+            .extraSmall: "特小", .small: "小", .medium: "中", .large: "大（默认）",
+            .extraLarge: "特大", .extraExtraLarge: "超大", .extraExtraExtraLarge: "最大",
+            .accessibilityMedium: "辅助功能 1 级", .accessibilityLarge: "辅助功能 2 级",
+            .accessibilityExtraLarge: "辅助功能 3 级", .accessibilityExtraExtraLarge: "辅助功能 4 级",
+            .accessibilityExtraExtraExtraLarge: "辅助功能 5 级",
+        ]
+        return .object([
+            "来源": .string("本机"),
+            "当前界面外观": .string(appearance),
+            "当前界面文字大小": .string(sizeNames[traits.preferredContentSizeCategory] ?? "未指定"),
+            "减弱动态效果": .bool(UIAccessibility.isReduceMotionEnabled),
+            "降低透明度": .bool(UIAccessibility.isReduceTransparencyEnabled),
+            "增强对比度": .bool(UIAccessibility.isDarkerSystemColorsEnabled),
+            "粗体文本": .bool(UIAccessibility.isBoldTextEnabled),
+            "灰度显示": .bool(UIAccessibility.isGrayscaleEnabled),
+        ])
     }
 
     private func saveInspectionReceipts() {

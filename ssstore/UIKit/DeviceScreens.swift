@@ -305,7 +305,15 @@ final class NativeInspection: NativePage {
             controls.append(NativeRow(title: "应用", detail: model.records.first(where: { $0.id == bundle })?.installed.name ?? (bundle.isEmpty ? "请选择" : bundle), action: { [weak self] in guard let self else { return }; let include = UserDefaults.standard.bool(forKey: "includeSystemApps"); let apps = model.records.filter { include || !$0.installed.isSystem }; let picker = NativeChoices(model, title: "选择应用", items: apps.map { ($0.id, $0.installed.name) }) { [weak self] in self?.bundle = $0; self?.result = nil; self?.reload() }; picker.compact = true; picker.icons = Dictionary(uniqueKeysWithValues: apps.compactMap { record in self.model.localIconURL(for: record.installed).map { (record.id, $0) } }); push(picker) }))
         }
         if operation.isBrowser || operation.isFileHelper { controls.append(NativeRow(title: "路径", detail: path, action: { [weak self] in guard let self else { return }; edit("路径", value: path) { [weak self] in self?.path = $0; self?.result = nil; self?.reload() } })) }
-        controls.append(NativeRow(title: working ? "正在读取…" : "读取", color: .systemBlue, action: working || model.busy ? nil : { [weak self] in self?.read() }))
+        let canRead = !working && !model.busy
+        let readsLocal = operation == .configuration
+        let readTitle = readsLocal ? "读取本机" : "读取"
+        controls.append(NativeRow(title: working ? "正在读取…" : readTitle, color: .systemBlue,
+                                  action: canRead ? { [weak self] in self?.read(locally: readsLocal) } : nil))
+        if readsLocal && model.hasPairing {
+            controls.append(NativeRow(title: "读取配对设备", color: .systemBlue,
+                                      action: canRead ? { [weak self] in self?.read() } : nil))
+        }
         var sections = [NativeSection(rows: controls)]
         if let failure { sections.append(NativeSection(rows: [NativeRow(title: failure, color: .systemOrange)])) }
         if let result {
@@ -335,10 +343,14 @@ final class NativeInspection: NativePage {
         return sections
     }
     func valueRows(_ value: InspectionValue) -> [NativeRow] { NativeValues.makeRows(value, owner: self) }
-    func read() {
+    func read(locally: Bool = false) {
         guard !working else { return }; working = true; failure = nil; result = nil; report = nil; reload()
+        let traits = locally ? traitCollection : nil
         Task { [self] in
-            do { let output = try await model.inspect(operation, bundleID: bundle, path: path, source: source); result = output.0; report = output.1 }
+            do {
+                let output = try await model.inspect(operation, bundleID: bundle, path: path, source: source, localConfigurationTraits: traits)
+                result = output.0; report = output.1
+            }
             catch { failure = error.localizedDescription }
             working = false; reload()
         }
@@ -358,14 +370,17 @@ final class NativeValues: NativePage {
         default: return [NativeRow(title: value.text)]
         }
         return entries.map { key, child in
+            let label = InspectionFieldLabels.chinese[key]
+            let title = label ?? key
+            let keyLine = label == nil ? "" : key + "\n"
             switch child {
-            case .object, .array: return NativeRow(title: key, detail: child.text, action: { [weak owner] in guard let owner else { return }; owner.push(NativeValues(owner.model, title: key, value: child)) })
+            case .object, .array: return NativeRow(title: title, detail: keyLine + child.text, action: { [weak owner] in guard let owner else { return }; owner.push(NativeValues(owner.model, title: title, value: child)) })
             default:
                 let sizeKeys = ["StaticDiskUsage", "DynamicDiskUsage", "size", "总字节数", "可用字节数", "字节数", "块大小", "TotalSystemCapacity", "TotalDataCapacity", "AmountDataAvailable", "AmountDataReserved", "BlockSize"]
                 var text = child.text
                 if sizeKeys.contains(key), let bytes = Double(text), bytes >= 0, bytes < Double(Int64.max) { text = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
                 let copied = text
-                return NativeRow(title: key, detail: text, action: { UIPasteboard.general.string = copied })
+                return NativeRow(title: title, detail: keyLine + text, action: { UIPasteboard.general.string = copied })
             }
         }
     }

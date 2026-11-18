@@ -305,6 +305,9 @@ static void IFreeStrings(char **strings, size_t count) {
             value = rows;
         }
         else if ([op isEqualToString:@"configuration"]) {
+            bool available = false;
+            REQUIRE(rsd_service_available(c->handshake, "com.apple.coredevice.configuration", &available), @"查询显示配置服务");
+            if (!available) { IError(error, @"当前配对连接未提供显示配置服务。可用「读取本机」查看本机状态。"); return nil; }
             REQUIRE(configuration_service_connect_rsd(c->adapter, c->handshake, &config), @"连接显示配置服务");
             NSMutableDictionary *fields = [NSMutableDictionary dictionary]; NSError *local = nil;
             enum IdeviceUserInterfaceStyle style;

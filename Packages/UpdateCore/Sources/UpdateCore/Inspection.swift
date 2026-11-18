@@ -75,7 +75,7 @@ public enum InspectionOperation: String, CaseIterable, Identifiable, Hashable, S
         case .deviceInfo, .batteryInfo, .diskInfo: return "com.apple.mobile.lockdown.remote.trusted"
         case .diagnostics, .batteryDiagnostics, .nandDiagnostics, .wifiDiagnostics, .mobileGestalt, .ioRegistry: return "com.apple.mobile.diagnostics_relay.shim.remote"
         case .coreApps, .coreProcesses: return "com.apple.coredevice.appservice"
-        case .configuration: return "com.apple.coredevice.configuration"
+        case .configuration: return "UIKit / com.apple.coredevice.configuration"
         case .developerMode, .mountedImages: return "com.apple.mobile.mobile_image_mounter.shim.remote"
         case .companion: return "com.apple.companion_proxy.shim.remote"
         }
@@ -153,6 +153,12 @@ public struct InspectionResult: Codable, Sendable {
     public var operation: String?
     public var bundleID: String?
     public var requestedPath: String?
+
+    public init(value: InspectionValue) {
+        self.value = value
+        files = []
+        entries = []
+    }
 }
 public struct InspectionReceipt: Codable, Sendable {
     public var date: Date
