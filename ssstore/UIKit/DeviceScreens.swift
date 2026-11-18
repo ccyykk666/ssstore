@@ -78,6 +78,7 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
     }
     private func clearCache() {
         guard !working, !model.busy else { return }
+        let startedAt = Date()
         let protected = model.protectedCacheFiles
         let ids = Set(Downloads.this.manifests.map(\.id))
         cacheStatus = ""
@@ -85,7 +86,7 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
         run { [self] in
             defer { clearingCache = false }
             do {
-                try await AppCacheCleaner.clear(keeping: protected, downloadIDs: ids)
+                try await AppCacheCleaner.clear(keeping: protected, downloadIDs: ids, startedAt: startedAt)
                 cacheStatus = "缓存已清理"
             } catch {
                 cacheStatus = "清理失败：\(error.localizedDescription)"

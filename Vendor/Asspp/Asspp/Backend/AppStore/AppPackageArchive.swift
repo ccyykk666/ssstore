@@ -56,10 +56,11 @@ class AppPackageArchive {
         self.package = package
         let key = [package.id, package.software.bundleID.lowercased(), region, (package.entityType ?? .iPhone).rawValue]
             .joined().lowercased()
-        _versionItems = Persist(key: "\(key).versions", defaultValue: [:])
-        _versionIdentifiers = Persist(key: "\(key).versionNumbers", defaultValue: [])
-        indexFetchedAt = Persist(key: "\(key).versionIndexFetchedAt", defaultValue: 0)
-        catalogFetchedAt = Persist(key: "\(key).catalogHistoryFetchedAt", defaultValue: 0)
+        let cache = StoreHistoryCacheStorage()
+        _versionItems = Persist(key: "\(key).versions", defaultValue: [:], engine: cache)
+        _versionIdentifiers = Persist(key: "\(key).versionNumbers", defaultValue: [], engine: cache)
+        indexFetchedAt = Persist(key: "\(key).versionIndexFetchedAt", defaultValue: 0, engine: cache)
+        catalogFetchedAt = Persist(key: "\(key).catalogHistoryFetchedAt", defaultValue: 0, engine: cache)
     }
 
     func package(for externalVersion: String) -> AppStore.AppPackage? {

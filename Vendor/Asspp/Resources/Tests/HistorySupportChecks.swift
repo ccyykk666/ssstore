@@ -8,6 +8,7 @@ enum HistorySupportChecks {
     }
 
     static func run() async throws {
+        try checkLegacyCacheCleanup()
         let prepared = StorePreparedDownloadCache<String>(lifetime: 10)
         typealias Key = StorePreparedDownloadCache<String>.Key
         let identity = Key(account: "first", token: "token", guid: "device", store: "store", app: "app", platform: "iPhone", version: "old")
@@ -197,6 +198,29 @@ enum HistorySupportChecks {
         let deleted = StoreHistorySupport.mergingChanges(current: [newerA, b, c],
             original: [a, b], updated: [a], key: { $0.identity })
         precondition(deleted == [newerA, c], "Deletions must not erase concurrent unrelated cookies")
-        print("History catalog, date provenance, cache, and concurrent-cookie regression checks passed.")
+        print("History catalog, date provenance, cache, legacy-file cleanup, and concurrent-cookie regression checks passed.")
+    }
+
+    private static func checkLegacyCacheCleanup() throws {
+        let manager = FileManager.default
+        let directory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? manager.removeItem(at: directory) }
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let history = [
+            "com.example.appcom.example.appcniphone.versions",
+            "com.example.appcom.example.appusipad.versionNumbers",
+            "com.example.appcom.example.appcniphone.versionIndexFetchedAt",
+            "com.example.appcom.example.appcniphone.catalogHistoryFetchedAt.corrupt",
+        ]
+        let retained = ["DownloadRequests", "app-settings", "com.example.document.versions"]
+        for name in history + retained {
+            try Data("fixture".utf8).write(to: directory.appendingPathComponent(name))
+        }
+        let link = directory.appendingPathComponent("com.example.appcom.example.appapappletv.versions")
+        try manager.createSymbolicLink(at: link, withDestinationURL: directory.appendingPathComponent("DownloadRequests"))
+        try StoreHistorySupport.removeLegacyCache(in: directory)
+        try StoreHistorySupport.removeLegacyCache(in: directory)
+        let remaining = try Set(manager.contentsOfDirectory(atPath: directory.path))
+        precondition(remaining == Set(retained + [link.lastPathComponent]), "Only app-generated version history files may be removed")
     }
 }

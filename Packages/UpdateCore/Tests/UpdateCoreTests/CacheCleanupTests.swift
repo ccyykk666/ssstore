@@ -48,6 +48,25 @@ final class CacheCleanupTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: userData), Data("data".utf8))
     }
 
+    func testRemovesRecentOrphanedIPAsAndSigningFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let version = root.appendingPathComponent("com.example.app/21.0.0")
+        let live = UUID(), orphan = UUID()
+        let retained = try ["\(live).ipa", ".\(live).ipa.unsigned", "user.ipa"].map {
+            try write(version.appendingPathComponent($0), old: false)
+        }
+        let removable = try ["\(orphan).ipa", ".\(orphan).ipa.unsigned"].map {
+            try write(version.appendingPathComponent($0), old: false)
+        }
+        let cutoff = Date().addingTimeInterval(1)
+        let removed = try CacheCleanup.removeUnusedFiles(in: root, keeping: [], olderThan: cutoff,
+                                                        downloadIdentifiers: [live], createdBefore: cutoff)
+        XCTAssertEqual(removed, 8)
+        for file in retained { XCTAssertTrue(FileManager.default.fileExists(atPath: file.path)) }
+        for file in removable { XCTAssertFalse(FileManager.default.fileExists(atPath: file.path)) }
+    }
+
     private func write(_ url: URL, old: Bool) throws -> URL {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("data".utf8).write(to: url)

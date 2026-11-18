@@ -24,9 +24,15 @@ private let configDir = documentsDirectory
  That means, no one else is able to access it if app is properly signed.
  */
 class FileStorage: PersistProvider {
+    private let directory: URL
+
+    init(directory: URL? = nil) {
+        self.directory = directory ?? configDir
+    }
+
     func pathForKey(_ key: String) -> URL {
-        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
-        var url = configDir.appendingPathComponent(key)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var url = directory.appendingPathComponent(key)
         var resourceValues = URLResourceValues()
         resourceValues.isExcludedFromBackup = true
         try? url.setResourceValues(resourceValues)
@@ -41,6 +47,54 @@ class FileStorage: PersistProvider {
         // Atomic write so a crash mid-write cannot truncate persisted state
         // (download manifests, settings) into an undecodable blob.
         try? data?.write(to: pathForKey(key), options: .atomic)
+    }
+}
+
+final class StoreHistoryCacheStorage: PersistProvider {
+    private static let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ssstore-version-history", isDirectory: true)
+    private static let lock = NSLock()
+    private static var generation = UUID()
+    private let generation: UUID
+    private let storage = FileStorage(directory: StoreHistoryCacheStorage.directory)
+
+    init() {
+        generation = Self.lock.withLock { Self.generation }
+    }
+
+    func data(forKey key: String) throws -> Data? {
+        try Self.lock.withLock {
+            guard generation == Self.generation else { return nil }
+            let destination = storage.pathForKey(key)
+            let legacy = configDir.appendingPathComponent(key)
+            if !FileManager.default.fileExists(atPath: destination.path),
+               (try? legacy.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])).map({
+                   $0.isRegularFile == true && $0.isSymbolicLink != true
+               }) == true {
+                // Move so an interrupted migration leaves a readable copy.
+                try? FileManager.default.moveItem(at: legacy, to: destination)
+                return (try? Data(contentsOf: destination)) ?? (try? Data(contentsOf: legacy))
+            }
+            return try storage.data(forKey: key)
+        }
+    }
+
+    func set(_ data: Data?, forKey key: String) throws {
+        try Self.lock.withLock {
+            guard generation == Self.generation else { return }
+            try storage.set(data, forKey: key)
+        }
+    }
+
+    static func clear() throws {
+        try lock.withLock {
+            // History pages from before the clear may still have queued writes.
+            generation = UUID()
+            try StoreHistorySupport.removeLegacyCache(in: configDir)
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+        }
     }
 }
 

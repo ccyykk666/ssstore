@@ -68,6 +68,29 @@ actor StoreBagCache {
 }
 
 enum StoreHistorySupport {
+    static func removeLegacyCache(in directory: URL) throws {
+        guard FileManager.default.fileExists(atPath: directory.path),
+              try directory.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else { return }
+        let manager = FileManager.default
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+        let files = try manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys)
+        let suffixes = ["versions", "versionNumbers", "versionIndexFetchedAt", "catalogHistoryFetchedAt"]
+        for file in files {
+            let name = file.pathExtension == "corrupt" ? file.deletingPathExtension() : file
+            let prefix = name.deletingPathExtension().lastPathComponent
+            // Older history keys used the bundle ID twice, followed by the
+            // storefront country and device type.
+            guard suffixes.contains(name.pathExtension),
+                  prefix.range(of: #"^([a-z0-9.-]+)\1[a-z]{2}(?:iphone|ipad|appletv)$"#,
+                               options: .regularExpression) != nil
+            else { continue }
+            let values = try file.resourceValues(forKeys: Set(keys))
+            guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+            do { try manager.removeItem(at: file) }
+            catch CocoaError.fileNoSuchFile { continue }
+        }
+    }
+
     struct Metadata: Codable, Equatable, Sendable {
         let displayVersion: String
         let releaseDate: Date?
