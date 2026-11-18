@@ -7,6 +7,8 @@ enum InspectionFieldLabels {
         "CFBundleDocumentTypes": "声明的文档类型",
         "CFBundleExecutable": "可执行文件名",
         "CFBundleIcons": "应用图标配置",
+        "CFBundlePrimaryIcon": "主图标",
+        "CFBundleIconFiles": "图标文件列表",
         "CFBundleIconName": "图标资源名称",
         "CFBundleIdentifier": "Bundle 标识符",
         "CFBundleInfoDictionaryVersion": "Info.plist 格式版本",

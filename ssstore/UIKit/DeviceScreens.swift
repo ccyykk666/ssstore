@@ -307,7 +307,13 @@ final class NativeInspection: NativePage {
         if operation.isBrowser || operation.isFileHelper { controls.append(NativeRow(title: "路径", detail: path, action: { [weak self] in guard let self else { return }; edit("路径", value: path) { [weak self] in self?.path = $0; self?.result = nil; self?.reload() } })) }
         let canRead = !working && !model.busy
         let readsLocal = operation == .configuration
-        let readTitle = readsLocal ? "读取本机" : "读取"
+        if operation == .icon, !bundle.isEmpty {
+            controls.append(link("提取本机图标") { [weak self] in
+                guard let self else { return }
+                push(NativeInstalledIcon(model, bundleID: bundle))
+            })
+        }
+        let readTitle = readsLocal ? "读取本机" : operation == .icon ? "通过配对读取" : "读取"
         controls.append(NativeRow(title: working ? "正在读取…" : readTitle, color: .systemBlue,
                                   action: canRead ? { [weak self] in self?.read(locally: readsLocal) } : nil))
         if readsLocal && model.hasPairing {
@@ -342,7 +348,10 @@ final class NativeInspection: NativePage {
         }
         return sections
     }
-    func valueRows(_ value: InspectionValue) -> [NativeRow] { NativeValues.makeRows(value, owner: self) }
+    func valueRows(_ value: InspectionValue) -> [NativeRow] {
+        let installedBundleID = operation == .appDetails && !bundle.isEmpty ? bundle : nil
+        return NativeValues.makeRows(value, owner: self, installedBundleID: installedBundleID)
+    }
     func read(locally: Bool = false) {
         guard !working else { return }; working = true; failure = nil; result = nil; report = nil; reload()
         let traits = locally ? traitCollection : nil
@@ -359,10 +368,28 @@ final class NativeInspection: NativePage {
 @MainActor
 final class NativeValues: NativePage {
     let value: InspectionValue
-    init(_ model: AppModel, title: String, value: InspectionValue) { self.value = value; super.init(model, title: title) }
+    let sourceKey: String?
+    let installedBundleID: String?
+    init(_ model: AppModel, title: String, value: InspectionValue,
+         sourceKey: String? = nil, installedBundleID: String? = nil) {
+        self.value = value
+        self.sourceKey = sourceKey
+        self.installedBundleID = installedBundleID
+        super.init(model, title: title)
+    }
     required init?(coder: NSCoder) { fatalError() }
-    override func rows() -> [NativeSection] { [NativeSection(rows: Self.makeRows(value, owner: self))] }
-    static func makeRows(_ value: InspectionValue, owner: NativePage) -> [NativeRow] {
+    override func rows() -> [NativeSection] {
+        var sections: [NativeSection] = []
+        if sourceKey == "CFBundlePrimaryIcon", let installedBundleID {
+            sections.append(NativeSection(rows: [link("提取本机图标") { [weak self] in
+                guard let self else { return }
+                push(NativeInstalledIcon(model, bundleID: installedBundleID, resourceName: value["CFBundleIconName"]?.string))
+            }]))
+        }
+        sections.append(NativeSection(rows: Self.makeRows(value, owner: self, installedBundleID: installedBundleID)))
+        return sections
+    }
+    static func makeRows(_ value: InspectionValue, owner: NativePage, installedBundleID: String? = nil) -> [NativeRow] {
         let entries: [(String, InspectionValue)]
         switch value {
         case .object(let dict): entries = dict.keys.sorted().map { ($0, dict[$0]!) }
@@ -374,7 +401,12 @@ final class NativeValues: NativePage {
             let title = label ?? key
             let keyLine = label == nil ? "" : key + "\n"
             switch child {
-            case .object, .array: return NativeRow(title: title, detail: keyLine + child.text, action: { [weak owner] in guard let owner else { return }; owner.push(NativeValues(owner.model, title: title, value: child)) })
+            case .object, .array:
+                return NativeRow(title: title, detail: keyLine + child.text, action: { [weak owner] in
+                    guard let owner else { return }
+                    owner.push(NativeValues(owner.model, title: title, value: child, sourceKey: key,
+                                            installedBundleID: installedBundleID))
+                })
             default:
                 let sizeKeys = ["StaticDiskUsage", "DynamicDiskUsage", "size", "总字节数", "可用字节数", "字节数", "块大小", "TotalSystemCapacity", "TotalDataCapacity", "AmountDataAvailable", "AmountDataReserved", "BlockSize"]
                 var text = child.text
