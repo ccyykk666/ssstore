@@ -79,7 +79,7 @@ final class NativeProduct: NativePage {
         let descriptionRow = NativeRow(title: app.description, isDescription: true)
         var header = [NativeRow(title: app.name, detail: app.sellerName, icon: URL(string: app.artworkUrl), badge: app.formattedPrice ?? "—", productHeader: true), descriptionRow]
         header.append(link("版本 \(app.version)") { [weak self] in guard let self else { return }; push(NativeHistory(model, archive: AppPackageArchive(accountID: accountID, region: region, package: package))) })
-        header.append(link(working ? "正在请求…" : "下载最新版") { [weak self] in self?.download() })
+        header.append(link(working ? "正在请求…" : "下载") { [weak self] in self?.download() })
         var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+")]
         if let size = app.fileSizeBytes.flatMap(Int64.init) { details.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
         var sections = [NativeSection(rows: header), NativeSection(title: "详情", rows: details), NativeSection(title: "新功能", rows: [NativeRow(title: app.releaseNotes ?? "")])]
