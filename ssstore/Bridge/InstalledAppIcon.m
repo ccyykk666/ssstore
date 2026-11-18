@@ -1,6 +1,6 @@
 #import "InstalledAppIcon.h"
+#import "InstalledIconPixels.h"
 #import <dlfcn.h>
-#include <stdbool.h>
 
 // These declarations are used only to type-check calls on runtime-resolved classes.
 @interface UIImage (SSInstalledAppIcon)
@@ -8,7 +8,7 @@
 @end
 
 @interface SSSystemIconImage : NSObject
-@property (readonly) CGImageRef CGImage;
+- (CGImageRef)CGImage NS_RETURNS_INNER_POINTER;
 @property (readonly) bool placeholder;
 @end
 
@@ -18,8 +18,23 @@
 @property bool shouldApplyMask;
 @end
 
+@interface SSSystemIconResource : NSObject
+@property (readonly) NSString *imageName;
+- (bool)hasDarkResource;
+- (bool)hasTintableResource;
+- (SSSystemIconImage *)imageForSize:(CGSize)size scale:(CGFloat)scale;
+@end
+
+@interface SSSystemIconProvider : NSObject
+- (SSSystemIconResource *)iconResource;
+- (SSSystemIconResource *)resourceNamed:(NSString *)name;
+@end
+
 @interface SSSystemApplicationIcon : NSObject
++ (instancetype)genericApplicationIcon;
++ (instancetype)placeholderIcon;
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleID;
+- (SSSystemIconProvider *)makeResourceProvider;
 - (SSSystemIconImage *)prepareImageForDescriptor:(SSSystemIconDescriptor *)descriptor;
 @end
 
@@ -31,6 +46,76 @@
 @end
 
 typedef void (*SSApplyIconAppearance)(id descriptor, id appearance, uint64_t options);
+
+static NSString *const SSMissingIconBundleID = @"invalid.ssstore.icon-placeholder";
+
+static void SSLoadIconServices(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/IconServices.framework/IconServices", RTLD_LAZY | RTLD_LOCAL);
+    });
+}
+
+static SSApplyIconAppearance SSLoadAppearanceModifier(void) {
+    static SSApplyIconAppearance modifier;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *framework = dlopen("/System/Library/PrivateFrameworks/SpringBoardHome.framework/SpringBoardHome",
+                                 RTLD_LAZY | RTLD_LOCAL);
+        if (framework) modifier = (SSApplyIconAppearance)dlsym(framework, "SBHModifyImageDescriptorWithImageAppearance");
+    });
+    return modifier;
+}
+
+static SSSystemApplicationIcon *SSBundleIcon(NSString *bundleID) {
+    SSLoadIconServices();
+    Class iconClass = NSClassFromString(@"ISBundleIdentifierIcon");
+    if (![iconClass instancesRespondToSelector:@selector(initWithBundleIdentifier:)]) return nil;
+    return [[iconClass alloc] initWithBundleIdentifier:bundleID];
+}
+
+static SSSystemIconDescriptor *SSDescriptor(NSString *resourceName) {
+    Class descriptorClass = NSClassFromString(@"ISImageDescriptor");
+    if (![descriptorClass instancesRespondToSelector:@selector(initWithSize:scale:)]) return nil;
+    SSSystemIconDescriptor *descriptor = [[descriptorClass alloc] initWithSize:CGSizeMake(60, 60) scale:3];
+    if (resourceName.length) {
+        if (![descriptor respondsToSelector:@selector(setPreferedResourceName:)]) return nil;
+        descriptor.preferedResourceName = resourceName;
+    }
+    if ([descriptor respondsToSelector:@selector(setShouldApplyMask:)]) descriptor.shouldApplyMask = YES;
+    return descriptor;
+}
+
+static SSSystemIconResource *SSIconResource(SSSystemApplicationIcon *icon, NSString *resourceName) {
+    if (![icon respondsToSelector:@selector(makeResourceProvider)]) return nil;
+    SSSystemIconProvider *provider = [icon makeResourceProvider];
+    if (resourceName.length && [provider respondsToSelector:@selector(resourceNamed:)]) {
+        SSSystemIconResource *named = [provider resourceNamed:resourceName];
+        if (named) return named;
+    }
+    if (![provider respondsToSelector:@selector(iconResource)]) return nil;
+    SSSystemIconResource *primary = [provider iconResource];
+    if (!resourceName.length) return primary;
+    return [primary respondsToSelector:@selector(imageName)] && [primary.imageName isEqualToString:resourceName] ? primary : nil;
+}
+
+static SSIconCapabilities SSResourceCapabilities(SSSystemIconResource *resource) {
+    if (!SSLoadAppearanceModifier()) return 0;
+    Class style = NSClassFromString(@"SBHIconImageAppearance");
+    SSIconCapabilities result = 0;
+    if ([resource respondsToSelector:@selector(hasDarkResource)] && [resource hasDarkResource] &&
+        [style respondsToSelector:@selector(darkAppearance)]) {
+        result |= SSIconCapabilitiesDark;
+    }
+    // A tintable rendition is the supplied artwork shared by the two tint modes.
+    // IconServices can also synthesize tinting for ordinary icons. Do not count that.
+    if ([resource respondsToSelector:@selector(hasTintableResource)] && [resource hasTintableResource]) {
+        if ([style respondsToSelector:@selector(tintedAppearanceWithTintColor:)]) result |= SSIconCapabilitiesTinted;
+        if ([style respondsToSelector:@selector(tintedDarkAppearanceWithTintColor:)]) result |= SSIconCapabilitiesTintedDark;
+        if ([style respondsToSelector:@selector(tintedLightAppearanceWithTintColor:)]) result |= SSIconCapabilitiesTintedLight;
+    }
+    return result;
+}
 
 static SSSystemIconAppearance *SSMakeAppearance(Class appearanceClass, SSIconAppearance appearance, UIColor *tint) {
     switch (appearance) {
@@ -51,69 +136,92 @@ static SSSystemIconAppearance *SSMakeAppearance(Class appearanceClass, SSIconApp
     return nil;
 }
 
-static NSData *SSUIKitIconPNG(NSString *bundleID) {
+static SSSystemIconImage *SSPrepareIcon(SSSystemApplicationIcon *icon, SSSystemIconDescriptor *descriptor) {
+    if (!descriptor || ![icon respondsToSelector:@selector(prepareImageForDescriptor:)]) return nil;
+    return [icon prepareImageForDescriptor:descriptor];
+}
+
+static CGImageRef SSSystemIconCGImage(SSSystemIconImage *image) {
+    return [image respondsToSelector:@selector(CGImage)] ? image.CGImage : NULL;
+}
+
+static UIImage *SSUIKitIcon(NSString *bundleID) {
     if (![UIImage respondsToSelector:@selector(_applicationIconImageForBundleIdentifier:format:scale:)]) return nil;
-    // Use the same format for both requests. UIKit may return a generic icon
-    // instead of nil when the app cannot be resolved or its image is restricted.
-    UIImage *icon = [UIImage _applicationIconImageForBundleIdentifier:bundleID format:2 scale:3];
-    if (!icon.CGImage) return nil;
-    UIImage *placeholder = [UIImage _applicationIconImageForBundleIdentifier:@"invalid.ssstore.icon-placeholder" format:2 scale:3];
-    NSData *png = UIImagePNGRepresentation(icon);
-    NSData *generic = placeholder.CGImage ? UIImagePNGRepresentation(placeholder) : nil;
-    return [png isEqualToData:generic] ? nil : png;
+    return [UIImage _applicationIconImageForBundleIdentifier:bundleID format:2 scale:3];
+}
+
+static BOOL SSIsIconArtwork(CGImageRef image, SSSystemIconDescriptor *descriptor) {
+    SSIconPixels pixels;
+    if (!SSGetIconPixels(image, &pixels)) return NO;
+    if (SSIconMatchesPixels(pixels, SSUIKitIcon(SSMissingIconBundleID).CGImage)) return NO;
+    SSSystemIconImage *missing = SSPrepareIcon(SSBundleIcon(SSMissingIconBundleID), descriptor);
+    if (SSIconMatchesPixels(pixels, SSSystemIconCGImage(missing))) return NO;
+    Class iconClass = NSClassFromString(@"ISIcon");
+    if ([iconClass respondsToSelector:@selector(genericApplicationIcon)]) {
+        SSSystemIconImage *generic = SSPrepareIcon([iconClass genericApplicationIcon], descriptor);
+        if (SSIconMatchesPixels(pixels, SSSystemIconCGImage(generic))) return NO;
+    }
+    if ([iconClass respondsToSelector:@selector(placeholderIcon)]) {
+        SSSystemIconImage *placeholder = SSPrepareIcon([iconClass placeholderIcon], descriptor);
+        if (SSIconMatchesPixels(pixels, SSSystemIconCGImage(placeholder))) return NO;
+    }
+    return YES;
+}
+
+static NSData *SSSystemIconPNG(SSSystemIconImage *image, SSSystemIconDescriptor *descriptor) {
+    if ([image respondsToSelector:@selector(placeholder)] && image.placeholder) return nil;
+    CGImageRef cgImage = SSSystemIconCGImage(image);
+    return SSIsIconArtwork(cgImage, descriptor) ? UIImagePNGRepresentation([UIImage imageWithCGImage:cgImage]) : nil;
 }
 
 @implementation InstalledAppIcon
++ (SSIconCapabilities)capabilitiesForBundleIdentifier:(NSString *)bundleID resourceName:(NSString *)resourceName {
+    @try {
+        return SSResourceCapabilities(SSIconResource(SSBundleIcon(bundleID), resourceName));
+    } @catch (__unused NSException *exception) {
+        return 0;
+    }
+}
+
++ (BOOL)isUsablePNG:(NSData *)data {
+    @try {
+        SSLoadIconServices();
+        UIImage *image = [UIImage imageWithData:data];
+        return SSIsIconArtwork(image.CGImage, SSDescriptor(nil));
+    } @catch (__unused NSException *exception) {
+        return NO;
+    }
+}
+
 + (NSData *)PNGForBundleIdentifier:(NSString *)bundleID resourceName:(NSString *)resourceName
                         appearance:(SSIconAppearance)appearance tint:(UIColor *)tint error:(NSError **)error {
-    NSString *failure = appearance == SSIconAppearanceStandard
-        ? @"系统没有返回此已安装应用的图标。"
-        : @"当前系统未提供这种图标外观的读取接口。";
+    NSString *failure = @"本机系统没有返回可用的图标内容。";
     @try {
-        static dispatch_once_t iconOnce;
-        dispatch_once(&iconOnce, ^{
-            dlopen("/System/Library/PrivateFrameworks/IconServices.framework/IconServices", RTLD_LAZY | RTLD_LOCAL);
-        });
-        Class iconClass = NSClassFromString(@"ISBundleIdentifierIcon");
-        Class descriptorClass = NSClassFromString(@"ISImageDescriptor");
-        if ([iconClass instancesRespondToSelector:@selector(initWithBundleIdentifier:)] &&
-            [iconClass instancesRespondToSelector:@selector(prepareImageForDescriptor:)] &&
-            [descriptorClass instancesRespondToSelector:@selector(initWithSize:scale:)]) {
-            SSSystemApplicationIcon *icon = [[iconClass alloc] initWithBundleIdentifier:bundleID];
-            SSSystemIconDescriptor *descriptor = [[descriptorClass alloc] initWithSize:CGSizeMake(60, 60) scale:3];
-            BOOL ready = icon && descriptor;
-            if (resourceName.length) {
-                ready = ready && [descriptor respondsToSelector:@selector(setPreferedResourceName:)];
-                if (ready) descriptor.preferedResourceName = resourceName;
+        SSSystemApplicationIcon *icon = SSBundleIcon(bundleID);
+        SSSystemIconDescriptor *descriptor = SSDescriptor(resourceName);
+        if (appearance == SSIconAppearanceStandard) {
+            NSData *png = SSSystemIconPNG(SSPrepareIcon(icon, descriptor), descriptor);
+            if (png) return png;
+            SSSystemIconResource *resource = SSIconResource(icon, resourceName);
+            if ([resource respondsToSelector:@selector(imageForSize:scale:)]) {
+                png = SSSystemIconPNG([resource imageForSize:CGSizeMake(60, 60) scale:3], descriptor);
+                if (png) return png;
             }
-            if (appearance != SSIconAppearanceStandard) {
-                static SSApplyIconAppearance applyAppearance;
-                static dispatch_once_t appearanceOnce;
-                dispatch_once(&appearanceOnce, ^{
-                    void *framework = dlopen("/System/Library/PrivateFrameworks/SpringBoardHome.framework/SpringBoardHome",
-                                             RTLD_LAZY | RTLD_LOCAL);
-                    if (framework) applyAppearance = (SSApplyIconAppearance)dlsym(framework, "SBHModifyImageDescriptorWithImageAppearance");
-                });
-                SSSystemIconAppearance *style = SSMakeAppearance(NSClassFromString(@"SBHIconImageAppearance"), appearance, tint);
-                if (ready && applyAppearance && style) {
-                    applyAppearance(descriptor, style, 0);
-                    failure = @"系统没有返回此应用的所选外观图标。";
-                } else ready = NO;
-            } else if ([descriptor respondsToSelector:@selector(setShouldApplyMask:)]) {
-                descriptor.shouldApplyMask = YES;
+            if (!resourceName.length) {
+                UIImage *image = SSUIKitIcon(bundleID);
+                if (SSIsIconArtwork(image.CGImage, descriptor)) return UIImagePNGRepresentation(image);
             }
-            if (ready) {
-                SSSystemIconImage *image = [icon prepareImageForDescriptor:descriptor];
-                if ([image respondsToSelector:@selector(CGImage)] &&
-                    (![image respondsToSelector:@selector(placeholder)] || !image.placeholder) && image.CGImage) {
-                    NSData *png = UIImagePNGRepresentation([UIImage imageWithCGImage:image.CGImage]);
-                    if (png.length) return png;
-                }
-            }
-        }
-        if (appearance == SSIconAppearanceStandard && !resourceName.length) {
-            NSData *png = SSUIKitIconPNG(bundleID);
-            if (png.length) return png;
+        } else if (appearance >= SSIconAppearanceDark && appearance <= SSIconAppearanceTintedLight) {
+            // The order of capabilities matches the non-default appearance enum values.
+            SSIconCapabilities capabilities = SSResourceCapabilities(SSIconResource(icon, resourceName));
+            SSIconCapabilities requested = (SSIconCapabilities)(1UL << (appearance - 1));
+            SSApplyIconAppearance modifier = SSLoadAppearanceModifier();
+            SSSystemIconAppearance *style = SSMakeAppearance(NSClassFromString(@"SBHIconImageAppearance"), appearance, tint);
+            if ((capabilities & requested) && modifier && style && descriptor) {
+                modifier(descriptor, style, 0);
+                NSData *png = SSSystemIconPNG(SSPrepareIcon(icon, descriptor), descriptor);
+                if (png) return png;
+            } else failure = @"未能确认此应用提供了所选外观的图标资源。";
         }
     } @catch (NSException *exception) {
         failure = [NSString stringWithFormat:@"本机图标服务读取失败（%@）。", exception.name];

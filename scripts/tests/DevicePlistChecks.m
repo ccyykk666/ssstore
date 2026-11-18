@@ -1,11 +1,48 @@
 #import <Foundation/Foundation.h>
 #import "DevicePlist.h"
+#import "InstalledIconPixels.h"
 #include <math.h>
 #include <string.h>
 
 static void Check(BOOL condition, NSString *message) {
     if (!condition) { fprintf(stderr, "%s\n", message.UTF8String); exit(1); }
 }
+static CGImageRef IconFixture(BOOL visible, BOOL artwork, size_t size) {
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(NULL, size, size, 8, size * 4, space, kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    Check(context != NULL, @"Could not create an icon fixture");
+    CGContextClearRect(context, CGRectMake(0, 0, size, size));
+    if (visible) {
+        CGContextSetRGBFillColor(context, .52, .52, .52, 1);
+        CGContextFillRect(context, CGRectMake(0, 0, size, size));
+        if (artwork) {
+            CGContextSetRGBFillColor(context, 0, 0.4, 1, 1);
+            CGContextFillRect(context, CGRectMake(size / 4, size / 4, size / 2, size / 2));
+        }
+    }
+    CGImageRef image = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    return image;
+}
+
+static void CheckIconPixels(void) {
+    CGImageRef invisible = IconFixture(NO, NO, 60);
+    CGImageRef placeholder = IconFixture(YES, NO, 60);
+    CGImageRef scaled = IconFixture(YES, NO, 180);
+    CGImageRef artwork = IconFixture(YES, YES, 60);
+    SSIconPixels pixels;
+    Check(!SSGetIconPixels(invisible, &pixels), @"A transparent PNG is not artwork");
+    Check(SSGetIconPixels(placeholder, &pixels), @"The placeholder fixture must have visible pixels");
+    Check(SSIconMatchesPixels(pixels, scaled), @"The same placeholder at a different size must match");
+    Check(!SSIconMatchesPixels(pixels, artwork), @"An icon with artwork must differ from the placeholder");
+    CGImageRelease(invisible);
+    CGImageRelease(placeholder);
+    CGImageRelease(scaled);
+    CGImageRelease(artwork);
+    puts("Installed icons: transparent, generic placeholder, and valid artwork fixtures passed");
+}
+
 static plist_t Fixture(void) {
     plist_t node = plist_new_dict();
     plist_dict_set_item(node, "UID", plist_new_uid(42));
@@ -59,6 +96,7 @@ int main(int argc, const char **argv) {
         }
         plist_free(node);
         puts("Device plist: binary conversion and repeated null/empty-sentinel/nonempty-array cleanup passed");
+        CheckIconPixels();
     }
     return 0;
 }

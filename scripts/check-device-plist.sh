@@ -6,7 +6,7 @@ probe_dir=$(mktemp -d)
 trap 'rm -rf "$probe_dir"' EXIT
 xcrun --sdk macosx clang -fobjc-arc -fmodules -I "$slice/Headers" -I ssstore/Bridge \
   scripts/tests/DevicePlistChecks.m "$slice/idevice-macos.a" \
-  -framework Foundation -framework CoreFoundation -framework Security -framework SystemConfiguration -framework IOKit \
+  -framework Foundation -framework CoreFoundation -framework CoreGraphics -framework Security -framework SystemConfiguration -framework IOKit \
   -Wl,-dead_strip -lresolv -liconv -lc++ \
   -o "$probe_dir/plist-checks"
 "$probe_dir/plist-checks"
