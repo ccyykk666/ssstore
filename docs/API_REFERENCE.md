@@ -1,4 +1,4 @@
-Current UI (0.6.0 build 83): Device screenshot capture and its connection probe were removed. Data is the second tab; removed DVT and app-container backends are deleted. Logs are in Settings > About. Mounted-image, plist and string array cleanup guards empty Rust slices. Ignored-app display reconciles only successful complete inventories; removed apps stay ignored but are hidden until installed again. The integrations below are historical references, not guaranteed availability.
+Current UI (0.6.0 build 81): Data is the second tab; removed DVT and app-container backends are deleted. Logs are in Settings > About. Mounted-image, plist and string array cleanup guards empty Rust slices. Ignored-app display reconciles only successful complete inventories; removed apps stay ignored but are hidden until installed again. The integrations below are historical references, not guaranteed availability.
 
 # ssstore 0.5.2 device data interfaces
 
