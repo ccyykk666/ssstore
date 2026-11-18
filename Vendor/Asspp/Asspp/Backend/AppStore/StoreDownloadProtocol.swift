@@ -48,8 +48,7 @@ enum StoreDownloadError: LocalizedError {
 
 /// Response classification and request rules without credentials or networking.
 enum StoreDownloadProtocol {
-    /// SP/RP are machine provisioning instructions, not ordinary account messages
-    /// or proof that the cached account-specific kbsync blob is invalid.
+    /// SP/RP identify machine provisioning instructions.
     static func requiresDeviceVerification(_ response: [String: Any], actionHeader: String? = nil) -> Bool {
         // Preserve explicit license/account/session verdicts before considering a retry.
         guard failureCode(response).isEmpty else { return false }
@@ -60,17 +59,6 @@ enum StoreDownloadProtocol {
         }
     }
 
-    static func preferredOrCompatibility(preferred: () async throws -> [String: Any],
-                                         compatibility: () async throws -> [String: Any]) async throws -> [String: Any] {
-        do {
-            let response = try await preferred()
-            if requiresDeviceVerification(response) { throw StoreDownloadError.deviceVerificationRequired }
-            return response
-        } catch StoreDownloadError.deviceVerificationRequired {
-            try Task.checkCancellation()
-            return try await compatibility()
-        }
-    }
     static func isExpiredSession(_ error: Error) -> Bool {
         if case StoreDownloadError.rejected("2034", _) = error { return true }
         // ApplePackage's purchase API exposes this verdict as a localized NSError.
@@ -89,82 +77,6 @@ enum StoreDownloadProtocol {
         }
     }
 
-    static let entPath = "/WebObjects/DownloadDispatch.woa/wa/ent/download"
-
-    /// Current bags advertise ent/download under volumeStoreDownloadProduct.
-    static func entEndpoint(in bag: [String: Any]) -> URL? {
-        let urls = bag["urlBag"] as? [String: Any] ?? [:]
-        let value = urls["volumeStoreDownloadProduct"] ?? bag["volumeStoreDownloadProduct"]
-            ?? urls["loc-volumeStoreDownloadProduct"] ?? bag["loc-volumeStoreDownloadProduct"]
-        guard let raw = value as? String, let components = URLComponents(string: raw),
-              components.scheme == "https", components.host == "downloaddispatch.itunes.apple.com",
-              components.percentEncodedPath == entPath,
-              components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
-              components.port == nil || components.port == 443
-        else { return nil }
-        return components.url
-    }
-
-    static func entRequest(endpoint: URL, appID: Int64, guid: String, dsid: String,
-                           store: String, token: String, version: String, blob: String) throws -> URLRequest {
-        guard entEndpoint(in: ["volumeStoreDownloadProduct": endpoint.absoluteString]) != nil,
-              guid.count == 12, guid.allSatisfy(\.isHexDigit), !version.isEmpty, !blob.isEmpty
-        else { throw StoreDownloadError.invalidPackage }
-        var hardware: [UInt8] = []
-        var index = guid.startIndex
-        while index < guid.endIndex {
-            let end = guid.index(index, offsetBy: 2)
-            guard let byte = UInt8(guid[index ..< end], radix: 16) else { throw StoreDownloadError.invalidPackage }
-            hardware.append(byte)
-            index = end
-        }
-        var url = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
-        url.queryItems = [URLQueryItem(name: "guid", value: guid)]
-        var request = URLRequest(url: url.url!)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue(StoreProtocol.userAgent, forHTTPHeaderField: "User-Agent")
-        request.setValue(StoreProtocol.storefrontIdentifier(store) + "-1", forHTTPHeaderField: "X-Apple-Store-Front")
-        request.setValue(token, forHTTPHeaderField: "X-Token")
-        request.setValue(dsid, forHTTPHeaderField: "iCloud-DSID")
-        request.setValue(dsid, forHTTPHeaderField: "X-Dsid")
-        request.httpBody = try PropertyListSerialization.data(fromPropertyList: [
-            "creditDisplay": "", "guid": guid, "kbsync": blob, "salableAdamId": String(appID),
-            "serialNumber": Data([0x54, 0xc8, 0xb0, 0xa9, 0x88] + Array(hardware.dropFirst(2))).base64EncodedString(),
-            "externalVersionId": version,
-        ], format: .xml, options: 0)
-        return request
-    }
-
-    /// Only a rejected cached blob permits one regeneration; fresh failures and
-    /// explicit account/license verdicts never trigger signing or login loops.
-    static func preferredDownload(cached: String?, generate: () async throws -> String,
-                                  invalidate: (String) async -> Void,
-                                  fetch: (String) async throws -> [String: Any]) async throws -> [String: Any] {
-        if let cached {
-            do { return try await fetch(cached) }
-            catch StoreDownloadError.serviceResponse(403, "ent/download") {
-                try Task.checkCancellation()
-                await invalidate(cached)
-            }
-        }
-        try Task.checkCancellation()
-        let fresh = try await generate()
-        try Task.checkCancellation()
-        return try await fetch(fresh)
-    }
-
-    static func validateEntResponse(_ response: [String: Any], appID: Int64,
-                                    bundleID: String, version: String) throws {
-        let item = try packageItem(response, bundleID: bundleID, version: version)
-        guard let list = response["songList"] as? [Any], list.count == 1,
-              let metadata = item["metadata"] as? [String: Any],
-              StoreProtocol.string(metadata["itemId"]) == String(appID),
-              metadata["softwareVersionBundleId"] as? String == bundleID,
-              StoreProtocol.string(metadata["softwareVersionExternalIdentifier"]) == version,
-              let asset = item["URL"] as? String, !asset.isEmpty
-        else { throw StoreDownloadError.invalidPackage }
-    }
     /// Follow ipatool: let Apple's generic host route a session without an assigned pod.
     /// A guessed p25 pod can be unrelated to the account's actual store session.
     static func storeHost(pod: String?) throws -> String {
@@ -292,14 +204,14 @@ enum StoreDownloadProtocol {
         return response["songList"] == nil ? "missing-songList" : nil
     }
 
-    /// Each endpoint is attempted at most once. A failed catalog lookup must not turn into an
-    /// unpinned redownload, and historical requests must keep their version ID.
+    /// Each endpoint is attempted at most once with the same version ID.
     static func fetchWithFallback(
-        version: String?,
-        fetch: (Endpoint, String?) async throws -> [String: Any],
-        resolveVersion: () async throws -> String,
+        version: String,
+        fetch: (Endpoint, String) async throws -> [String: Any],
         onFallback: (String) -> Void,
     ) async throws -> [String: Any] {
+        guard !version.isEmpty else { throw StoreDownloadError.catalogUnavailable }
+        try Task.checkCancellation()
         let reason: String
         do {
             let primary = try await fetch(.volumeStore, version)
@@ -308,18 +220,14 @@ enum StoreDownloadProtocol {
         } catch StoreDownloadError.deviceVerificationRequired {
             reason = "device-verification"
         }
+        try Task.checkCancellation()
         onFallback(reason)
-        let resolved: String = if let version, !version.isEmpty {
-            version
-        } else {
-            try await resolveVersion()
-        }
-        guard !resolved.isEmpty else { throw StoreDownloadError.catalogUnavailable }
         do {
-            return try await fetch(.redownload, resolved)
+            return try await fetch(.redownload, version)
         } catch StoreDownloadError.emptyResponse(500) {
+            try Task.checkCancellation()
             onFallback("empty-redownload-http500")
-            return try await fetch(.update, resolved)
+            return try await fetch(.update, version)
         }
     }
 

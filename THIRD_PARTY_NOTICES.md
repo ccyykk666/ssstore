@@ -2,7 +2,7 @@
 
 The 2026-11-09 store compatibility updates reference MIT-licensed [ipatool](https://github.com/majd/ipatool), Copyright (c) 2021 Majd Alfhaily. Applied behavior changes and upstream commits are documented in `docs/UPSTREAM_REVIEW_2026-11-09.md`; the desktop emulator and its Apple framework assets are not bundled.
 
-The public Apple catalog query design (`mdm-lockup` lookup and external version ID) was researched from [AssppWeb](https://github.com/ccyykk666/AssppWeb). AssppWeb is also used for the local WebKit kbsync runtime described below; the earlier statement that it was only a research reference is no longer accurate.
+The public Apple catalog query design (`mdm-lockup` lookup and external version ID) was researched from [AssppWeb](https://github.com/ccyykk666/AssppWeb).
 
 The device transport links the published **idevice v0.1.68** Apple XCFramework from [jkcoxson/idevice](https://github.com/jkcoxson/idevice). The Rust `idevice` crate declares MIT licensing in its [package metadata](https://github.com/jkcoxson/idevice/blob/v0.1.68/idevice/Cargo.toml). Its distributed static binary also contains transitive dependencies; consult the upstream repository and release for their applicable license terms before distributing a finished build.
 
@@ -25,23 +25,9 @@ The App Store account, search, historical version, download, IPA management and 
 
 Local adaptations: shared ssstore launch and storage bootstrap, integration tabs and links from installed-app details, embedded store settings, a download navigation callback, and dismissible preview/share sheets. Upstream standalone launch, welcome UI, branding assets and macOS-only device management are excluded from the iOS target.
 
-## AssppWeb and local kbsync runtime
+## AssppWeb
 
-The build uses AssppWeb commit `dda77c915e9b61469ca7b4995c7515a6eb0e3115` from <https://github.com/ccyykk666/AssppWeb>, pinned by file hashes in `scripts/kbsync-manifest.json`. The TypeScript engine and adapters are modified for ssstore's bundled WebKit page and worker. AssppWeb's MIT license, copyright (c) 2025 Lakr233 with his friends, is preserved in `Vendor/AssppWeb/LICENSE` and bundled as `AssppWebLicense.txt`.
-
-AssppWeb's MIT license does **not** replace the licenses of the following bundled dependencies or Apple binaries.
-
-### Unicorn / QEMU
-
-The runtime uses a patched Unicorn 2.1.4 WebAssembly interpreter. Upstream: <https://github.com/unicorn-engine/unicorn/tree/2.1.4>. Unicorn declares GPLv2 licensing and contains components with additional notices, including LGPL and GLib notices. The build copies `COPYING`, `COPYING.LGPL2`, `COPYING_GLIB`, the AssppWeb patch and build script into `KBSyncRuntime/sources`.
-
-The current script does **not** include the complete Unicorn source tree: copying the AssppWeb adapter, patch and build script alone is not a complete corresponding-source distribution. This must be resolved, together with the license terms of the combined distribution, before treating a released IPA as license-compliant. Adding an attribution or an MIT license to ssstore alone does not resolve this.
-
-### Apple runtime resources
-
-`scripts/prepare-kbsync.py` extracts CommerceKit, CommerceCore, CoreFP, CoreFP.icxs and storeagent from an Apple OS X 10.9 update and bundles selected architecture slices in the IPA. These files are not committed to the Git source tree. They remain Apple software; publicly downloadable files are not automatically licensed for redistribution.
-
-No permission to redistribute those Apple components is granted by Asspp, AssppWeb, this repository or this notice. Review the applicable [Apple software license](https://www.apple.com/legal/sla/docs/OSX109.pdf) before distributing a build containing them.
+The AssppWeb MIT license, copyright (c) 2025 Lakr233 with his friends, is preserved in `Vendor/AssppWeb/LICENSE` and bundled as `AssppWebLicense.txt`. Versions through build 92 included a local WebKit kbsync runtime with its own notices. Build 93 uses the compatibility download endpoints and omits the local interpreter and OS X runtime assets.
 
 ## Public localhost TLS fixture
 
