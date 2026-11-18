@@ -16,7 +16,6 @@ final class AppModel: ObservableObject {
     @Published var scannedAt: Date?
     @Published var inventoryOrigin = "尚未读取"
     @Published var hasPairing = false
-    @Published var iconRevision = 0
     @Published var scanWarning = ""
     @Published var queryWarning = ""
     @Published private(set) var ignoredApps: IgnoredApplications
@@ -110,10 +109,7 @@ final class AppModel: ObservableObject {
                                     catch { self.message = error.localizedDescription }
                                 }
                             }, progress: { text in
-                                DispatchQueue.main.async {
-                                    self.activity = text
-                                    self.iconRevision += 1
-                                }
+                                DispatchQueue.main.async { self.activity = text }
                             }, warning: { text in
                                 DispatchQueue.main.async {
                                     self.scanWarning += (self.scanWarning.isEmpty ? "" : "\n") + text

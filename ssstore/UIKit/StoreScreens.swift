@@ -3,7 +3,6 @@ import Combine
 import Observation
 import ApplePackage
 import UpdateCore
-import Kingfisher
 import QuickLook
 import UniformTypeIdentifiers
 import ZIPFoundation
@@ -37,7 +36,7 @@ final class NativeProductHeaderCell: UITableViewCell {
     func update(_ row: NativeRow) {
         name.text = row.title; price.text = row.badge; seller.text = row.detail
         price.isHidden = row.badge?.isEmpty != false; seller.isHidden = row.detail.isEmpty
-        let request = row.icon.map { NativeIconRequest(url: $0, size: 52, scale: max(1, traitCollection.displayScale), revision: row.iconRevision) }
+        let request = row.icon.map { NativeIconRequest(url: $0, size: 52, scale: max(1, traitCollection.displayScale)) }
         icon.image = iconState.update(request, load: NativeIconLoading.load) { [weak self] image in self?.icon.image = image } ?? UIImage(systemName: "app")
     }
 }

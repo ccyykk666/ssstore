@@ -2,7 +2,6 @@ import ApplePackage
 import Foundation
 import Logging
 import Kingfisher
-import UIKit
 
 let logger = Logger(label: "dev.personal.ssstore.store")
 let documentsDirectory: URL = {
@@ -20,7 +19,6 @@ let temporaryDirectory: URL = {
 @MainActor
 enum StoreRuntime {
     private static var prepared = false
-    private static var memoryWarningObserver: NSObjectProtocol?
 
     static func prepare() {
         guard !prepared else { return }
@@ -32,9 +30,6 @@ enum StoreRuntime {
         images.keepWhenEnteringBackground = false
         ImageCache.default.memoryStorage.config = images
         URLCache.shared.memoryCapacity = min(URLCache.shared.memoryCapacity, 4 * 1024 * 1024)
-        memoryWarningObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in releaseTransientMemory() }
-        }
         LoggingSystem.bootstrap { LogManagerHandler(label: $0) }
         APLogger.verbose = false
         APLogger.logger = Logger(label: "dev.personal.ssstore.applepackage")

@@ -203,8 +203,8 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
             if !condition { SheetTrace.shared.mark("list-regression", status: "failed", detail: message) }
             return condition
         }
-        let first = NativeIconRequest(url: URL(string: "https://example.com/a.png")!, size: 46, scale: 3, revision: 0)
-        let next = NativeIconRequest(url: URL(string: "https://example.com/b.png")!, size: 46, scale: 3, revision: 0)
+        let first = NativeIconRequest(url: URL(string: "https://example.com/a.png")!, size: 46, scale: 3)
+        let next = NativeIconRequest(url: URL(string: "https://example.com/b.png")!, size: 46, scale: 3)
         for _ in 0..<50 { _ = state.update(first, load: loader) { _ in delivered += 1 } }
         guard require(completions.count == 1 && cancellations == 0, "Progress refresh restarted an in-flight icon") else { return false }
         _ = state.update(next, load: loader) { _ in delivered += 1 }
@@ -226,9 +226,6 @@ final class ProbeScene: UIResponder, UIWindowSceneDelegate {
         completions[3](nil)
         _ = state.update(first, load: loader) { _ in }
         guard require(completions.count == 5, "Failed request could not be retried") else { return false }
-        let revised = NativeIconRequest(url: first.url, size: 46, scale: 3, revision: 1)
-        _ = state.update(revised, load: loader) { _ in }
-        guard require(completions.count == 6, "Icon revision did not invalidate pending request") else { return false }
         state.reset()
         let cell = NativeCell(style: .subtitle, reuseIdentifier: "test")
         var configuration = cell.defaultContentConfiguration(); configuration.image = loaded; cell.contentConfiguration = configuration

@@ -3,7 +3,6 @@ import Combine
 import Observation
 import ApplePackage
 import UpdateCore
-import Kingfisher
 import QuickLook
 import UniformTypeIdentifiers
 import ZIPFoundation

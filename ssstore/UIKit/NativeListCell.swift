@@ -4,7 +4,6 @@ struct NativeIconRequest: Equatable, Sendable {
     let url: URL
     let size: CGFloat
     let scale: CGFloat
-    let revision: Int
 }
 
 /// Keeps one display-sized image/request. Progress and text changes do not
@@ -52,10 +51,8 @@ final class NativeCell: UITableViewCell {
         accessoryView?.sizeToFit(); super.layoutSubviews()
     }
     override func prepareForReuse() {
-        super.prepareForReuse(); releaseIcon(); progressFill.reset()
-    }
-    func releaseIcon() {
-        iconState.reset()
+        super.prepareForReuse()
+        iconState.reset(); progressFill.reset()
         if var configuration = contentConfiguration as? UIListContentConfiguration {
             configuration.image = nil; contentConfiguration = configuration
         }

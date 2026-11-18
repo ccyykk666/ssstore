@@ -37,7 +37,6 @@ struct NativeRow {
     var deleteTitle = "删除"
     var badge: String? = nil
     var metrics: [Int]? = nil
-    var iconRevision = 0
     var accessoryAction: UIAction?
     var metricActions: [Int: () -> Void] = [:]
     var compact = false
@@ -48,7 +47,7 @@ struct NativeRow {
 
     func hasSameContent(as other: NativeRow) -> Bool {
         title == other.title && detail == other.detail && icon == other.icon && color == other.color &&
-        badge == other.badge && metrics == other.metrics && iconRevision == other.iconRevision && compact == other.compact &&
+        badge == other.badge && metrics == other.metrics && compact == other.compact &&
         accessoryAction?.title == other.accessoryAction?.title && accessoryAction?.attributes == other.accessoryAction?.attributes &&
         isDescription == other.isDescription && productHeader == other.productHeader &&
         isDownload == other.isDownload && progress == other.progress &&
@@ -361,14 +360,16 @@ class NativePage: UITableViewController, NativeSheetContent {
         let iconSize: CGFloat = row.compact ? 46 : 52
         config.imageProperties.maximumSize = CGSize(width: iconSize, height: iconSize)
         config.imageProperties.cornerRadius = row.compact ? 10 : 11
-        if row.compact {
+        if row.compact || row.icon != nil {
             config.imageProperties.reservedLayoutSize = CGSize(width: iconSize, height: iconSize)
+        }
+        if row.compact {
             config.image = UIImage(systemName: "app")
             config.textProperties.font = .preferredFont(forTextStyle: .callout)
             config.secondaryTextProperties.font = .preferredFont(forTextStyle: .footnote)
             config.directionalLayoutMargins.top = 10; config.directionalLayoutMargins.bottom = 10
         }
-        let request = row.icon.map { NativeIconRequest(url: $0, size: iconSize, scale: max(1, traitCollection.displayScale), revision: row.iconRevision) }
+        let request = row.icon.map { NativeIconRequest(url: $0, size: iconSize, scale: max(1, traitCollection.displayScale)) }
         let image = cell.iconState.update(request, load: NativeIconLoading.load) { [weak cell] image in
             guard let cell, var current = cell.contentConfiguration as? UIListContentConfiguration else { return }
             UIView.performWithoutAnimation {
@@ -396,9 +397,6 @@ class NativePage: UITableViewController, NativeSheetContent {
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         sections[indexPath.section].rows[indexPath.row].action?()
-    }
-    override func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        if !tableView.visibleCells.contains(where: { $0 === cell }) { (cell as? NativeCell)?.releaseIcon() }
     }
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         let row = sections[indexPath.section].rows[indexPath.row]

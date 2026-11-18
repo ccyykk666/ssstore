@@ -3,7 +3,6 @@ import Combine
 import Observation
 import ApplePackage
 import UpdateCore
-import Kingfisher
 import QuickLook
 import UniformTypeIdentifiers
 import ZIPFoundation
@@ -65,7 +64,7 @@ final class NativeApps: NativeSearchPage {
             let status = record.status(country: model.country)
             let update = matched && (status == .different || status == .update)
             let tag = update ? "新版本" : (matched && status == .unknown ? "待核对" : "")
-            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag, iconRevision: model.iconRevision, compact: true)
+            return NativeRow(title: record.installed.name, detail: "本机 \(record.displayedVersion(country: model.country) ?? "未知") · 商店 \(record.release.flatMap { $0.matches(scope: self.model.country) ? $0.version : nil } ?? "—")" + (matched && record.error != nil ? "\n查询失败" : ""), icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL, action: { [weak self] in guard let self else { return }; push(NativeAppDetail(model, id: record.id)) }, delete: { [weak self] in self?.model.ignoreApp(record.id) }, deleteTitle: "忽略", badge: tag.isEmpty ? nil : tag, compact: true)
         }
         return [NativeSection(rows: summary), NativeSection(title: "共\(filtered.count)个应用", rows: rows.isEmpty ? [NativeRow(title: "暂无匹配应用")] : rows)]
     }
@@ -81,7 +80,7 @@ final class NativeAppDetail: NativePage {
         let query = UIAction(title: "查询", attributes: model.busy ? .disabled : []) { [weak self] _ in
             guard let self else { return }; model.checkUpdates(only: id)
         }
-        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed), iconRevision: model.iconRevision, accessoryAction: query), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
+        var fields = [NativeRow(title: record.installed.name, icon: model.localIconURL(for: record.installed), accessoryAction: query), NativeRow(title: "本机版本", detail: record.displayedVersion(country: model.country) ?? "未知")]
         if let original = record.installed.version, original != record.displayedVersion(country: model.country) { fields.append(NativeRow(title: "原始版本", detail: original)) }
         fields += [NativeRow(title: "构建号", detail: record.installed.build ?? "未提供"), NativeRow(title: "构建 SDK", detail: record.installed.buildSDKDescription ?? "未提供"), NativeRow(title: "Bundle ID", detail: record.id)]
         var store: [NativeRow] = []
