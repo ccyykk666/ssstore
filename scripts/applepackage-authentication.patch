@@ -33,7 +33,7 @@
      private let signer: SAPSigner
      private let deviceIdentifier: String
      private var endpoint: URL
-@@ -27,12 +46,31 @@
+@@ -27,12 +46,30 @@
      private var authenticating = false
 
      /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
@@ -55,30 +55,28 @@
 +
 +    private static func fetchAuthenticationBag(traceID: UUID) async throws -> Bag.BagOutput {
 +        let trace = traceID.uuidString.prefix(8)
-+        let clock = ContinuousClock()
-+        let start = clock.now
++        let start = ProcessInfo.processInfo.systemUptime
 +        APLogger.info("auth [\(trace)] bag request")
 +        do {
 +            let bag = try await Bag.fetchBag(redirectConfiguration: .disallow, traceID: traceID)
-+            APLogger.info("auth [\(trace)] bag response route=\(AuthenticationRoute.logAddress(bag.authEndpoint)) elapsed=\(clock.now - start)")
++            APLogger.info("auth [\(trace)] bag response route=\(AuthenticationRoute.logAddress(bag.authEndpoint)) elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - start) * 1000))")
 +            return bag
 +        } catch {
-+            APLogger.error("auth [\(trace)] bag failed type=\(String(describing: type(of: error))) code=\((error as NSError).code) elapsed=\(clock.now - start)")
++            APLogger.error("auth [\(trace)] bag failed type=\(String(describing: type(of: error))) code=\((error as NSError).code) elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - start) * 1000))")
 +            throw error
 +        }
      }
 
      public static func authenticate(email: String, password: String, code: String = "", cookies: [Cookie] = []) async throws -> Account {
-@@ -48,27 +86,42 @@
+@@ -48,27 +85,41 @@
          defer { _ = client.shutdown() }
          var retried = false
          var redirects = 0
 +        let trace = traceID.uuidString.prefix(8)
-+        let clock = ContinuousClock()
          for _ in 0 ..< 5 {
 +            requestNumber += 1
 +            let number = requestNumber
-+            let start = clock.now
++            let start = ProcessInfo.processInfo.systemUptime
 +            let route = AuthenticationRoute.logAddress(endpoint)
 +            APLogger.info("auth [\(trace)] request=\(number) signing phase=\(code.isEmpty ? "credentials" : "verification-code") route=\(route)")
              let request = try await Self.makeRequest(
@@ -87,16 +85,16 @@
              )
              let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
 -            let response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
-+            APLogger.info("auth [\(trace)] request=\(number) sending cookiePresent=\(request.headers.first(name: "cookie") != nil) signElapsed=\(clock.now - start)")
++            APLogger.info("auth [\(trace)] request=\(number) sending cookiePresent=\(request.headers.first(name: "cookie") != nil) signElapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - start) * 1000))")
 +            let response: HTTPClient.Response
 +            do {
 +                response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
 +            } catch {
-+                APLogger.error("auth [\(trace)] request=\(number) transport failed type=\(String(describing: type(of: error))) code=\((error as NSError).code) elapsed=\(clock.now - start)")
++                APLogger.error("auth [\(trace)] request=\(number) transport failed type=\(String(describing: type(of: error))) code=\((error as NSError).code) elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - start) * 1000))")
 +                throw error
 +            }
 +            let headers = response.headers
-+            APLogger.info("auth [\(trace)] request=\(number) HTTP=\(response.status.code) route=\(route) bodyBytes=\(response.body?.readableBytes ?? 0) elapsed=\(clock.now - start) locationPresent=\(headers.first(name: "location") != nil) retryAfterPresent=\(headers.first(name: "retry-after") != nil) setCookieCount=\(headers["set-cookie"].count) challengePresent=\(headers.first(name: "www-authenticate") != nil || headers.first(name: "x-apple-amd-action") != nil)")
++            APLogger.info("auth [\(trace)] request=\(number) HTTP=\(response.status.code) route=\(route) bodyBytes=\(response.body?.readableBytes ?? 0) elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - start) * 1000)) locationPresent=\(headers.first(name: "location") != nil) retryAfterPresent=\(headers.first(name: "retry-after") != nil) setCookieCount=\(headers["set-cookie"].count) challengePresent=\(headers.first(name: "www-authenticate") != nil || headers.first(name: "x-apple-amd-action") != nil)")
              let result = try parseResponse(response, email: email, password: password, code: code)
              switch result {
              case let .success(account): return account
@@ -117,7 +115,7 @@
              case let .failure(message): try ensureFailed("\(Strings.authFailed): \(message)")
              }
          }
-@@ -87,7 +140,8 @@
+@@ -87,7 +138,8 @@
      }
 
      private static func createInitialRequestEndpoint(baseURL: URL, deviceIdentifier: String) throws -> URL {
@@ -127,7 +125,7 @@
              try ensureFailed("\(Strings.invalidAuthEndpoint): \(baseURL)")
          }
          var query = comps.queryItems ?? []
-@@ -107,7 +161,7 @@
+@@ -107,7 +159,7 @@
          ]
          let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
          var headers: [(String, String)] = [("User-Agent", Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
@@ -136,7 +134,7 @@
              headers.append(item)
          }
          _ = try approvedEndpoint(endpoint)
-@@ -117,12 +171,46 @@
+@@ -117,12 +169,46 @@
          return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
      }
 
@@ -184,7 +182,7 @@
 
          let readStoreFrontValue = response.headers["x-set-apple-store-front"].filter { !$0.isEmpty }.compactMap {
              $0.components(separatedBy: "-").first
-@@ -138,19 +226,37 @@
+@@ -138,19 +224,37 @@
 
          let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
          if redirectStatuses.contains(response.status) {
@@ -256,28 +254,27 @@
              status: response.status.code,
 --- a/Sources/ApplePackage/SAP/SAPSigner+Connect.swift
 +++ b/Sources/ApplePackage/SAP/SAPSigner+Connect.swift
-@@ -3,10 +3,14 @@
+@@ -3,10 +3,13 @@
 
  public extension SAPSigner {
      /// Establish protocol-200 state using Apple's certificate and two-round setup service.
 -    static func connect() async throws -> SAPSigner {
 +    static func connect(traceID: UUID? = nil) async throws -> SAPSigner {
 +        let trace = traceID.map { $0.uuidString.prefix(8) }
-+        let clock = ContinuousClock()
          let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
          defer { _ = client.shutdown() }
          func exchange(url: String, payload: Data? = nil, key: String) async throws -> Data {
-+            let start = clock.now
++            let start = ProcessInfo.processInfo.systemUptime
 +            if let trace { APLogger.info("auth [\(trace)] SAP request route=\(url)") }
              let body = try payload.map {
                  try PropertyListSerialization.data(fromPropertyList: ["sign-sap-setup-buffer": $0], format: .xml, options: 0)
              }
-@@ -16,6 +20,9 @@
+@@ -16,6 +19,9 @@
              )
              let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
              let response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
 +            if let trace {
-+                APLogger.info("auth [\(trace)] SAP response route=\(url) HTTP=\(response.status.code) bodyBytes=\(response.body?.readableBytes ?? 0) elapsed=\(clock.now - start)")
++                APLogger.info("auth [\(trace)] SAP response route=\(url) HTTP=\(response.status.code) bodyBytes=\(response.body?.readableBytes ?? 0) elapsedMs=\(Int((ProcessInfo.processInfo.systemUptime - start) * 1000))")
 +            }
              guard response.status == .ok, let buffer = response.body, buffer.readableBytes <= 2 * 1024 * 1024,
                    let plist = try PropertyListSerialization.propertyList(from: Data(buffer.readableBytesView), format: nil) as? [String: Any],
