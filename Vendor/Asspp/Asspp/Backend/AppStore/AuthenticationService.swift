@@ -35,9 +35,10 @@ extension AppStore {
         if original.account.passwordToken != expectedToken { return }
         if let pending = sessionRefreshes[id] { return try await pending.value }
         let pending = Task { [self] in
+            let session: ApplePackage.Authenticator
             let refreshed: ApplePackage.Account
             do {
-                let session = try await makeAuthenticationSession(cookies: original.account.cookie)
+                session = try await makeAuthenticationSession(cookies: original.account.cookie)
                 refreshed = try await authenticateAccount(email: original.id, password: original.account.password, code: "", using: session)
             } catch is CancellationError {
                 throw CancellationError()
@@ -49,7 +50,14 @@ extension AppStore {
             try Task.checkCancellation()
             guard let current = accounts.first(where: { $0.id == id }) else { throw AuthenticationError.accountNotFound }
             guard current.account.passwordToken == expectedToken else { return }
-            _ = try saveRefreshedAccount(refreshed, replacing: original)
+            let trace = session.traceID.uuidString.prefix(8)
+            do {
+                _ = try saveRefreshedAccount(refreshed, replacing: original)
+                logger.info("auth [\(trace)] automatic refresh saved")
+            } catch {
+                logger.error("auth [\(trace)] automatic refresh save failed: \(StoreDiagnostics.errorSummary(error))")
+                throw error
+            }
         }
         sessionRefreshes[id] = pending
         defer { sessionRefreshes.removeValue(forKey: id) }
@@ -60,26 +68,28 @@ extension AppStore {
     func authenticate(email: String, password: String, code: String, using session: ApplePackage.Authenticator,
                       replacing original: UserAccount? = nil) async throws -> UserAccount {
         let operation = original == nil ? "authentication" : "account rotation"
-        logger.info("starting \(operation) for user")
+        let trace = session.traceID.uuidString.prefix(8)
+        logger.info("auth [\(trace)] starting \(operation)")
         do {
             let appleAccount = try await authenticateAccount(email: email, password: password, code: code, using: session)
             try Task.checkCancellation()
+            logger.info("auth [\(trace)] saving account")
             let userAccount: UserAccount
             if let original {
                 userAccount = try saveRefreshedAccount(appleAccount, replacing: original)
             } else {
                 userAccount = try save(email: email, account: appleAccount)
             }
-            logger.info("\(operation) successful for user")
+            logger.info("auth [\(trace)] \(operation) successful")
             return userAccount
         } catch ApplePackage.AuthenticationError.verificationCodeRequired {
-            logger.info("\(operation) requires a verification code")
+            logger.info("auth [\(trace)] \(operation) requires a verification code")
             throw ApplePackage.AuthenticationError.verificationCodeRequired
         } catch let error as ApplePackage.AuthenticationRedirectError {
-            logger.error("\(operation) could not follow Apple redirect, HTTP=\(error.statusCode) hasLocation=\(error.hasLocation)")
+            logger.error("auth [\(trace)] \(operation) could not follow Apple redirect, HTTP=\(error.statusCode) hasLocation=\(error.hasLocation)")
             throw error
         } catch {
-            logger.error("\(operation) failed for user: \(StoreDiagnostics.authenticationErrorSummary(error))")
+            logger.error("auth [\(trace)] \(operation) failed: \(StoreDiagnostics.authenticationErrorSummary(error))")
             throw error
         }
     }
@@ -91,19 +101,20 @@ extension AppStore {
         defer { activeAuthenticationAccounts.remove(key) }
         let clock = ContinuousClock()
         let start = clock.now
-        defer { logger.debug("Apple authentication elapsed=\(clock.now - start)") }
+        let trace = session.traceID.uuidString.prefix(8)
+        defer { logger.debug("auth [\(trace)] authentication elapsed=\(clock.now - start)") }
         do {
             return try await StoreAuthenticationRetry.run(response: { error in
                 guard let response = error as? ApplePackage.AuthenticationHTTPError else { return nil }
                 return (response.statusCode, response.retryAfter)
             }, wait: { delay in
-                logger.info("Apple authentication retry scheduled, delayMs=\(delay)")
+                logger.info("auth [\(trace)] retry scheduled delayMs=\(delay)")
                 try await Task.sleep(for: .milliseconds(delay))
             }) {
                 try await session.authenticate(email: email, password: password, code: code)
             }
         } catch let error as ApplePackage.AuthenticationHTTPError {
-            logger.warning("Apple authentication temporarily unavailable, HTTP=\(error.statusCode)")
+            logger.warning("auth [\(trace)] authentication temporarily unavailable HTTP=\(error.statusCode)")
             throw AuthenticationError.serviceTemporarilyUnavailable(error.statusCode)
         }
     }
@@ -111,8 +122,16 @@ extension AppStore {
     func makeAuthenticationSession(cookies: [ApplePackage.Cookie] = []) async throws -> ApplePackage.Authenticator {
         let clock = ContinuousClock()
         let start = clock.now
-        defer { logger.debug("Apple authentication setup elapsed=\(clock.now - start)") }
-        return try await ApplePackage.Authenticator(cookies: cookies)
+        let traceID = UUID()
+        let trace = traceID.uuidString.prefix(8)
+        logger.info("auth [\(trace)] setup started")
+        defer { logger.debug("auth [\(trace)] setup elapsed=\(clock.now - start)") }
+        do {
+            return try await ApplePackage.Authenticator(cookies: cookies, traceID: traceID)
+        } catch {
+            logger.error("auth [\(trace)] setup failed: \(StoreDiagnostics.authenticationErrorSummary(error))")
+            throw error
+        }
     }
 
     private func saveRefreshedAccount(_ account: ApplePackage.Account, replacing original: UserAccount) throws -> UserAccount {

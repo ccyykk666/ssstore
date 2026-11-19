@@ -337,6 +337,9 @@ struct DownloadProtocolChecks {
         let query = "routing=A%2FB%2B1&guid=fixture"
         let pod = AuthenticationRoute.normalized("https://p30-buy.itunes.apple.com\(legacy)?\(query)", relativeTo: initial)
         precondition(pod?.absoluteString == "https://p30-buy.itunes.apple.com\(legacy)/?\(query)")
+        precondition(pod.map(AuthenticationRoute.logAddress) == "p30-buy.itunes.apple.com\(legacy)/")
+        let unsafe = URL(string: "https://user:secret@buy.itunes.apple.com\(legacy)?token=fixture")!
+        precondition(AuthenticationRoute.logAddress(unsafe) == "<redacted>")
         let relative = AuthenticationRoute.normalized("\(legacy)?\(query)", relativeTo: initial)
         precondition(relative?.absoluteString == "https://buy.itunes.apple.com\(legacy)/?\(query)")
         let native = AuthenticationRoute.normalized("https://auth.itunes.apple.com/auth/v1/native?\(query)")

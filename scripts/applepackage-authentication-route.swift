@@ -1,6 +1,13 @@
 import Foundation
 
 enum AuthenticationRoute {
+    static func logAddress(_ url: URL) -> String {
+        guard normalized(url.absoluteString) != nil,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let host = components.host else { return "<redacted>" }
+        return host + components.percentEncodedPath
+    }
+
     static func normalized(_ value: String, relativeTo base: URL? = nil) -> URL? {
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, let resolved = URL(string: value, relativeTo: base)?.absoluteURL,

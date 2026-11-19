@@ -24,24 +24,84 @@
 
  public actor Authenticator {
      private enum LoginResponse {
-@@ -29,9 +46,11 @@
+@@ -18,6 +35,8 @@
+         case failure(String)
+     }
+
++    public nonisolated let traceID: UUID
++    private var requestNumber = 0
+     private let signer: SAPSigner
+     private let deviceIdentifier: String
+     private var endpoint: URL
+@@ -27,12 +46,31 @@
+     private var authenticating = false
+
      /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
-     public init(cookies: [Cookie] = []) async throws {
+-    public init(cookies: [Cookie] = []) async throws {
++    public init(cookies: [Cookie] = [], traceID: UUID = UUID()) async throws {
++        self.traceID = traceID
          deviceIdentifier = Configuration.deviceIdentifier
 -        let bag = try await Bag.fetchBag(redirectConfiguration: .disallow)
 -        endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
 -        signer = try await SAPSigner.connect()
-+        async let bag = Bag.fetchBag(redirectConfiguration: .disallow)
-+        async let preparedSigner = SAPSigner.connect()
++        async let bag = Self.fetchAuthenticationBag(traceID: traceID)
++        async let preparedSigner = SAPSigner.connect(traceID: traceID)
 +        let routing = try await bag
 +        endpoint = try Self.createInitialRequestEndpoint(baseURL: routing.authEndpoint, deviceIdentifier: deviceIdentifier)
 +        signer = try await preparedSigner
          self.cookies = cookies
++        APLogger.info("auth [\(traceID.uuidString.prefix(8))] setup ready route=\(AuthenticationRoute.logAddress(endpoint)) storedCookies=\(cookies.count)")
++    }
++
++    private static func fetchAuthenticationBag(traceID: UUID) async throws -> Bag.BagOutput {
++        let trace = traceID.uuidString.prefix(8)
++        let clock = ContinuousClock()
++        let start = clock.now
++        APLogger.info("auth [\(trace)] bag request")
++        do {
++            let bag = try await Bag.fetchBag(redirectConfiguration: .disallow, traceID: traceID)
++            APLogger.info("auth [\(trace)] bag response route=\(AuthenticationRoute.logAddress(bag.authEndpoint)) elapsed=\(clock.now - start)")
++            return bag
++        } catch {
++            APLogger.error("auth [\(trace)] bag failed type=\(String(describing: type(of: error))) code=\((error as NSError).code) elapsed=\(clock.now - start)")
++            throw error
++        }
      }
 
-@@ -60,10 +79,7 @@
+     public static func authenticate(email: String, password: String, code: String = "", cookies: [Cookie] = []) async throws -> Account {
+@@ -48,27 +86,42 @@
+         defer { _ = client.shutdown() }
+         var retried = false
+         var redirects = 0
++        let trace = traceID.uuidString.prefix(8)
++        let clock = ContinuousClock()
+         for _ in 0 ..< 5 {
++            requestNumber += 1
++            let number = requestNumber
++            let start = clock.now
++            let route = AuthenticationRoute.logAddress(endpoint)
++            APLogger.info("auth [\(trace)] request=\(number) signing phase=\(code.isEmpty ? "credentials" : "verification-code") route=\(route)")
+             let request = try await Self.makeRequest(
+                 endpoint: endpoint, email: email, password: password, code: code, cookies: cookies, deviceIdentifier: deviceIdentifier,
+                 sapSigner: signer,
+             )
+             let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
+-            let response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
++            APLogger.info("auth [\(trace)] request=\(number) sending cookiePresent=\(request.headers.first(name: "cookie") != nil) signElapsed=\(clock.now - start)")
++            let response: HTTPClient.Response
++            do {
++                response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
++            } catch {
++                APLogger.error("auth [\(trace)] request=\(number) transport failed type=\(String(describing: type(of: error))) code=\((error as NSError).code) elapsed=\(clock.now - start)")
++                throw error
++            }
++            let headers = response.headers
++            APLogger.info("auth [\(trace)] request=\(number) HTTP=\(response.status.code) route=\(route) bodyBytes=\(response.body?.readableBytes ?? 0) elapsed=\(clock.now - start) locationPresent=\(headers.first(name: "location") != nil) retryAfterPresent=\(headers.first(name: "retry-after") != nil) setCookieCount=\(headers["set-cookie"].count) challengePresent=\(headers.first(name: "www-authenticate") != nil || headers.first(name: "x-apple-amd-action") != nil)")
+             let result = try parseResponse(response, email: email, password: password, code: code)
+             switch result {
              case let .success(account): return account
              case let .redirect(url):
++                APLogger.info("auth [\(trace)] request=\(number) redirect target=\(AuthenticationRoute.logAddress(url))")
                  guard redirects < 3 else { try ensureFailed("Authentication redirect limit exceeded.") }
 -                guard let resolved = URL(string: url.relativeString, relativeTo: endpoint)?.absoluteURL else {
 -                    try ensureFailed(Strings.failedToRetrieveRedirect)
@@ -51,7 +111,13 @@
                  redirects += 1
              case .codeRequired: throw AuthenticationError.verificationCodeRequired
              case .retry:
-@@ -87,7 +103,8 @@
+                 guard !retried else { try ensureFailed(Strings.authFailedUnknown) }
+                 retried = true
++                APLogger.info("auth [\(trace)] request=\(number) server requested authentication retry")
+             case let .failure(message): try ensureFailed("\(Strings.authFailed): \(message)")
+             }
+         }
+@@ -87,7 +140,8 @@
      }
 
      private static func createInitialRequestEndpoint(baseURL: URL, deviceIdentifier: String) throws -> URL {
@@ -61,7 +127,7 @@
              try ensureFailed("\(Strings.invalidAuthEndpoint): \(baseURL)")
          }
          var query = comps.queryItems ?? []
-@@ -107,7 +124,7 @@
+@@ -107,7 +161,7 @@
          ]
          let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
          var headers: [(String, String)] = [("User-Agent", Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
@@ -70,7 +136,7 @@
              headers.append(item)
          }
          _ = try approvedEndpoint(endpoint)
-@@ -117,12 +134,46 @@
+@@ -117,12 +171,46 @@
          return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
      }
 
@@ -118,7 +184,7 @@
 
          let readStoreFrontValue = response.headers["x-set-apple-store-front"].filter { !$0.isEmpty }.compactMap {
              $0.components(separatedBy: "-").first
-@@ -138,13 +189,27 @@
+@@ -138,19 +226,37 @@
 
          let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
          if redirectStatuses.contains(response.status) {
@@ -137,7 +203,6 @@
 -        guard response.status == .ok else { return .failure("HTTP \(response.status.code)") }
 +        guard response.status == .ok else {
 +            let status = Int(response.status.code)
-+            APLogger.info("authentication response HTTP=\(status) host=\(endpoint.host ?? "unknown")")
 +            if [204, 404, 503].contains(status),
 +               response.headers.first(name: "www-authenticate") == nil,
 +               response.headers.first(name: "x-apple-amd-action") == nil,
@@ -149,6 +214,17 @@
          guard var body = response.body, body.readableBytes <= 2 * 1024 * 1024, let data = body.readData(length: body.readableBytes) else {
              return .failure("response body is empty (code: \(response.status.code))")
          }
+
+         let listItem = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+         let dic = try (listItem as? [String: Any]).get(Strings.responseNotDictionary)
++        let failure = (dic["failureType"] as? String).flatMap(Int.init).flatMap {
++            (-99_999 ... 99_999).contains($0) ? String($0) : nil
++        }
++        let trace = traceID.uuidString.prefix(8)
++        APLogger.info("auth [\(trace)] request=\(requestNumber) plist failureCode=\(failure ?? "none") accountPresent=\(dic["accountInfo"] != nil) tokenPresent=\(dic["passwordToken"] != nil) dialogPresent=\(dic["dialog"] != nil)")
+
+         if let failureType = dic["failureType"] as? String, failureType.isEmpty, code.isEmpty,
+            let customerMessage = dic["customerMessage"] as? String, customerMessage == "MZFinance.BadLogin.Configurator_message"
 --- a/Sources/ApplePackage/Commands/Bag.swift
 +++ b/Sources/ApplePackage/Commands/Bag.swift
 @@ -9,7 +9,7 @@
@@ -160,3 +236,49 @@
          public var authEndpoint: URL
          public var redownloadEndpoint: URL?
          public var updateEndpoint: URL?
+@@ -19,6 +19,7 @@
+
+     public static func fetchBag(
+         redirectConfiguration: HTTPClient.Configuration.RedirectConfiguration = .follow(max: 8, allowCycles: false),
++        traceID: UUID? = nil,
+     ) async throws -> BagOutput {
+         let deviceIdentifier = Configuration.deviceIdentifier
+
+@@ -49,6 +50,9 @@
+         )
+
+         let response = try await client.execute(request: request).get()
++        if let traceID {
++            APLogger.info("auth [\(traceID.uuidString.prefix(8))] bag HTTP=\(response.status.code) bodyBytes=\(response.body?.readableBytes ?? 0)")
++        }
+
+         APLogger.logResponse(
+             status: response.status.code,
+--- a/Sources/ApplePackage/SAP/SAPSigner+Connect.swift
++++ b/Sources/ApplePackage/SAP/SAPSigner+Connect.swift
+@@ -3,10 +3,14 @@
+
+ public extension SAPSigner {
+     /// Establish protocol-200 state using Apple's certificate and two-round setup service.
+-    static func connect() async throws -> SAPSigner {
++    static func connect(traceID: UUID? = nil) async throws -> SAPSigner {
++        let trace = traceID.map { $0.uuidString.prefix(8) }
++        let clock = ContinuousClock()
+         let client = Configuration.makeHTTPClient(redirectConfiguration: .disallow)
+         defer { _ = client.shutdown() }
+         func exchange(url: String, payload: Data? = nil, key: String) async throws -> Data {
++            let start = clock.now
++            if let trace { APLogger.info("auth [\(trace)] SAP request route=\(url)") }
+             let body = try payload.map {
+                 try PropertyListSerialization.data(fromPropertyList: ["sign-sap-setup-buffer": $0], format: .xml, options: 0)
+             }
+@@ -16,6 +20,9 @@
+             )
+             let accumulator = ResponseAccumulator(request: request, maxBodySize: 2 * 1024 * 1024)
+             let response = try await client.execute(request: request, delegate: accumulator).futureResult.get()
++            if let trace {
++                APLogger.info("auth [\(trace)] SAP response route=\(url) HTTP=\(response.status.code) bodyBytes=\(response.body?.readableBytes ?? 0) elapsed=\(clock.now - start)")
++            }
+             guard response.status == .ok, let buffer = response.body, buffer.readableBytes <= 2 * 1024 * 1024,
+                   let plist = try PropertyListSerialization.propertyList(from: Data(buffer.readableBytesView), format: nil) as? [String: Any],
+                   let data = plist[key] as? Data, !data.isEmpty, data.count <= 1 << 20
