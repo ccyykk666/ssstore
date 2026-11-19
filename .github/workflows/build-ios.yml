@@ -9,6 +9,8 @@ on:
       - 'Vendor/**'
       - 'project.yml'
       - 'scripts/build-ipa.sh'
+      - 'scripts/prepare-applepackage.sh'
+      - 'scripts/applepackage-authentication.patch'
       - 'scripts/prepare-performance-devicekit.py'
       - 'scripts/patches/**'
       - 'scripts/select-ci-tests.py'

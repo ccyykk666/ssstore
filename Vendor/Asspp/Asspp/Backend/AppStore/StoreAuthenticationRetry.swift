@@ -1,26 +1,37 @@
 import Foundation
 
 enum StoreAuthenticationRetry {
-    static func isTemporary(_ error: Error) -> Bool {
-        switch StoreDiagnostics.authenticationHTTPStatus(error) {
-        case 204, 503: true
-        default: false
-        }
-    }
-
     static func run<Value>(
-        wait: (Int64) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
+        response: (Error) -> (status: Int, retryAfter: String?)?,
+        now: () -> Date = Date.init,
+        wait: (Int64) async throws -> Void = { try await Task.sleep(for: .milliseconds($0)) },
         operation: () async throws -> Value
     ) async throws -> Value {
-        for delay in [10, 20] as [Int64] {
+        var remainingWait: Int64 = 10_000
+        for fallback in [2.0, 4.0] {
             try Task.checkCancellation()
             do {
                 return try await operation()
-            } catch where isTemporary(error) {
+            } catch {
+                guard let response = response(error), response.status == 204 || response.status == 503 else { throw error }
+                let seconds = max(1, retryDelay(response.retryAfter, now: now()) ?? fallback)
+                guard seconds <= Double(remainingWait) / 1000 else { throw error }
+                let delay = Int64((seconds * 1000).rounded(.up))
+                remainingWait -= delay
                 try await wait(delay)
             }
         }
         try Task.checkCancellation()
         return try await operation()
+    }
+
+    private static func retryDelay(_ header: String?, now: Date) -> TimeInterval? {
+        guard let value = header?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+        if let seconds = Double(value), seconds.isFinite, seconds >= 0 { return seconds }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+        return formatter.date(from: value).map { max(0, $0.timeIntervalSince(now)) }
     }
 }

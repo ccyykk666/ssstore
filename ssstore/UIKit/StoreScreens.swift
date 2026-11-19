@@ -186,7 +186,7 @@ final class NativeAccountDetail: NativePage {
         run { [self] in
             var session: ApplePackage.Authenticator?
             do {
-                let attempt = try await ApplePackage.Authenticator(cookies: account.account.cookie)
+                let attempt = try await AppStore.this.makeAuthenticationSession(cookies: account.account.cookie)
                 session = attempt
                 _ = try await AppStore.this.authenticate(email: account.id, password: account.account.password,
                     code: "", using: attempt, replacing: account)
@@ -302,7 +302,7 @@ final class NativeAddAccount: NativePage {
             defer { setAuthenticationInProgress(false) }
             do {
                 let session: ApplePackage.Authenticator
-                if let authenticator { session = authenticator } else { session = try await ApplePackage.Authenticator(); authenticator = session }
+                if let authenticator { session = authenticator } else { session = try await AppStore.this.makeAuthenticationSession(); authenticator = session }
                 _ = try await AppStore.this.authenticate(email: emailText, password: secret, code: verificationCode,
                     using: session, replacing: original)
                 password.text = ""

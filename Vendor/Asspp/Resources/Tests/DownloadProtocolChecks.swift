@@ -331,38 +331,57 @@ struct DownloadProtocolChecks {
     }
 
     static func authenticationRetryChecks() async throws {
-        func httpError(_ status: Int) -> NSError {
-            NSError(domain: "fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "authentication failed: HTTP \(status)"])
+        struct Response: Error {
+            let status: Int
+            var retryAfter: String?
         }
+        func response(_ error: Error) -> (Int, String?)? {
+            guard let result = error as? Response else { return nil }
+            return (result.status, result.retryAfter)
+        }
+
         var attempts = 0
         var delays: [Int64] = []
-        let token = try await StoreAuthenticationRetry.run(wait: { delays.append($0) }) {
+        let token = try await StoreAuthenticationRetry.run(response: response, wait: { delays.append($0) }) {
             attempts += 1
-            if attempts == 1 { throw httpError(204) }
-            if attempts == 2 { throw httpError(503) }
+            if attempts == 1 { throw Response(status: 204) }
+            if attempts == 2 { throw Response(status: 503) }
             return "fixture-token"
         }
-        precondition(token == "fixture-token" && attempts == 3 && delays == [10, 20])
+        precondition(token == "fixture-token" && attempts == 3 && delays == [2_000, 4_000])
 
-        for (status, expectedAttempts) in [(204, 3), (503, 3), (401, 1), (429, 1)] {
+        let date = Date(timeIntervalSince1970: 0)
+        attempts = 0
+        delays = []
+        _ = try await StoreAuthenticationRetry.run(response: response, now: { date }, wait: { delays.append($0) }) {
+            attempts += 1
+            if attempts == 1 { throw Response(status: 503, retryAfter: "3") }
+            if attempts == 2 { throw Response(status: 503, retryAfter: "Thu, 01 Jan 1970 00:00:07 GMT") }
+            return true
+        }
+        precondition(attempts == 3 && delays == [3_000, 7_000])
+
+        for (status, retryAfter, expectedAttempts) in [
+            (204, nil, 3), (503, nil, 3), (401, nil, 1), (429, nil, 1), (503, "11", 1), (503, "6", 2),
+        ] as [(Int, String?, Int)] {
             attempts = 0
             do {
-                let _: String = try await StoreAuthenticationRetry.run(wait: { _ in }) {
+                let _: String = try await StoreAuthenticationRetry.run(response: response, wait: { _ in }) {
                     attempts += 1
-                    throw httpError(status)
+                    throw Response(status: status, retryAfter: retryAfter)
                 }
                 fatalError("Authentication returned a token without a successful response")
-            } catch {
-                precondition(StoreDiagnostics.authenticationHTTPStatus(error) == status)
+            } catch let error as Response {
+                precondition(error.status == status)
             }
             precondition(attempts == expectedAttempts)
         }
 
         attempts = 0
         do {
-            let _: String = try await StoreAuthenticationRetry.run(wait: { _ in throw CancellationError() }) {
+            let _: String = try await StoreAuthenticationRetry.run(response: response, wait: { _ in throw CancellationError() }) {
                 attempts += 1
-                throw httpError(503)
+                throw Response(status: 503)
             }
             fatalError("Authentication skipped cancellation")
         } catch is CancellationError {}

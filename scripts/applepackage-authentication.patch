@@ -1,0 +1,77 @@
+--- a/Sources/ApplePackage/Commands/Authenticate.swift
++++ b/Sources/ApplePackage/Commands/Authenticate.swift
+@@ -8,6 +8,13 @@
+ import AsyncHTTPClient
+ import Foundation
+ import NIOHTTP1
++
++public struct AuthenticationHTTPError: LocalizedError {
++    public let statusCode: Int
++    public let retryAfter: String?
++
++    public var errorDescription: String? { "authentication failed: HTTP \(statusCode)" }
++}
+
+ public actor Authenticator {
+     private enum LoginResponse {
+@@ -29,9 +36,11 @@
+     /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
+     public init(cookies: [Cookie] = []) async throws {
+         deviceIdentifier = Configuration.deviceIdentifier
+-        let bag = try await Bag.fetchBag(redirectConfiguration: .disallow)
+-        endpoint = try Self.createInitialRequestEndpoint(baseURL: bag.authEndpoint, deviceIdentifier: deviceIdentifier)
+-        signer = try await SAPSigner.connect()
++        async let bag = Bag.fetchBag(redirectConfiguration: .disallow)
++        async let preparedSigner = SAPSigner.connect()
++        let routing = try await bag
++        endpoint = try Self.createInitialRequestEndpoint(baseURL: routing.authEndpoint, deviceIdentifier: deviceIdentifier)
++        signer = try await preparedSigner
+         self.cookies = cookies
+     }
+
+@@ -117,6 +126,16 @@
+         return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
+     }
+
++    private static func hasAuthenticationVerdict(_ response: HTTPClient.Response) -> Bool {
++        guard let buffer = response.body, buffer.readableBytes > 0 else { return false }
++        guard buffer.readableBytes <= 2 * 1024 * 1024 else { return true }
++        let value = try? PropertyListSerialization.propertyList(from: Data(buffer.readableBytesView), format: nil)
++        guard let dictionary = value as? [String: Any] else { return false }
++        return ["failureType", "customerMessage", "accountInfo", "passwordToken", "dialog"].contains {
++            dictionary[$0] != nil
++        }
++    }
++
+     private func parseResponse(_ response: HTTPClient.Response, email: String, password: String, code: String) throws -> LoginResponse {
+         APLogger.logResponse(
+             status: response.status.code, headers: response.headers.map { ($0.name, $0.value) }, bodySize: response.body?.readableBytes,
+@@ -144,7 +163,16 @@
+             return .redirect(url)
+         }
+
+-        guard response.status == .ok else { return .failure("HTTP \(response.status.code)") }
++        guard response.status == .ok else {
++            let status = Int(response.status.code)
++            if (status == 204 || status == 503),
++               response.headers.first(name: "www-authenticate") == nil,
++               response.headers.first(name: "x-apple-amd-action") == nil,
++               !Self.hasAuthenticationVerdict(response) {
++                throw AuthenticationHTTPError(statusCode: status, retryAfter: response.headers.first(name: "retry-after"))
++            }
++            return .failure("HTTP \(status)")
++        }
+         guard var body = response.body, body.readableBytes <= 2 * 1024 * 1024, let data = body.readData(length: body.readableBytes) else {
+             return .failure("response body is empty (code: \(response.status.code))")
+         }
+--- a/Sources/ApplePackage/Commands/Bag.swift
++++ b/Sources/ApplePackage/Commands/Bag.swift
+@@ -9,7 +9,7 @@
+ import Foundation
+
+ public enum Bag {
+-    public struct BagOutput {
++    public struct BagOutput: Sendable {
+         public var authEndpoint: URL
+         public var redownloadEndpoint: URL?
+         public var updateEndpoint: URL?

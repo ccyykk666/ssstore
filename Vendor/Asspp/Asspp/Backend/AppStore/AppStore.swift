@@ -12,6 +12,7 @@ import Foundation
 @MainActor
 class AppStore {
     @ObservationIgnored var sessionRefreshes: [String: Task<Void, Error>] = [:]
+    @ObservationIgnored var activeAuthenticationAccounts: Set<String> = []
     @ObservationIgnored
     private var _accounts = Persist<[UserAccount]>(
         key: "Accounts",

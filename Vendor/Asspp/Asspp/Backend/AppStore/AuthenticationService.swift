@@ -15,6 +15,7 @@ extension AppStore {
         case accountChanged
         case accountMismatch
         case sessionExpired
+        case authenticationInProgress
         case serviceTemporarilyUnavailable(Int)
         var errorDescription: String? {
             switch self {
@@ -22,6 +23,7 @@ extension AppStore {
             case .accountChanged: "账户已更新，请重新打开账户详情。"
             case .accountMismatch: "验证返回的账户与当前账户不一致。"
             case .sessionExpired: "账户会话已过期，自动刷新未完成，请在账户页重新登录并完成验证。"
+            case .authenticationInProgress: "此账户正在验证，请稍候。"
             case let .serviceTemporarilyUnavailable(status): "Apple 认证暂时不可用（HTTP \(status)），请稍后再试。"
             }
         }
@@ -35,7 +37,7 @@ extension AppStore {
         let pending = Task { [self] in
             let refreshed: ApplePackage.Account
             do {
-                let session = try await ApplePackage.Authenticator(cookies: original.account.cookie)
+                let session = try await makeAuthenticationSession(cookies: original.account.cookie)
                 refreshed = try await authenticateAccount(email: original.id, password: original.account.password, code: "", using: session)
             } catch is CancellationError {
                 throw CancellationError()
@@ -81,15 +83,33 @@ extension AppStore {
 
     private func authenticateAccount(email: String, password: String, code: String,
                                      using session: ApplePackage.Authenticator) async throws -> ApplePackage.Account {
+        let key = email.lowercased()
+        guard activeAuthenticationAccounts.insert(key).inserted else { throw AuthenticationError.authenticationInProgress }
+        defer { activeAuthenticationAccounts.remove(key) }
+        let clock = ContinuousClock()
+        let start = clock.now
+        defer { logger.debug("Apple authentication elapsed=\(clock.now - start)") }
         do {
-            return try await StoreAuthenticationRetry.run {
+            return try await StoreAuthenticationRetry.run(response: { error in
+                guard let response = error as? ApplePackage.AuthenticationHTTPError else { return nil }
+                return (response.statusCode, response.retryAfter)
+            }, wait: { delay in
+                logger.info("Apple authentication retry scheduled, delayMs=\(delay)")
+                try await Task.sleep(for: .milliseconds(delay))
+            }) {
                 try await session.authenticate(email: email, password: password, code: code)
             }
-        } catch where StoreAuthenticationRetry.isTemporary(error) {
-            guard let status = StoreDiagnostics.authenticationHTTPStatus(error) else { throw error }
-            logger.warning("Apple authentication temporarily unavailable after retry, HTTP=\(status)")
-            throw AuthenticationError.serviceTemporarilyUnavailable(status)
+        } catch let error as ApplePackage.AuthenticationHTTPError {
+            logger.warning("Apple authentication temporarily unavailable, HTTP=\(error.statusCode)")
+            throw AuthenticationError.serviceTemporarilyUnavailable(error.statusCode)
         }
+    }
+
+    func makeAuthenticationSession(cookies: [ApplePackage.Cookie] = []) async throws -> ApplePackage.Authenticator {
+        let clock = ContinuousClock()
+        let start = clock.now
+        defer { logger.debug("Apple authentication setup elapsed=\(clock.now - start)") }
+        return try await ApplePackage.Authenticator(cookies: cookies)
     }
 
     private func saveRefreshedAccount(_ account: ApplePackage.Account, replacing original: UserAccount) throws -> UserAccount {
@@ -110,7 +130,7 @@ extension AppStore {
         guard let account = accounts.first(where: { $0.id == id }) else {
             throw AuthenticationError.accountNotFound
         }
-        let session = try await ApplePackage.Authenticator(cookies: account.account.cookie)
+        let session = try await makeAuthenticationSession(cookies: account.account.cookie)
         return try await authenticate(email: account.account.email, password: account.account.password,
                                       code: "", using: session, replacing: account)
     }

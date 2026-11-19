@@ -10,6 +10,7 @@ fi
 # CI selects relevant checks separately; this script only builds and packages.
 bash scripts/prepare-devicekit.sh
 python3 scripts/prepare-performance-devicekit.py
+bash scripts/prepare-applepackage.sh
 xcodegen generate
 mkdir -p ssstore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 cp Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved \

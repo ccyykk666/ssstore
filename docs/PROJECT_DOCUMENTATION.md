@@ -170,7 +170,7 @@ brew install xcodegen
 bash scripts/build-ipa.sh
 ```
 
-`build-ipa.sh` 会准备 IDevice 二进制、运行 XcodeGen、复制已锁定的 Swift Package 解析文件，并用 Release / generic iOS destination / `CODE_SIGNING_ALLOWED=NO` 编译。成功后输出 `dist/ssstore.ipa`（未签名）。脚本自身只负责编译打包；CI 在它之前独立选择并执行相关检查。
+`build-ipa.sh` 会准备 IDevice 二进制、校验并准备固定版本的 ApplePackage 认证补丁、运行 XcodeGen、复制已锁定的 Swift Package 解析文件，并用 Release / generic iOS destination / `CODE_SIGNING_ALLOWED=NO` 编译。成功后输出 `dist/ssstore.ipa`（未签名）。脚本自身只负责编译打包；CI 在它之前独立选择并执行相关检查。
 
 首次构建需要网络访问依赖。CI 使用缓存减少重复下载。请勿把签名证书、Apple 凭据、个人配对文件、账户 token 或本机私密日志加进资源目录。
 
