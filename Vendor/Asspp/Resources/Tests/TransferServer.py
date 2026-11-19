@@ -36,7 +36,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         request_range = self.headers.get("Range", "")
         requests[self.path].append(request_range or "GET")
-        if self.path == "/denied":
+        if self.path == "/denied" or (self.path == "/parallel-denied" and request_range):
             self.send_response(403)
             self.send_header("Content-Length", "0")
             self.end_headers()
@@ -50,7 +50,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(206 if request_range else 200)
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("ETag", '"parallel-fixture"' if self.path.startswith("/parallel") else '"transfer-fixture"')
+        if self.path != "/parallel-missing-validator" or not request_range:
+            self.send_header("ETag", '"parallel-fixture"' if self.path.startswith("/parallel") else '"transfer-fixture"')
         self.send_header("Last-Modified", "Mon, 02 Nov 2026 00:00:00 GMT")
         if request_range:
             self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload)}")

@@ -12,7 +12,6 @@ final class DownloadBackgroundExecution {
         var subtitle: String
         var completed: Int64
         var active = true
-        var start: (() -> Void)?
     }
 
     private let identifier = Bundle.main.bundleIdentifier! + ".downloads"
@@ -37,33 +36,42 @@ final class DownloadBackgroundExecution {
                     return
                 }
                 self.task = continued
+                logger.info("Continued download task granted")
                 Downloads.this.backgroundNotice = nil
                 continued.expirationHandler = { [weak self, weak continued] in
                     Task { @MainActor in
                         guard let self, let continued, self.task === continued else { return }
-                        self.stop()
+                        if UIApplication.shared.applicationState == .background {
+                            self.stop()
+                        } else {
+                            continued.expirationHandler = nil
+                            self.task = nil
+                            continued.setTaskCompleted(success: false)
+                        }
                     }
                 }
-                for id in Array(self.entries.keys) { self.startEntry(id) }
                 self.updateActivity()
             }
         }
     }
 
-    func begin(_ request: PackageManifest, start: @escaping () -> Void) {
+    func begin(_ request: PackageManifest, start: () -> Void) {
         entries[request.id] = Entry(name: request.package.software.name, subtitle: "正在连接下载服务器…",
-                                    completed: min(999, Int64(request.state.percent * 1000)), start: start)
+                                    completed: min(999, Int64(request.state.percent * 1000)))
         if task != nil {
-            startEntry(request.id)
+            start()
             updateActivity()
             return
         }
-        guard !requested else { return }
-        guard UIApplication.shared.applicationState == .active else {
+        guard UIApplication.shared.applicationState != .background else {
             Downloads.this.suspend(request: request)
             Downloads.this.backgroundNotice = "请返回 App 后继续下载。"
             return
         }
+        // A successful submission may deliver its launch callback later.
+        // Foreground transfer can start independently of that callback.
+        defer { start() }
+        guard !requested else { return }
         let submission = BGContinuedProcessingTaskRequest(identifier: identifier,
             title: request.package.software.name, subtitle: "正在连接下载服务器…")
         submission.strategy = .fail
@@ -71,18 +79,12 @@ final class DownloadBackgroundExecution {
             guard registered else { throw DownloadBackgroundError.registrationFailed }
             requested = true
             try BGTaskScheduler.shared.submit(submission)
+            logger.info("Continued download task submitted")
         } catch {
             requested = false
             Downloads.this.backgroundNotice = "系统未允许后台下载，请保持 App 在前台。"
-            logger.warning("Continued download task unavailable: \(error.localizedDescription)")
-            for id in Array(entries.keys) { startEntry(id) }
+            logger.warning("Continued download task unavailable: \(StoreDiagnostics.errorSummary(error))")
         }
-    }
-
-    private func startEntry(_ id: UUID) {
-        let start = entries[id]?.start
-        entries[id]?.start = nil
-        start?()
     }
 
     func update(_ request: PackageManifest) {
@@ -99,7 +101,6 @@ final class DownloadBackgroundExecution {
         if request.completed {
             entries[request.id]?.active = false
             entries[request.id]?.completed = 1000
-            entries[request.id]?.start = nil
         } else {
             hadFailure = true
             entries.removeValue(forKey: request.id)
@@ -134,6 +135,7 @@ final class DownloadBackgroundExecution {
 
     private func stop() {
         let activeIDs = Set(entries.filter { $0.value.active }.map(\.key))
+        if !activeIDs.isEmpty { logger.info("Continued download protection ended, pausing \(activeIDs.count) transfers") }
         let expired = task
         expired?.expirationHandler = nil
         task = nil

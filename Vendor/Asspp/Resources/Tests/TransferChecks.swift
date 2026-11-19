@@ -91,7 +91,9 @@ struct TransferChecks {
                     completion: { continuation.resume(with: $0) }
             }
             fatalError("HTTP 403 must never be accepted as an IPA")
-        } catch {}
+        } catch let error as PackageTransferHTTPError {
+            precondition(error.statusCode == 403 && (error as NSError).code == 403)
+        }
         let (data, _) = try await URLSession.shared.data(from: base.appendingPathComponent("stats"))
         let stats = try JSONDecoder().decode([String: [String]].self, from: data)
         precondition(stats["/single"] == ["GET"], "No duplicate requests or HEAD preflight")
@@ -129,12 +131,14 @@ struct TransferChecks {
         precondition(parallelPaused && SHA256.hash(data: resumedParallelData) == SHA256.hash(data: parallelExpected))
         phase = "range fallback"
         print("Checking \(phase)"); fflush(stdout)
-        let ignoredRange: URL = try await withCheckedThrowingContinuation { continuation in
-            parallel.resume(id: UUID(), url: base.appendingPathComponent("parallel-ignored")) { _, _ in }
-                completion: { continuation.resume(with: $0) }
+        for route in ["parallel-ignored", "parallel-denied", "parallel-missing-validator"] {
+            let file: URL = try await withCheckedThrowingContinuation { continuation in
+                parallel.resume(id: UUID(), url: base.appendingPathComponent(route)) { _, _ in }
+                    completion: { continuation.resume(with: $0) }
+            }
+            let bytes = try Data(contentsOf: file)
+            precondition(SHA256.hash(data: bytes) == SHA256.hash(data: parallelExpected), "\(route) must fall back without corrupting the file")
         }
-        let ignoredRangeData = try Data(contentsOf: ignoredRange)
-        precondition(SHA256.hash(data: ignoredRangeData) == SHA256.hash(data: parallelExpected), "Ignored ranges must fall back without corrupting the file")
         print("Native transfer checks passed: integrity, coalescing, progress throttling, persisted and rapid resume, HTTP errors")
     }
 }
