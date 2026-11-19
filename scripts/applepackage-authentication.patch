@@ -182,33 +182,36 @@
 
          let readStoreFrontValue = response.headers["x-set-apple-store-front"].filter { !$0.isEmpty }.compactMap {
              $0.components(separatedBy: "-").first
-@@ -138,19 +224,37 @@
+@@ -136,21 +222,40 @@
+             pod = podValue
+         }
 
++        let status = Int(response.status.code)
++        let location = response.headers.first(name: "location")?.trimmingCharacters(in: .whitespacesAndNewlines)
++        let missingLocation = location?.isEmpty ?? true
++        // Without Location, only the original signed route can be retried.
++        if [204, 404, 503].contains(status) || (status == 301 && missingLocation),
++           response.headers.first(name: "www-authenticate") == nil,
++           response.headers.first(name: "x-apple-amd-action") == nil,
++           !Self.hasAuthenticationVerdict(response) {
++            throw AuthenticationHTTPError(statusCode: status, retryAfter: response.headers.first(name: "retry-after"))
++        }
++
          let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
          if redirectStatuses.contains(response.status) {
 -            guard let location = response.headers.first(name: "location"), let url = URL(string: location) else {
 -                return .failure(Strings.failedToRetrieveRedirect)
-+            let location = response.headers.first(name: "location")?.trimmingCharacters(in: .whitespacesAndNewlines)
-+            guard let location, !location.isEmpty else {
-+                throw AuthenticationRedirectError(statusCode: Int(response.status.code), hasLocation: false)
++            guard let location, !missingLocation else {
++                throw AuthenticationRedirectError(statusCode: status, hasLocation: false)
 +            }
 +            guard let url = AuthenticationRoute.normalized(location, relativeTo: endpoint) else {
-+                throw AuthenticationRedirectError(statusCode: Int(response.status.code), hasLocation: true)
++                throw AuthenticationRedirectError(statusCode: status, hasLocation: true)
              }
              return .redirect(url)
          }
 
 -        guard response.status == .ok else { return .failure("HTTP \(response.status.code)") }
-+        guard response.status == .ok else {
-+            let status = Int(response.status.code)
-+            if [204, 404, 503].contains(status),
-+               response.headers.first(name: "www-authenticate") == nil,
-+               response.headers.first(name: "x-apple-amd-action") == nil,
-+               !Self.hasAuthenticationVerdict(response) {
-+                throw AuthenticationHTTPError(statusCode: status, retryAfter: response.headers.first(name: "retry-after"))
-+            }
-+            return .failure("HTTP \(status)")
-+        }
++        guard response.status == .ok else { return .failure("HTTP \(status)") }
          guard var body = response.body, body.readableBytes <= 2 * 1024 * 1024, let data = body.readData(length: body.readableBytes) else {
              return .failure("response body is empty (code: \(response.status.code))")
          }

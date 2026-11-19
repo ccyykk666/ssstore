@@ -366,8 +366,8 @@ struct DownloadProtocolChecks {
         var delays: [Int64] = []
         let token = try await StoreAuthenticationRetry.run(response: response, wait: { delays.append($0) }) {
             attempts += 1
-            if attempts == 1 { throw Response(status: 204) }
-            if attempts == 2 { throw Response(status: 503) }
+            if attempts == 1 { throw Response(status: 503) }
+            if attempts == 2 { throw Response(status: 301) }
             return "fixture-token"
         }
         precondition(token == "fixture-token" && attempts == 3 && delays == [2_000, 4_000])
@@ -384,7 +384,7 @@ struct DownloadProtocolChecks {
         precondition(attempts == 3 && delays == [3_000, 7_000])
 
         for (status, retryAfter, expectedAttempts) in [
-            (204, nil, 3), (404, nil, 3), (503, nil, 3), (401, nil, 1), (429, nil, 1), (503, "11", 1), (503, "6", 2),
+            (204, nil, 3), (301, nil, 3), (404, nil, 3), (503, nil, 3), (401, nil, 1), (429, nil, 1), (301, "11", 1), (503, "6", 2),
         ] as [(Int, String?, Int)] {
             attempts = 0
             do {

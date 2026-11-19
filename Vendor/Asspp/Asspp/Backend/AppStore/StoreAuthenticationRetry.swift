@@ -13,7 +13,7 @@ enum StoreAuthenticationRetry {
             do {
                 return try await operation()
             } catch {
-                guard let response = response(error), [204, 404, 503].contains(response.status) else { throw error }
+                guard let response = response(error), [204, 301, 404, 503].contains(response.status) else { throw error }
                 let seconds = max(1, retryDelay(response.retryAfter, now: now()) ?? fallback)
                 guard seconds <= Double(remainingWait) / 1000 else { throw error }
                 let delay = Int64((seconds * 1000).rounded(.up))
