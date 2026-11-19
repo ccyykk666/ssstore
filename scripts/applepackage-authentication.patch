@@ -1,6 +1,6 @@
 --- a/Sources/ApplePackage/Commands/Authenticate.swift
 +++ b/Sources/ApplePackage/Commands/Authenticate.swift
-@@ -8,6 +8,13 @@
+@@ -8,6 +8,23 @@
  import AsyncHTTPClient
  import Foundation
  import NIOHTTP1
@@ -11,10 +11,20 @@
 +
 +    public var errorDescription: String? { "authentication failed: HTTP \(statusCode)" }
 +}
++
++public struct AuthenticationRedirectError: LocalizedError {
++    public let statusCode: Int
++    public let hasLocation: Bool
++
++    public var errorDescription: String? {
++        hasLocation ? "authentication failed: invalid redirect location"
++                    : "authentication failed: failed to retrieve redirect location"
++    }
++}
 
  public actor Authenticator {
      private enum LoginResponse {
-@@ -29,9 +36,11 @@
+@@ -29,9 +46,11 @@
      /// A fresh SAP exchange is mandatory. Reuse this instance when supplying a verification code.
      public init(cookies: [Cookie] = []) async throws {
          deviceIdentifier = Configuration.deviceIdentifier
@@ -29,7 +39,29 @@
          self.cookies = cookies
      }
 
-@@ -107,7 +116,7 @@
+@@ -60,10 +79,7 @@
+             case let .success(account): return account
+             case let .redirect(url):
+                 guard redirects < 3 else { try ensureFailed("Authentication redirect limit exceeded.") }
+-                guard let resolved = URL(string: url.relativeString, relativeTo: endpoint)?.absoluteURL else {
+-                    try ensureFailed(Strings.failedToRetrieveRedirect)
+-                }
+-                endpoint = try Self.approvedEndpoint(resolved)
++                endpoint = url
+                 redirects += 1
+             case .codeRequired: throw AuthenticationError.verificationCodeRequired
+             case .retry:
+@@ -87,7 +103,8 @@
+     }
+
+     private static func createInitialRequestEndpoint(baseURL: URL, deviceIdentifier: String) throws -> URL {
+-        guard var comps = URLComponents(url: baseURL, resolvingAgainstBaseURL: true) else {
++        guard let normalized = AuthenticationRoute.normalized(baseURL.absoluteString),
++              var comps = URLComponents(url: normalized, resolvingAgainstBaseURL: false) else {
+             try ensureFailed("\(Strings.invalidAuthEndpoint): \(baseURL)")
+         }
+         var query = comps.queryItems ?? []
+@@ -107,7 +124,7 @@
          ]
          let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
          var headers: [(String, String)] = [("User-Agent", Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
@@ -38,7 +70,7 @@
              headers.append(item)
          }
          _ = try approvedEndpoint(endpoint)
-@@ -117,12 +126,46 @@
+@@ -117,12 +134,46 @@
          return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
      }
 
@@ -86,14 +118,27 @@
 
          let readStoreFrontValue = response.headers["x-set-apple-store-front"].filter { !$0.isEmpty }.compactMap {
              $0.components(separatedBy: "-").first
-@@ -144,7 +187,16 @@
+@@ -138,13 +189,27 @@
+
+         let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
+         if redirectStatuses.contains(response.status) {
+-            guard let location = response.headers.first(name: "location"), let url = URL(string: location) else {
+-                return .failure(Strings.failedToRetrieveRedirect)
++            let location = response.headers.first(name: "location")?.trimmingCharacters(in: .whitespacesAndNewlines)
++            guard let location, !location.isEmpty else {
++                throw AuthenticationRedirectError(statusCode: Int(response.status.code), hasLocation: false)
++            }
++            guard let url = AuthenticationRoute.normalized(location, relativeTo: endpoint) else {
++                throw AuthenticationRedirectError(statusCode: Int(response.status.code), hasLocation: true)
+             }
              return .redirect(url)
          }
 
 -        guard response.status == .ok else { return .failure("HTTP \(response.status.code)") }
 +        guard response.status == .ok else {
 +            let status = Int(response.status.code)
-+            if (status == 204 || status == 503),
++            APLogger.info("authentication response HTTP=\(status) host=\(endpoint.host ?? "unknown")")
++            if [204, 404, 503].contains(status),
 +               response.headers.first(name: "www-authenticate") == nil,
 +               response.headers.first(name: "x-apple-amd-action") == nil,
 +               !Self.hasAuthenticationVerdict(response) {

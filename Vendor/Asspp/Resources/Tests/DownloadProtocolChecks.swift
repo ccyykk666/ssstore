@@ -3,6 +3,7 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        authenticationRouteChecks()
         try await authenticationRetryChecks()
         try await machineProvisioningChecks()
         precondition(StoreProtocol.storefrontIdentifier(" 143441-1,34 ") == "143441")
@@ -330,6 +331,24 @@ struct DownloadProtocolChecks {
         print("Download protocol regression checks passed.")
     }
 
+    static func authenticationRouteChecks() {
+        let legacy = "/WebObjects/MZFinance.woa/wa/authenticate"
+        let initial = URL(string: "https://buy.itunes.apple.com\(legacy)/?guid=fixture")!
+        let query = "routing=A%2FB%2B1&guid=fixture"
+        let pod = AuthenticationRoute.normalized("https://p30-buy.itunes.apple.com\(legacy)?\(query)", relativeTo: initial)
+        precondition(pod?.absoluteString == "https://p30-buy.itunes.apple.com\(legacy)/?\(query)")
+        let relative = AuthenticationRoute.normalized("\(legacy)?\(query)", relativeTo: initial)
+        precondition(relative?.absoluteString == "https://buy.itunes.apple.com\(legacy)/?\(query)")
+        let native = AuthenticationRoute.normalized("https://auth.itunes.apple.com/auth/v1/native?\(query)")
+        precondition(native?.absoluteString == "https://auth.itunes.apple.com/auth/v1/native/fast/?\(query)")
+        for bad in ["", " ", "https://buy.itunes.apple.com:8080\(legacy)",
+                    "http://buy.itunes.apple.com\(legacy)", "https://buy.itunes.apple.com.attacker.invalid\(legacy)",
+                    "https://p30-buy.itunes.apple.com/other", "https://auth.itunes.apple.com/other",
+                    "https://user:password@buy.itunes.apple.com\(legacy)", "\(legacy)#fragment"] {
+            precondition(AuthenticationRoute.normalized(bad, relativeTo: initial) == nil)
+        }
+    }
+
     static func authenticationRetryChecks() async throws {
         struct Response: Error {
             let status: Int
@@ -362,7 +381,7 @@ struct DownloadProtocolChecks {
         precondition(attempts == 3 && delays == [3_000, 7_000])
 
         for (status, retryAfter, expectedAttempts) in [
-            (204, nil, 3), (503, nil, 3), (401, nil, 1), (429, nil, 1), (503, "11", 1), (503, "6", 2),
+            (204, nil, 3), (404, nil, 3), (503, nil, 3), (401, nil, 1), (429, nil, 1), (503, "11", 1), (503, "6", 2),
         ] as [(Int, String?, Int)] {
             attempts = 0
             do {

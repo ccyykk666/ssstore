@@ -75,6 +75,9 @@ extension AppStore {
         } catch ApplePackage.AuthenticationError.verificationCodeRequired {
             logger.info("\(operation) requires a verification code")
             throw ApplePackage.AuthenticationError.verificationCodeRequired
+        } catch let error as ApplePackage.AuthenticationRedirectError {
+            logger.error("\(operation) could not follow Apple redirect, HTTP=\(error.statusCode) hasLocation=\(error.hasLocation)")
+            throw error
         } catch {
             logger.error("\(operation) failed for user: \(StoreDiagnostics.authenticationErrorSummary(error))")
             throw error

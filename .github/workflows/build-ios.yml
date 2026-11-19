@@ -11,6 +11,7 @@ on:
       - 'scripts/build-ipa.sh'
       - 'scripts/prepare-applepackage.sh'
       - 'scripts/applepackage-authentication.patch'
+      - 'scripts/applepackage-authentication-route.swift'
       - 'scripts/prepare-performance-devicekit.py'
       - 'scripts/patches/**'
       - 'scripts/select-ci-tests.py'

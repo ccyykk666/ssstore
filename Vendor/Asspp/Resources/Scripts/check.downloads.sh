@@ -14,6 +14,7 @@ if [[ "$check_kind" != localization ]]; then
     swiftc Asspp/Backend/AppStore/StoreProtocol.swift \
     Asspp/Backend/AppStore/StoreDiagnostics.swift \
     Asspp/Backend/AppStore/StoreAuthenticationRetry.swift \
+    ../../scripts/applepackage-authentication-route.swift \
     Asspp/Backend/AppStore/StoreDownloadProtocol.swift \
     Asspp/Backend/AppStore/StoreHistorySupport.swift \
     Asspp/Backend/AppStore/StoreCatalogHistoryService.swift \

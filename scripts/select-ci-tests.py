@@ -42,6 +42,7 @@ CHECK_INPUTS = {
     ),
     "downloads": (
         "scripts/applepackage-authentication.patch",
+        "scripts/applepackage-authentication-route.swift",
         STORE + "Asspp/Backend/AppStore/AppStore.swift",
         STORE + "Asspp/Backend/AppStore/AuthenticationService.swift",
         STORE + "Asspp/Backend/AppStore/StoreAuthenticationRetry.swift",

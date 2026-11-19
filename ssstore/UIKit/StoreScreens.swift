@@ -200,7 +200,7 @@ final class NativeAccountDetail: NativePage {
                     logger.error("account rotation setup failed: \(StoreDiagnostics.authenticationErrorSummary(error))")
                 }
                 guard !(error is AppStore.AuthenticationError), !(error is AppStore.AccountStorageError),
-                      !(error is CancellationError) else { return }
+                      !(error is ApplePackage.AuthenticationRedirectError), !(error is CancellationError) else { return }
                 presentVerification(for: account, session: nil)
             }
         }
