@@ -109,7 +109,8 @@ enum StoreHistorySupport {
               let item = items.first, StoreProtocol.string(item["id"]) == String(appID),
               item["type"] as? String == "apps",
               let attributes = item["attributes"] as? [String: Any],
-              let families = attributes["deviceFamilies"] as? [String], families.contains(platform),
+              let families = attributes["deviceFamilies"] as? [String],
+              platform == "appletv" ? families.contains("appletv") : families.contains(where: { $0 == "iphone" || $0 == "ipad" }),
               let platforms = attributes["platformAttributes"] as? [String: Any],
               let details = platforms[platform == "appletv" ? "appletvos" : "ios"] as? [String: Any],
               details["bundleId"] as? String == bundleID,
@@ -134,6 +135,47 @@ enum StoreHistorySupport {
         }
         guard !identifiers.isEmpty else { throw StoreDownloadError.noVersions }
         return Index(identifiers: identifiers, metadata: known)
+    }
+
+    static func pageReleaseDates(_ data: Data, appID: Int64, bundleID: String, region: String) throws -> [String: Date] {
+        guard let html = String(data: data, encoding: .utf8),
+              let marker = html.range(of: "id=\"serialized-server-data\""),
+              let opening = html[marker.upperBound...].firstIndex(of: ">"),
+              let end = html.range(of: "</script>", range: opening..<html.endIndex),
+              let root = try JSONSerialization.jsonObject(with: Data(html[html.index(after: opening)..<end.lowerBound].utf8)) as? [String: Any],
+              let pages = root["data"] as? [[String: Any]],
+              let page = pages.first(where: {
+                  let intent = $0["intent"] as? [String: Any]
+                  return StoreProtocol.string(intent?["id"]) == String(appID) && intent?["storefront"] as? String == region.lowercased()
+              }),
+              let product = page["data"] as? [String: Any],
+              let offer = product["titleOfferDisplayProperties"] as? [String: Any],
+              StoreProtocol.string(offer["adamId"]) == String(appID), offer["bundleId"] as? String == bundleID,
+              let devices = product["appPlatforms"] as? [String], devices.contains(where: { $0 == "phone" || $0 == "pad" }),
+              let shelves = product["shelfMapping"] as? [String: Any],
+              let recent = shelves["mostRecentVersion"] as? [String: Any],
+              let action = recent["seeAllAction"] as? [String: Any],
+              let history = action["pageData"] as? [String: Any],
+              let historyShelves = history["shelves"] as? [[String: Any]]
+        else { throw StoreDownloadError.catalogUnavailable }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "EEE MMM dd yyyy HH:mm:ss 'GMT'Z"
+        let rows = historyShelves.flatMap { $0["items"] as? [[String: Any]] ?? [] }
+        let labels = Dictionary(grouping: rows.compactMap { row -> (String, String)? in
+            guard row["$kind"] as? String == "TitledParagraph",
+                  let version = row["primarySubtitle"] as? String,
+                  let stamp = row["secondarySubtitle"] as? String else { return nil }
+            return (version, stamp)
+        }, by: { $0.0 })
+        return labels.compactMapValues { entries in
+            guard entries.count == 1, let stamp = entries.first?.1 else { return nil }
+            if let value = date(stamp) { return value }
+            let timestamp = stamp.components(separatedBy: " (").first ?? stamp
+            return formatter.date(from: timestamp)
+        }
     }
 
     static func index(_ item: [String: Any]) throws -> Index {

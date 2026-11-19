@@ -108,9 +108,10 @@ final class NativeHistory: NativePage {
         if let error = archive.error { rows.append(NativeRow(title: error, color: .systemOrange)) }
         versionRowOffset = rows.count
         displayedVersionIDs = archive.versionIdentifiers
+        let releaseDates = archive.releaseDates
         for key in displayedVersionIDs {
-            if let package = archive.package(for: key), let metadata = archive.versionItems[key] {
-                let date = metadata.releaseDate.map { date in
+            if let package = archive.package(for: key) {
+                let date = releaseDates[key].map { date in
                     let thisYear = Calendar(identifier: .gregorian).isDate(date, equalTo: Date(), toGranularity: .year)
                     return Self.dateFormatters[thisYear ? 0 : 1].string(from: date)
                 }

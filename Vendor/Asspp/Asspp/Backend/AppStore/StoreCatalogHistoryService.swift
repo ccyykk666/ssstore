@@ -61,4 +61,34 @@ enum StoreCatalogHistoryService {
         onEvent("Store history catalog: app=\(appID) versions=\(index.identifiers.count) HTTP=200")
         return index
     }
+
+    static func pageReleaseDates(appID: Int64, bundleID: String, region: String, platform: String) async throws -> [String: Date] {
+        guard platform != "appletv" else { return [:] }
+        let catalogRequest = try request(appID: appID, region: region, platform: platform)
+        guard let catalogURL = catalogRequest.url,
+              var components = URLComponents(url: catalogURL, resolvingAgainstBaseURL: false) else {
+            throw StoreDownloadError.catalogUnavailable
+        }
+        components.path = "/\(region.lowercased())/app/id\(appID)"
+        components.queryItems = nil
+        guard var url = components.url else { throw StoreDownloadError.catalogUnavailable }
+        for redirect in 0...1 {
+            let (data, response) = try await session.data(from: url)
+            try Task.checkCancellation()
+            guard let response = response as? HTTPURLResponse, response.url == url else { break }
+            if response.statusCode == 200, data.count <= 2 * 1024 * 1024 {
+                return try StoreHistorySupport.pageReleaseDates(data, appID: appID, bundleID: bundleID, region: region)
+            }
+            guard redirect == 0, [301, 302, 307, 308].contains(response.statusCode),
+                  let location = response.value(forHTTPHeaderField: "Location"),
+                  let canonical = URL(string: location, relativeTo: url)?.absoluteURL,
+                  canonical.scheme == "https", canonical.host == "apps.apple.com",
+                  canonical.port == nil, canonical.user == nil, canonical.password == nil,
+                  canonical.path.hasPrefix("/\(region.lowercased())/app/"),
+                  canonical.lastPathComponent == "id\(appID)",
+                  canonical.query == nil, canonical.fragment == nil else { break }
+            url = canonical
+        }
+        throw StoreDownloadError.catalogUnavailable
+    }
 }

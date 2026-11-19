@@ -78,6 +78,9 @@ enum HistorySupportChecks {
         precondition(catalog.metadata["893599338"]?.releaseDate == StoreHistorySupport.date("2026-10-22T02:27:46Z"))
         precondition(catalog.metadata["893256306"]?.releaseDate != nil)
         precondition(catalog.metadata["892756980"]?.releaseDate == StoreHistorySupport.date("2026-10-12"))
+        let iPad = try StoreHistorySupport.catalogIndex(catalogData(families: ["iphone", "ipod"]), appID: 458318329,
+            bundleID: "com.tencent.live4iphone", platform: "ipad")
+        precondition(iPad.identifiers == catalog.identifiers && iPad.metadata == catalog.metadata)
         let trusted = catalog.metadata["893599338"]!
         let roundTrip = try JSONDecoder().decode(StoreHistorySupport.Metadata.self, from: JSONEncoder().encode(trusted))
         precondition(roundTrip == trusted, "Trusted dates survive cache reload")
@@ -98,6 +101,25 @@ enum HistorySupportChecks {
             appID: 458318329, bundleID: "com.tencent.live4iphone", platform: "iphone")
         precondition(unknownDate.metadata["123"]?.releaseDate == nil)
         precondition(StoreHistorySupport.date("2026-02-30") == nil)
+        let page = Data("""
+        <script type="application/json" id="serialized-server-data">
+        {"data":[{"intent":{"id":"6781589798","storefront":"cn"},"data":{
+          "titleOfferDisplayProperties":{"adamId":"6781589798","bundleId":"com.qianwen.ime"},
+          "appPlatforms":["phone"],
+          "shelfMapping":{"mostRecentVersion":{"seeAllAction":{"pageData":{"shelves":[{"items":[
+            {"$kind":"TitledParagraph","primarySubtitle":"1.1.47","secondarySubtitle":"Tue Nov 17 2026 13:52:02 GMT+0000 (Coordinated Universal Time)"},
+            {"$kind":"TitledParagraph","primarySubtitle":"1.1.46","secondarySubtitle":"2026-11-17T01:45:43Z"},
+            {"$kind":"TitledParagraph","primarySubtitle":"1.1.46","secondarySubtitle":"2026-11-16T01:45:43Z"}
+          ]}]}}}}
+        }}]}
+        </script>
+        """.utf8)
+        let dates = try StoreHistorySupport.pageReleaseDates(page, appID: 6781589798, bundleID: "com.qianwen.ime", region: "CN")
+        precondition(dates.count == 1 && dates["1.1.47"] == StoreHistorySupport.date("2026-11-17T13:52:02Z"))
+        do {
+            _ = try StoreHistorySupport.pageReleaseDates(page, appID: 6781589798, bundleID: "com.qianwen.ime", region: "US")
+            fatalError("Accepted release dates from the wrong storefront")
+        } catch StoreDownloadError.catalogUnavailable {}
         let request = try StoreCatalogHistoryService.request(appID: 458318329, region: "CN", platform: "iphone")
         precondition(request.url?.host == "apps.apple.com" && request.url?.scheme == "https")
         precondition(request.url?.path == "/api/apps/v1/catalog/cn/apps/458318329")
