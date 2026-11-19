@@ -43,6 +43,7 @@ CHECK_INPUTS = {
     "downloads": (
         STORE + "Asspp/Backend/AppStore/AppStore.swift",
         STORE + "Asspp/Backend/AppStore/AuthenticationService.swift",
+        STORE + "Asspp/Backend/AppStore/StoreAuthenticationRetry.swift",
         STORE + "Asspp/Backend/Downloader/Downloads.swift",
         STORE + "Asspp/Backend/Downloader/PackageTransfer.swift",
         STORE + "Asspp/Backend/Downloader/ParallelPackageTransfer.swift",

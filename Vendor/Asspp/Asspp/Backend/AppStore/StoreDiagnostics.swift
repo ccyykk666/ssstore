@@ -14,12 +14,16 @@ enum StoreDiagnostics {
     static func authenticationErrorSummary(_ error: Error) -> String {
         let summary = errorSummary(error)
         if isInvalidVerificationCode(error) { return summary + " reason=invalid-verification-code" }
+        if let status = authenticationHTTPStatus(error) { return summary + " HTTP=\(status)" }
+        return summary
+    }
+
+    static func authenticationHTTPStatus(_ error: Error) -> Int? {
         let prefix = "authentication failed: HTTP "
         let message = error.localizedDescription
-        if message.hasPrefix(prefix), let status = Int(message.dropFirst(prefix.count)), (100...599).contains(status) {
-            return summary + " HTTP=\(status)"
-        }
-        return summary
+        guard message.hasPrefix(prefix), let status = Int(message.dropFirst(prefix.count)),
+              (100...599).contains(status) else { return nil }
+        return status
     }
 }
 

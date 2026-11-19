@@ -15,12 +15,14 @@ extension AppStore {
         case accountChanged
         case accountMismatch
         case sessionExpired
+        case serviceTemporarilyUnavailable(Int)
         var errorDescription: String? {
             switch self {
             case .accountNotFound: "找不到下载账户，请先添加账户。"
             case .accountChanged: "账户已更新，请重新打开账户详情。"
             case .accountMismatch: "验证返回的账户与当前账户不一致。"
             case .sessionExpired: "账户会话已过期，自动刷新未完成，请在账户页重新登录并完成验证。"
+            case let .serviceTemporarilyUnavailable(status): "Apple 认证暂时不可用（HTTP \(status)），请稍后再试。"
             }
         }
     }
@@ -31,13 +33,21 @@ extension AppStore {
         if original.account.passwordToken != expectedToken { return }
         if let pending = sessionRefreshes[id] { return try await pending.value }
         let pending = Task { [self] in
-            var refreshed = original
-            do { try await ApplePackage.Authenticator.rotatePasswordToken(for: &refreshed.account) }
-            catch { throw AuthenticationError.sessionExpired }
+            let refreshed: ApplePackage.Account
+            do {
+                let session = try await ApplePackage.Authenticator(cookies: original.account.cookie)
+                refreshed = try await authenticateAccount(email: original.id, password: original.account.password, code: "", using: session)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as AuthenticationError {
+                throw error
+            } catch {
+                throw AuthenticationError.sessionExpired
+            }
             try Task.checkCancellation()
             guard let current = accounts.first(where: { $0.id == id }) else { throw AuthenticationError.accountNotFound }
             guard current.account.passwordToken == expectedToken else { return }
-            _ = try saveRefreshedAccount(refreshed.account, replacing: original)
+            _ = try saveRefreshedAccount(refreshed, replacing: original)
         }
         sessionRefreshes[id] = pending
         defer { sessionRefreshes.removeValue(forKey: id) }
@@ -50,11 +60,7 @@ extension AppStore {
         let operation = original == nil ? "authentication" : "account rotation"
         logger.info("starting \(operation) for user")
         do {
-            let appleAccount = try await session.authenticate(
-                email: email,
-                password: password,
-                code: code,
-            )
+            let appleAccount = try await authenticateAccount(email: email, password: password, code: code, using: session)
             try Task.checkCancellation()
             let userAccount: UserAccount
             if let original {
@@ -70,6 +76,19 @@ extension AppStore {
         } catch {
             logger.error("\(operation) failed for user: \(StoreDiagnostics.authenticationErrorSummary(error))")
             throw error
+        }
+    }
+
+    private func authenticateAccount(email: String, password: String, code: String,
+                                     using session: ApplePackage.Authenticator) async throws -> ApplePackage.Account {
+        do {
+            return try await StoreAuthenticationRetry.run {
+                try await session.authenticate(email: email, password: password, code: code)
+            }
+        } catch where StoreAuthenticationRetry.isTemporary(error) {
+            guard let status = StoreDiagnostics.authenticationHTTPStatus(error) else { throw error }
+            logger.warning("Apple authentication temporarily unavailable after retry, HTTP=\(status)")
+            throw AuthenticationError.serviceTemporarilyUnavailable(status)
         }
     }
 

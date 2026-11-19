@@ -313,6 +313,8 @@ final class NativeAddAccount: NativePage {
                 needsCode = true
                 code.text = ""
                 reload()
+            } catch AppStore.AuthenticationError.serviceTemporarilyUnavailable(let status) {
+                alert(AppStore.AuthenticationError.serviceTemporarilyUnavailable(status).localizedDescription)
             } catch {
                 if authenticator == nil {
                     logger.error("authentication setup failed: \(StoreDiagnostics.authenticationErrorSummary(error))")

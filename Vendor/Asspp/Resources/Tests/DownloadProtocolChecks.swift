@@ -3,6 +3,7 @@ import Foundation
 @main
 struct DownloadProtocolChecks {
     static func main() async throws {
+        try await authenticationRetryChecks()
         try await machineProvisioningChecks()
         precondition(StoreProtocol.storefrontIdentifier(" 143441-1,34 ") == "143441")
         precondition(StoreProtocol.storefrontIdentifier("143443,34") == "143443")
@@ -327,6 +328,45 @@ struct DownloadProtocolChecks {
         let httpError = NSError(domain: "fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "authentication failed: HTTP 403"])
         precondition(StoreDiagnostics.authenticationErrorSummary(httpError).hasSuffix("HTTP=403"))
         print("Download protocol regression checks passed.")
+    }
+
+    static func authenticationRetryChecks() async throws {
+        func httpError(_ status: Int) -> NSError {
+            NSError(domain: "fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "authentication failed: HTTP \(status)"])
+        }
+        var attempts = 0
+        var delays: [Int64] = []
+        let token = try await StoreAuthenticationRetry.run(wait: { delays.append($0) }) {
+            attempts += 1
+            if attempts == 1 { throw httpError(204) }
+            if attempts == 2 { throw httpError(503) }
+            return "fixture-token"
+        }
+        precondition(token == "fixture-token" && attempts == 3 && delays == [10, 20])
+
+        for (status, expectedAttempts) in [(204, 3), (503, 3), (401, 1), (429, 1)] {
+            attempts = 0
+            do {
+                let _: String = try await StoreAuthenticationRetry.run(wait: { _ in }) {
+                    attempts += 1
+                    throw httpError(status)
+                }
+                fatalError("Authentication returned a token without a successful response")
+            } catch {
+                precondition(StoreDiagnostics.authenticationHTTPStatus(error) == status)
+            }
+            precondition(attempts == expectedAttempts)
+        }
+
+        attempts = 0
+        do {
+            let _: String = try await StoreAuthenticationRetry.run(wait: { _ in throw CancellationError() }) {
+                attempts += 1
+                throw httpError(503)
+            }
+            fatalError("Authentication skipped cancellation")
+        } catch is CancellationError {}
+        precondition(attempts == 1)
     }
 
     static func machineProvisioningChecks() async throws {
