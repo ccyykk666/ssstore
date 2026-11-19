@@ -41,6 +41,7 @@ CHECK_INPUTS = {
         "ssstore/UIKit/FileContents.swift",
     ),
     "downloads": (
+        "scripts/applepackage-authentication.patch",
         STORE + "Asspp/Backend/AppStore/AppStore.swift",
         STORE + "Asspp/Backend/AppStore/AuthenticationService.swift",
         STORE + "Asspp/Backend/AppStore/StoreAuthenticationRetry.swift",

@@ -29,10 +29,43 @@
          self.cookies = cookies
      }
 
-@@ -117,6 +126,16 @@
+@@ -107,7 +116,7 @@
+         ]
+         let data = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
+         var headers: [(String, String)] = [("User-Agent", Configuration.userAgent), ("Content-Type", "application/x-apple-plist")]
+-        for item in cookies.buildCookieHeader(endpoint) {
++        for item in cookies.map(Self.normalizedCookie).sorted(by: { $0.path.count > $1.path.count }).buildCookieHeader(endpoint) {
+             headers.append(item)
+         }
+         _ = try approvedEndpoint(endpoint)
+@@ -117,12 +126,46 @@
          return try .init(url: endpoint.absoluteString, method: .POST, headers: .init(headers), body: .data(data))
      }
 
++    private static func normalizedCookie(_ cookie: Cookie) -> Cookie {
++        var cookie = cookie
++        cookie.domain = cookie.domain.map { String($0.drop(while: { $0 == "." })).lowercased() }
++        return cookie
++    }
++
++    private func mergeAuthenticationCookies(_ response: HTTPClient.Response) {
++        guard let host = endpoint.host?.lowercased() else { return }
++        for header in response.headers["set-cookie"] {
++            for incoming in HTTPCookie.cookies(withResponseHeaderFields: ["Set-Cookie": header], for: endpoint) {
++                let domain = String(incoming.domain.drop(while: { $0 == "." })).lowercased()
++                guard domain == "apple.com" || domain.hasSuffix(".apple.com"),
++                      host == domain || host.hasSuffix("." + domain) else { continue }
++                cookies.removeAll {
++                    $0.name == incoming.name && $0.path == incoming.path && Self.normalizedCookie($0).domain == domain
++                }
++                let expiry = incoming.expiresDate?.timeIntervalSince1970
++                if incoming.value.isEmpty || expiry.map({ $0 <= Date().timeIntervalSince1970 }) == true { continue }
++                cookies.append(Cookie(name: incoming.name, value: incoming.value, path: incoming.path, domain: domain,
++                                      expiresAt: expiry, httpOnly: incoming.isHTTPOnly, secure: incoming.isSecure))
++            }
++        }
++    }
++
 +    private static func hasAuthenticationVerdict(_ response: HTTPClient.Response) -> Bool {
 +        guard let buffer = response.body, buffer.readableBytes > 0 else { return false }
 +        guard buffer.readableBytes <= 2 * 1024 * 1024 else { return true }
@@ -46,7 +79,14 @@
      private func parseResponse(_ response: HTTPClient.Response, email: String, password: String, code: String) throws -> LoginResponse {
          APLogger.logResponse(
              status: response.status.code, headers: response.headers.map { ($0.name, $0.value) }, bodySize: response.body?.readableBytes,
-@@ -144,7 +163,16 @@
+         )
+
+-        cookies.mergeCookies(response.cookies)
++        mergeAuthenticationCookies(response)
+
+         let readStoreFrontValue = response.headers["x-set-apple-store-front"].filter { !$0.isEmpty }.compactMap {
+             $0.components(separatedBy: "-").first
+@@ -144,7 +187,16 @@
              return .redirect(url)
          }
 
