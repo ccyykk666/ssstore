@@ -182,27 +182,60 @@ final class NativeAccountDetail: NativePage {
         ])]
     }
     private func rotateToken() {
-        guard !working else { return }
+        guard !working, let account = AppStore.this.accounts.first(where: { $0.id == id }) else { return }
         run { [self] in
+            var session: ApplePackage.Authenticator?
             do {
-                _ = try await AppStore.this.rotate(id: id)
+                let attempt = try await ApplePackage.Authenticator(cookies: account.account.cookie)
+                session = attempt
+                _ = try await AppStore.this.authenticate(email: account.id, password: account.account.password,
+                    code: "", using: attempt, replacing: account)
                 rotationStatus = "已更新"
+            } catch ApplePackage.AuthenticationError.verificationCodeRequired {
+                rotationStatus = "轮换密码令牌"
+                presentVerification(for: account, session: session)
             } catch {
                 rotationStatus = "更新失败：\(error.localizedDescription)"
+                if session == nil {
+                    logger.error("account rotation setup failed: \(StoreDiagnostics.authenticationErrorSummary(error))")
+                }
+                guard !(error is AppStore.AuthenticationError), !(error is AppStore.AccountStorageError),
+                      !(error is CancellationError) else { return }
+                presentVerification(for: account, session: nil)
             }
         }
+    }
+
+    private func presentVerification(for account: AppStore.UserAccount, session: ApplePackage.Authenticator?) {
+        guard viewIfLoaded?.window != nil, presentedViewController == nil else { return }
+        let page = NativeAddAccount(model, replacing: account, challengeSession: session) { [weak self] in
+            self?.rotationStatus = "已更新"
+            self?.reload()
+        }
+        present(NativeFittingNavigation(root: page), animated: true)
     }
 }
 
 @MainActor
 final class NativeAddAccount: NativePage {
-    let email = UITextField()
-    let password = UITextField()
-    let code = UITextField()
-    var authenticator: ApplePackage.Authenticator?
-    var needsCode = false
-    var credentialsChanged = true
-    init(_ model: AppModel) { super.init(model, title: "添加账户") }
+    private let email = UITextField()
+    private let password = UITextField()
+    private let code = UITextField()
+    private let original: AppStore.UserAccount?
+    private let onSuccess: (() -> Void)?
+    private var authenticator: ApplePackage.Authenticator?
+    private var needsCode: Bool
+    private var useSavedPassword: Bool
+
+    init(_ model: AppModel, replacing original: AppStore.UserAccount? = nil,
+         challengeSession: ApplePackage.Authenticator? = nil, onSuccess: (() -> Void)? = nil) {
+        self.original = original
+        self.onSuccess = onSuccess
+        authenticator = challengeSession
+        needsCode = challengeSession != nil
+        useSavedPassword = challengeSession != nil
+        super.init(model, title: original == nil ? "添加账户" : "轮换密码令牌")
+    }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -210,6 +243,8 @@ final class NativeAddAccount: NativePage {
         email.placeholder = "邮箱（Apple ID）"; email.keyboardType = .emailAddress; email.textContentType = .username
         password.placeholder = "密码"; password.isSecureTextEntry = true; password.textContentType = .password
         code.placeholder = "验证码"; code.keyboardType = .numberPad; code.textContentType = .oneTimeCode
+        email.text = original?.id
+        email.isEnabled = original == nil
         for field in [email, password, code] {
             field.font = .preferredFont(forTextStyle: .body); field.adjustsFontForContentSizeCategory = true
             field.autocapitalizationType = .none; field.autocorrectionType = .no
@@ -217,38 +252,87 @@ final class NativeAddAccount: NativePage {
         }
         for field in [email, password] {
             field.addAction(UIAction { [weak self] _ in
-                guard let self else { return }; credentialsChanged = true
-                if needsCode { needsCode = false; code.text = ""; reload() }
+                self?.resetVerification()
             }, for: .editingChanged)
         }
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "取消", primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) })
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "确认", primaryAction: UIAction { [weak self] _ in self?.authenticate() })
     }
-    override func rows() -> [NativeSection] { [NativeSection(rows: Array(repeating: NativeRow(title: ""), count: needsCode ? 3 : 2)), NativeSection(rows: [link(password.isSecureTextEntry ? "显示密码" : "隐藏密码") { [weak self] in self?.password.isSecureTextEntry.toggle(); self?.reload() }])] }
+    private var fields: [UITextField] {
+        var fields = [email]
+        if !useSavedPassword { fields.append(password) }
+        if needsCode { fields.append(code) }
+        return fields
+    }
+    override func rows() -> [NativeSection] {
+        var sections = [NativeSection(rows: Array(repeating: NativeRow(title: ""), count: fields.count))]
+        if !useSavedPassword {
+            sections.append(NativeSection(rows: [link(password.isSecureTextEntry ? "显示密码" : "隐藏密码") { [weak self] in
+                self?.password.isSecureTextEntry.toggle()
+                self?.reload()
+            }]))
+        }
+        return sections
+    }
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         guard indexPath.section == 0 else { return super.tableView(tableView, cellForRowAt: indexPath) }
         let cell = UITableViewCell(); cell.selectionStyle = .none
-        let field = [email, password, code][indexPath.row]
+        let field = fields[indexPath.row]
         field.removeFromSuperview(); field.translatesAutoresizingMaskIntoConstraints = false; cell.contentView.addSubview(field)
         NSLayoutConstraint.activate([field.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor, constant: 18), field.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor, constant: -18), field.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: 16), field.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -16)])
         return cell
     }
-    func authenticate() {
-        guard !working, let emailText = email.text?.trimmingCharacters(in: .whitespacesAndNewlines), !emailText.isEmpty, let secret = password.text, !secret.isEmpty, !needsCode || !(code.text ?? "").isEmpty else { return }
-        view.endEditing(true); working = true; isModalInPresentation = true; navigationController?.isModalInPresentation = true; for field in [email, password, code] { field.isEnabled = false }; navigationItem.rightBarButtonItem?.isEnabled = false; navigationItem.leftBarButtonItem?.isEnabled = false
+    private func resetVerification() {
+        authenticator = nil
+        guard needsCode else { return }
+        needsCode = false
+        useSavedPassword = false
+        code.text = ""
+        reload()
+    }
+
+    private func authenticate() {
+        let secret = useSavedPassword ? original?.account.password : password.text
+        let verificationCode = (code.text ?? "").filter { !$0.isWhitespace }
+        guard !working, let emailText = email.text?.trimmingCharacters(in: .whitespacesAndNewlines), !emailText.isEmpty,
+              let secret, !secret.isEmpty, !needsCode || !verificationCode.isEmpty else { return }
+        view.endEditing(true)
+        setAuthenticationInProgress(true)
         Task { [self] in
-            defer { working = false; isModalInPresentation = false; navigationController?.isModalInPresentation = false; for field in [email, password, code] { field.isEnabled = true }; navigationItem.rightBarButtonItem?.isEnabled = true; navigationItem.leftBarButtonItem?.isEnabled = true }
+            defer { setAuthenticationInProgress(false) }
             do {
-                if credentialsChanged { authenticator = nil; credentialsChanged = false }
                 let session: ApplePackage.Authenticator
                 if let authenticator { session = authenticator } else { session = try await ApplePackage.Authenticator(); authenticator = session }
-                _ = try await AppStore.this.authenticate(email: emailText, password: secret, code: code.text ?? "", using: session)
-                password.text = ""; code.text = ""; dismiss(animated: true)
+                _ = try await AppStore.this.authenticate(email: emailText, password: secret, code: verificationCode,
+                    using: session, replacing: original)
+                password.text = ""
+                code.text = ""
+                onSuccess?()
+                dismiss(animated: true)
+            } catch ApplePackage.AuthenticationError.verificationCodeRequired {
+                needsCode = true
+                code.text = ""
+                reload()
             } catch {
-                if case ApplePackage.AuthenticationError.verificationCodeRequired = error { needsCode = true; reload() }
-                else { authenticator = nil; alert(error.localizedDescription) }
+                if authenticator == nil {
+                    logger.error("authentication setup failed: \(StoreDiagnostics.authenticationErrorSummary(error))")
+                }
+                if needsCode, StoreDiagnostics.isInvalidVerificationCode(error) { code.text = "" }
+                else { resetVerification() }
+                alert(error.localizedDescription)
             }
         }
+    }
+
+    private func setAuthenticationInProgress(_ inProgress: Bool) {
+        working = inProgress
+        isModalInPresentation = inProgress
+        navigationController?.isModalInPresentation = inProgress
+        email.isEnabled = !inProgress && original == nil
+        password.isEnabled = !inProgress
+        code.isEnabled = !inProgress
+        navigationItem.rightBarButtonItem?.isEnabled = !inProgress
+        navigationItem.leftBarButtonItem?.isEnabled = !inProgress
     }
 }
 

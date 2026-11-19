@@ -318,6 +318,14 @@ struct DownloadProtocolChecks {
         }
         let error = NSError(domain: secret, code: 403, userInfo: [NSLocalizedDescriptionKey: secret, NSURLErrorKey: secret])
         precondition(!StoreDiagnostics.errorSummary(error).contains(secret))
+        precondition(StoreDiagnostics.authenticationErrorSummary(error) == StoreDiagnostics.errorSummary(error))
+        let badCode = NSError(domain: "fixture", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "authentication failed: invalid or expired 2FA code (failureType: 5005)",
+        ])
+        precondition(StoreDiagnostics.isInvalidVerificationCode(badCode))
+        precondition(StoreDiagnostics.authenticationErrorSummary(badCode).hasSuffix("reason=invalid-verification-code"))
+        let httpError = NSError(domain: "fixture", code: 1, userInfo: [NSLocalizedDescriptionKey: "authentication failed: HTTP 403"])
+        precondition(StoreDiagnostics.authenticationErrorSummary(httpError).hasSuffix("HTTP=403"))
         print("Download protocol regression checks passed.")
     }
 

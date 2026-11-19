@@ -12,10 +12,14 @@ import Logging
 extension AppStore {
     enum AuthenticationError: LocalizedError {
         case accountNotFound
+        case accountChanged
+        case accountMismatch
         case sessionExpired
         var errorDescription: String? {
             switch self {
             case .accountNotFound: "找不到下载账户，请先添加账户。"
+            case .accountChanged: "账户已更新，请重新打开账户详情。"
+            case .accountMismatch: "验证返回的账户与当前账户不一致。"
             case .sessionExpired: "账户会话已过期，自动刷新未完成，请在账户页重新登录并完成验证。"
             }
         }
@@ -30,9 +34,10 @@ extension AppStore {
             var refreshed = original
             do { try await ApplePackage.Authenticator.rotatePasswordToken(for: &refreshed.account) }
             catch { throw AuthenticationError.sessionExpired }
-            guard let index = accounts.firstIndex(where: { $0.id == id }),
-                  accounts[index].account.passwordToken == expectedToken else { return }
-            accounts[index] = refreshed
+            try Task.checkCancellation()
+            guard let current = accounts.first(where: { $0.id == id }) else { throw AuthenticationError.accountNotFound }
+            guard current.account.passwordToken == expectedToken else { return }
+            _ = try saveRefreshedAccount(refreshed.account, replacing: original)
         }
         sessionRefreshes[id] = pending
         defer { sessionRefreshes.removeValue(forKey: id) }
@@ -40,45 +45,55 @@ extension AppStore {
     }
 
     @MainActor
-    func authenticate(email: String, password: String, code: String, using session: ApplePackage.Authenticator) async throws -> UserAccount {
-        logger.info("starting authentication for user")
+    func authenticate(email: String, password: String, code: String, using session: ApplePackage.Authenticator,
+                      replacing original: UserAccount? = nil) async throws -> UserAccount {
+        let operation = original == nil ? "authentication" : "account rotation"
+        logger.info("starting \(operation) for user")
         do {
             let appleAccount = try await session.authenticate(
                 email: email,
                 password: password,
                 code: code,
             )
-            let userAccount = try save(email: email, account: appleAccount)
-            logger.info("authentication successful for user")
+            try Task.checkCancellation()
+            let userAccount: UserAccount
+            if let original {
+                userAccount = try saveRefreshedAccount(appleAccount, replacing: original)
+            } else {
+                userAccount = try save(email: email, account: appleAccount)
+            }
+            logger.info("\(operation) successful for user")
             return userAccount
+        } catch ApplePackage.AuthenticationError.verificationCodeRequired {
+            logger.info("\(operation) requires a verification code")
+            throw ApplePackage.AuthenticationError.verificationCodeRequired
         } catch {
-            logger.error("authentication failed for user: \(StoreDiagnostics.errorSummary(error))")
+            logger.error("\(operation) failed for user: \(StoreDiagnostics.authenticationErrorSummary(error))")
             throw error
         }
+    }
+
+    private func saveRefreshedAccount(_ account: ApplePackage.Account, replacing original: UserAccount) throws -> UserAccount {
+        guard let current = accounts.first(where: { $0.id == original.id }) else { throw AuthenticationError.accountNotFound }
+        guard current.account.passwordToken == original.account.passwordToken,
+              current.account.password == original.account.password,
+              current.account.directoryServicesIdentifier == original.account.directoryServicesIdentifier
+        else { throw AuthenticationError.accountChanged }
+        guard account.directoryServicesIdentifier == original.account.directoryServicesIdentifier else {
+            throw AuthenticationError.accountMismatch
+        }
+        return try save(email: original.id, account: account)
     }
 
     @MainActor
     @discardableResult
     func rotate(id: UserAccount.ID) async throws -> UserAccount? {
-        logger.info("starting account rotation for user id: \(id)")
         guard let account = accounts.first(where: { $0.id == id }) else {
-            logger.error("account not found for rotation, id: \(id)")
             throw AuthenticationError.accountNotFound
         }
-        do {
-            let newAppleAccount = try await ApplePackage.Authenticator.authenticate(
-                email: account.account.email,
-                password: account.account.password,
-                code: "",
-                cookies: account.account.cookie,
-            )
-            let updatedAccount = try save(email: account.account.email, account: newAppleAccount)
-            logger.info("account rotation successful for user id: \(id)")
-            return updatedAccount
-        } catch {
-            logger.error("account rotation failed: \(StoreDiagnostics.errorSummary(error))")
-            throw error
-        }
+        let session = try await ApplePackage.Authenticator(cookies: account.account.cookie)
+        return try await authenticate(email: account.account.email, password: account.account.password,
+                                      code: "", using: session, replacing: account)
     }
 }
 
