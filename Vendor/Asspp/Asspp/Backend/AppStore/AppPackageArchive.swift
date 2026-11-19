@@ -41,7 +41,7 @@ class AppPackageArchive {
     var canLoadEarlierVersions = true
     var loadingIDs: Set<String> = []
     var metadataErrors: [String: String] = [:]
-    private var webReleaseDates: [String: Date] = [:]
+    private var webHistory: [String: StoreHistorySupport.Metadata]?
     var loading: Bool { isLoadingIndex || !loadingIDs.isEmpty }
 
     @ObservationIgnored private var indexTask: Task<Void, Never>?
@@ -72,13 +72,14 @@ class AppPackageArchive {
         return pkg
     }
 
-    var releaseDates: [String: Date] {
+    var historyMetadata: OrderedDictionary<VersionIdentifier, StoreHistorySupport.Metadata> {
         let items = versionItems
-        let fallback = webReleaseDates
-        let counts = fallback.isEmpty ? [:] : Dictionary(grouping: items.values, by: \.displayVersion).mapValues(\.count)
-        return items.reduce(into: [:]) { dates, entry in
-            let version = entry.value.displayVersion
-            dates[entry.key] = entry.value.releaseDate ?? (counts[version] == 1 ? fallback[version] : nil)
+        guard let webHistory, !webHistory.isEmpty else { return items }
+        let counts = Dictionary(grouping: items.values, by: \.displayVersion).mapValues(\.count)
+        return items.mapValues { entry in
+            let version = entry.displayVersion
+            guard counts[version] == 1 else { return entry }
+            return entry.fillingMissingFields(from: webHistory[version])
         }
     }
 
@@ -92,7 +93,9 @@ class AppPackageArchive {
         started = true
         canLoadEarlierVersions = !fullIndexIsFresh
         if !force, !versionIdentifiers.isEmpty,
-           !webReleaseDates.isEmpty || versionIdentifiers.prefix(25).allSatisfy({ versionItems[$0]?.releaseDate != nil }),
+           webHistory != nil || versionIdentifiers.prefix(25).allSatisfy({
+               versionItems[$0]?.releaseDate != nil && versionItems[$0]?.releaseNotes != nil
+           }),
            (0..<900).contains(Date().timeIntervalSince1970 - catalogFetchedAt.wrappedValue) {
             requestsPaused = false
             return
@@ -118,9 +121,7 @@ class AppPackageArchive {
                 guard generation == session else { return }
                 var retained = versionItems
                 for (key, value) in index.metadata {
-                    if value.releaseDate != nil || retained[key]?.releaseDate == nil || retained[key]?.displayVersion != value.displayVersion {
-                        retained[key] = value
-                    }
+                    retained[key] = value.fillingMissingFields(from: retained[key])
                     metadataErrors.removeValue(forKey: key)
                 }
                 versionItems = retained
@@ -132,26 +133,26 @@ class AppPackageArchive {
                 canLoadEarlierVersions = !fullIndexIsFresh
                 // Do not start authenticated requests just to display recent
                 // versions. Older versions are requested only on demand.
-                if index.identifiers.contains(where: { retained[$0]?.releaseDate == nil }) {
-                    await loadPageReleaseDates(appID: requestedPackage.software.id, bundleID: requestedPackage.software.bundleID,
-                                               region: requestedRegion, platform: platform, session: session)
+                if index.identifiers.contains(where: { retained[$0]?.releaseDate == nil || retained[$0]?.releaseNotes == nil }) {
+                    await loadPageHistory(appID: requestedPackage.software.id, bundleID: requestedPackage.software.bundleID,
+                                          region: requestedRegion, platform: platform, session: session)
                 }
             } catch {
                 guard generation == session, !Task.isCancelled else { return }
                 logger.info("Store history catalog unavailable; using account history")
-                async let publicDates: Void = loadPageReleaseDates(appID: requestedPackage.software.id, bundleID: requestedPackage.software.bundleID,
+                async let publicHistory: Void = loadPageHistory(appID: requestedPackage.software.id, bundleID: requestedPackage.software.bundleID,
                                                                 region: requestedRegion, platform: platform, session: session)
                 do { try await fetchFullIndex(session: session) }
                 catch { handleIndexError(error, session: session) }
-                await publicDates
+                await publicHistory
             }
         }
     }
 
-    private func loadPageReleaseDates(appID: Int64, bundleID: String, region: String, platform: String, session: UUID) async {
-        guard let dates = try? await StoreCatalogHistoryService.pageReleaseDates(appID: appID, bundleID: bundleID, region: region, platform: platform),
+    private func loadPageHistory(appID: Int64, bundleID: String, region: String, platform: String, session: UUID) async {
+        guard let history = try? await StoreCatalogHistoryService.pageHistory(appID: appID, bundleID: bundleID, region: region, platform: platform),
               generation == session, !Task.isCancelled else { return }
-        webReleaseDates = dates
+        webHistory = history
     }
 
     func loadEarlierVersions() {

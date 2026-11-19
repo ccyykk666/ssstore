@@ -7,6 +7,12 @@ import QuickLook
 import UniformTypeIdentifiers
 import ZIPFoundation
 
+private extension AppRecord {
+    func matchesSearchQuery(_ query: String) -> Bool {
+        query.isEmpty || installed.name.localizedCaseInsensitiveContains(query) || id.localizedCaseInsensitiveContains(query)
+    }
+}
+
 @MainActor
 final class NativeApps: NativeSearchPage {
     enum Filter { case all, attention, updates, pending, failed }
@@ -57,7 +63,7 @@ final class NativeApps: NativeSearchPage {
             case .pending: included = matched && record.error == nil && record.status(country: model.country) == .unknown
             case .failed: included = matched && record.error != nil
             }
-            return included && (query.isEmpty || record.installed.name.localizedCaseInsensitiveContains(query) || record.id.localizedCaseInsensitiveContains(query))
+            return included && record.matchesSearchQuery(query)
         }
         let rows = filtered.map { record -> NativeRow in
             let matched = revealed?.contains(record.id) ?? true
@@ -115,7 +121,12 @@ final class NativeStoreSearch: NativeSearchPage {
             UserDefaults.standard.set(first, forKey: "searchRegion")
             reset()
         }
-        navigationItem.hidesSearchBarWhenScrolling = !results.isEmpty
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let includeSystem = UserDefaults.standard.bool(forKey: "includeSystemApps")
+        let localResults = term.isEmpty ? [] : model.records.filter {
+            (includeSystem || !$0.installed.isSystem) && $0.matchesSearchQuery(term)
+        }
+        navigationItem.hidesSearchBarWhenScrolling = !localResults.isEmpty || !results.isEmpty
         let key = ([region, entity.rawValue] + regions).joined(separator: "|")
         if key != menuKey {
         menuKey = key
@@ -127,6 +138,16 @@ final class NativeStoreSearch: NativeSearchPage {
         buttons.forEach { $0.tintColor = .label }
         }
         var sections: [NativeSection] = []
+        if !localResults.isEmpty {
+            sections.append(NativeSection(title: "本机应用", rows: localResults.map { record in
+                NativeRow(title: record.installed.name, detail: record.id,
+                          icon: model.localIconURL(for: record.installed) ?? record.release?.iconURL,
+                          action: { [weak self] in
+                              guard let self else { return }
+                              push(NativeAppDetail(model, id: record.id))
+                          }, compact: true)
+            }))
+        }
         if let error { sections.append(NativeSection(rows: [NativeRow(title: error, color: .systemRed)])) }
         if loading || !results.isEmpty { sections.append(NativeSection(title: loading ? "正在搜索…" : "\(results.count) 个结果", rows: results.map { package in NativeRow(title: package.software.name, detail: package.software.sellerName, icon: URL(string: package.software.artworkUrl), action: { [weak self] in guard let self else { return }; push(NativeProduct(model, package: package, region: region)) }, compact: true) })) }
         return sections

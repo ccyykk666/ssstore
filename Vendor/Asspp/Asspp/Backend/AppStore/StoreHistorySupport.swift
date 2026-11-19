@@ -53,19 +53,30 @@ enum StoreHistorySupport {
     struct Metadata: Codable, Equatable, Sendable {
         let displayVersion: String
         let releaseDate: Date?
+        let releaseNotes: String?
         private let dateSource: String?
         var version: String { displayVersion }
 
-        init(version: String, catalogDate: Date? = nil) {
+        init(version: String, catalogDate: Date? = nil, releaseNotes: String? = nil) {
             displayVersion = version
             releaseDate = catalogDate
+            self.releaseNotes = releaseNotes.flatMap {
+                $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+            }
             dateSource = catalogDate == nil ? nil : "apple-catalog-history-v1"
         }
 
-        private enum CodingKeys: String, CodingKey { case displayVersion, releaseDate, dateSource }
+        func fillingMissingFields(from fallback: Metadata?) -> Metadata {
+            guard let fallback, fallback.displayVersion == displayVersion else { return self }
+            return Metadata(version: displayVersion, catalogDate: releaseDate ?? fallback.releaseDate,
+                            releaseNotes: releaseNotes ?? fallback.releaseNotes)
+        }
+
+        private enum CodingKeys: String, CodingKey { case displayVersion, releaseDate, releaseNotes, dateSource }
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             displayVersion = try values.decode(String.self, forKey: .displayVersion)
+            releaseNotes = try values.decodeIfPresent(String.self, forKey: .releaseNotes)
             dateSource = try values.decodeIfPresent(String.self, forKey: .dateSource)
             // Older caches used the download reply's app-level releaseDate.
             // Preserve version labels, but never display that date as a build date.
@@ -125,7 +136,7 @@ enum StoreHistorySupport {
                   let version = row["versionDisplay"] as? String, !version.isEmpty else { continue }
             let timestamp = (row["releaseTimestamp"] as? String).flatMap(date)
                 ?? (row["releaseDate"] as? String).flatMap(date)
-            let metadata = Metadata(version: version, catalogDate: timestamp)
+            let metadata = Metadata(version: version, catalogDate: timestamp, releaseNotes: row["releaseNotes"] as? String)
             if let previous = known[id] {
                 guard previous == metadata else { throw StoreDownloadError.invalidPackage }
                 continue
@@ -137,7 +148,7 @@ enum StoreHistorySupport {
         return Index(identifiers: identifiers, metadata: known)
     }
 
-    static func pageReleaseDates(_ data: Data, appID: Int64, bundleID: String, region: String) throws -> [String: Date] {
+    static func pageHistory(_ data: Data, appID: Int64, bundleID: String, region: String) throws -> [String: Metadata] {
         guard let html = String(data: data, encoding: .utf8),
               let marker = html.range(of: "id=\"serialized-server-data\""),
               let opening = html[marker.upperBound...].firstIndex(of: ">"),
@@ -164,17 +175,18 @@ enum StoreHistorySupport {
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "EEE MMM dd yyyy HH:mm:ss 'GMT'Z"
         let rows = historyShelves.flatMap { $0["items"] as? [[String: Any]] ?? [] }
-        let labels = Dictionary(grouping: rows.compactMap { row -> (String, String)? in
+        let labels = Dictionary(grouping: rows.compactMap { row -> Metadata? in
             guard row["$kind"] as? String == "TitledParagraph",
-                  let version = row["primarySubtitle"] as? String,
-                  let stamp = row["secondarySubtitle"] as? String else { return nil }
-            return (version, stamp)
-        }, by: { $0.0 })
+                  let version = row["primarySubtitle"] as? String, !version.isEmpty else { return nil }
+            let timestamp = (row["secondarySubtitle"] as? String).flatMap { stamp in
+                date(stamp) ?? formatter.date(from: stamp.components(separatedBy: " (").first ?? stamp)
+            }
+            return Metadata(version: version, catalogDate: timestamp, releaseNotes: row["text"] as? String)
+        }, by: \.displayVersion)
         return labels.compactMapValues { entries in
-            guard entries.count == 1, let stamp = entries.first?.1 else { return nil }
-            if let value = date(stamp) { return value }
-            let timestamp = stamp.components(separatedBy: " (").first ?? stamp
-            return formatter.date(from: timestamp)
+            guard entries.count == 1, let entry = entries.first,
+                  entry.releaseDate != nil || entry.releaseNotes != nil else { return nil }
+            return entry
         }
     }
 
