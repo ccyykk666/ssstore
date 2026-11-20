@@ -192,7 +192,7 @@
 +
 +        let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
 +        // Without Location, only the original signed route can be retried.
-+        if [204, 404, 503].contains(status) || (redirectStatuses.contains(response.status) && missingLocation),
++        if [204, 404, 500, 502, 503, 504].contains(status) || (redirectStatuses.contains(response.status) && missingLocation),
 +           response.headers.first(name: "www-authenticate") == nil,
 +           response.headers.first(name: "x-apple-amd-action") == nil,
 +           !Self.hasAuthenticationVerdict(response) {

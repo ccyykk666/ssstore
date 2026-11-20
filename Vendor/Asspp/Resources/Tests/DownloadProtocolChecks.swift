@@ -373,6 +373,16 @@ struct DownloadProtocolChecks {
         }
         precondition(token == "fixture-token" && attempts == 3 && delays == [2_000, 4_000])
 
+        attempts = 0
+        delays = []
+        let verification = try await StoreAuthenticationRetry.run(verifyingCode: true, response: response, wait: { delays.append($0) }) {
+            attempts += 1
+            let transientStatuses = [503, 404, 500]
+            if attempts <= transientStatuses.count { throw Response(status: transientStatuses[attempts - 1]) }
+            return "verified-token"
+        }
+        precondition(verification == "verified-token" && attempts == 4 && delays == [2_000, 4_000, 4_000])
+
         let date = Date(timeIntervalSince1970: 0)
         attempts = 0
         delays = []
@@ -386,7 +396,8 @@ struct DownloadProtocolChecks {
 
         for (status, retryAfter, expectedAttempts) in [
             (204, nil, 3), (301, nil, 3), (302, nil, 3), (303, nil, 3), (307, nil, 3), (308, nil, 3),
-            (404, nil, 3), (503, nil, 3), (401, nil, 1), (403, nil, 1), (429, nil, 1), (301, "11", 1), (503, "6", 2),
+            (404, nil, 3), (500, nil, 3), (502, nil, 3), (503, nil, 3), (504, nil, 3),
+            (401, nil, 1), (403, nil, 1), (429, nil, 1), (301, "11", 1), (503, "6", 2),
         ] as [(Int, String?, Int)] {
             attempts = 0
             do {

@@ -104,7 +104,7 @@ extension AppStore {
         let trace = session.traceID.uuidString.prefix(8)
         defer { logger.debug("auth [\(trace)] authentication elapsed=\(clock.now - start)") }
         do {
-            return try await StoreAuthenticationRetry.run(response: { error in
+            return try await StoreAuthenticationRetry.run(verifyingCode: !code.isEmpty, response: { error in
                 guard let response = error as? ApplePackage.AuthenticationHTTPError else { return nil }
                 return (response.statusCode, response.retryAfter)
             }, wait: { delay in
