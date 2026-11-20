@@ -79,14 +79,13 @@ final class NativeSettings: NativePage, UIDocumentPickerDelegate {
     private func clearCache() {
         guard !working, !model.busy else { return }
         let startedAt = Date()
-        let protected = model.protectedCacheFiles
         let ids = Set(Downloads.this.manifests.map(\.id))
         cacheStatus = ""
         clearingCache = true
         run { [self] in
-            defer { clearingCache = false }
+            defer { clearingCache = false; model.discardMissingInspectionPaths() }
             do {
-                try await AppCacheCleaner.clear(keeping: protected, downloadIDs: ids, startedAt: startedAt)
+                try await AppCacheCleaner.clear(downloadIDs: ids, startedAt: startedAt)
                 cacheStatus = "缓存已清理"
             } catch {
                 cacheStatus = "清理失败：\(error.localizedDescription)"
@@ -336,16 +335,17 @@ final class NativeInspection: NativePage {
                     sections.append(NativeSection(rows: [link("打开目录") { [weak self] in guard let self else { return }; let page = NativeInspection(model, operation: browser, bundle: bundle, path: path); push(page); page.read() }]))
                 } else { sections.append(NativeSection(rows: [link("读取文件") { [weak self] in guard let self else { return }; let page = NativeInspection(model, operation: .fileRead, bundle: bundle, path: path, source: source); push(page); page.read() }])) }
             }
-            if !result.files.isEmpty { sections.append(NativeSection(title: "文件", rows: result.files.flatMap { file in [link(file.name) { [weak self] in self?.preview(URL(fileURLWithPath: file.path)) }, link("导出 \(file.name)") { [weak self] in self?.share(URL(fileURLWithPath: file.path)) }] })) }
-            if let message = result.message, result.files.isEmpty, result.entries.isEmpty {
+            let files = result.files.filter { FileManager.default.fileExists(atPath: $0.path) }
+            if !files.isEmpty { sections.append(NativeSection(title: "文件", rows: files.flatMap { file in [link(file.name) { [weak self] in self?.preview(URL(fileURLWithPath: file.path)) }, link("导出 \(file.name)") { [weak self] in self?.share(URL(fileURLWithPath: file.path)) }] })) }
+            if let message = result.message, files.isEmpty, result.entries.isEmpty {
                 sections.append(NativeSection(rows: [NativeRow(title: message, color: .secondaryLabel)]))
             }
             let values = valueRows(result.value)
             if !values.isEmpty { sections.append(NativeSection(rows: values)) }
-            else if result.message == nil, result.files.isEmpty, result.entries.isEmpty {
+            else if result.message == nil, files.isEmpty, result.entries.isEmpty {
                 sections.append(NativeSection(rows: [NativeRow(title: "暂无数据", color: .secondaryLabel)]))
             }
-            if let report { sections.append(NativeSection(rows: [link("导出 JSON 报告") { [weak self] in self?.share(report) }])) }
+            if let report, FileManager.default.fileExists(atPath: report.path) { sections.append(NativeSection(rows: [link("导出 JSON 报告") { [weak self] in self?.share(report) }])) }
         }
         return sections
     }
@@ -483,6 +483,7 @@ final class NativeExtractedFile: NativePage {
         }
     }
     override func rows() -> [NativeSection] {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
         var rows = [link("查看内容") { [weak self] in guard let self else { return }; push(NativeFileContents(model: model, file: file, name: file.lastPathComponent)) }, link("预览") { [weak self] in guard let self else { return }; preview(file) }, link("导出") { [weak self] in guard let self else { return }; share(file) }]
         if let size { rows.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
         if let plist { rows.append(NativeRow(title: plist)) }

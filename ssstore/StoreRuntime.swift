@@ -29,6 +29,7 @@ enum StoreRuntime {
         images.expiration = .seconds(180)
         images.keepWhenEnteringBackground = false
         ImageCache.default.memoryStorage.config = images
+        ImageCache.default.diskStorage.config.sizeLimit = 8 * 1024 * 1024
         URLCache.shared.memoryCapacity = min(URLCache.shared.memoryCapacity, 4 * 1024 * 1024)
         LoggingSystem.bootstrap { LogManagerHandler(label: $0) }
         APLogger.verbose = false

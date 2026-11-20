@@ -71,7 +71,7 @@ final class NativeInstalledIcon: NativePage, UIColorPickerViewControllerDelegate
                                       action: working || model.busy ? nil : { [weak self] in self?.readPairedIcon() }))
         }
         var sections = [NativeSection(rows: controls)]
-        if let output {
+        if let output, FileManager.default.fileExists(atPath: output.file.path) {
             sections.append(NativeSection(rows: [
                 NativeRow(title: "预览图标", detail: output.source, icon: output.file,
                           action: { [weak self] in self?.preview(output.file) }),

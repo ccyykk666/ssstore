@@ -231,13 +231,13 @@ final class AppModel: ObservableObject {
         LocalAppIcon.url(for: app, in: iconsDirectory)
     }
 
-    var protectedCacheFiles: [URL] {
-        let icons = records.compactMap { localIconURL(for: $0.installed) }
-        let ignoredIcons = ignoredApps.visibleBundleIDs.compactMap { ignoredApps.application(for: $0) }
-            .compactMap { localIconURL(for: $0) }
-        let reports = inspectionReceipts.values.compactMap { $0.reportPath }
-            .map { URL(fileURLWithPath: $0).deletingLastPathComponent() }
-        return icons + ignoredIcons + reports
+    func discardMissingInspectionPaths() {
+        let missing = inspectionReceipts.filter { _, receipt in
+            receipt.reportPath.map { !FileManager.default.fileExists(atPath: $0) } ?? false
+        }
+        guard !missing.isEmpty else { return }
+        for key in missing.keys { inspectionReceipts[key]?.reportPath = nil }
+        saveInspectionReceipts()
     }
 
     func installPackage(at url: URL, bundleID: String, name: String,
