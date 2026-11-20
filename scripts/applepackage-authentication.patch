@@ -182,22 +182,24 @@
 
          let readStoreFrontValue = response.headers["x-set-apple-store-front"].filter { !$0.isEmpty }.compactMap {
              $0.components(separatedBy: "-").first
-@@ -136,21 +222,40 @@
+@@ -136,21 +222,41 @@
              pod = podValue
          }
 
 +        let status = Int(response.status.code)
 +        let location = response.headers.first(name: "location")?.trimmingCharacters(in: .whitespacesAndNewlines)
 +        let missingLocation = location?.isEmpty ?? true
++
++        let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
 +        // Without Location, only the original signed route can be retried.
-+        if [204, 404, 503].contains(status) || (status == 301 && missingLocation),
++        if [204, 404, 503].contains(status) || (redirectStatuses.contains(response.status) && missingLocation),
 +           response.headers.first(name: "www-authenticate") == nil,
 +           response.headers.first(name: "x-apple-amd-action") == nil,
 +           !Self.hasAuthenticationVerdict(response) {
 +            throw AuthenticationHTTPError(statusCode: status, retryAfter: response.headers.first(name: "retry-after"))
 +        }
 +
-         let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
+-        let redirectStatuses: [HTTPResponseStatus] = [.movedPermanently, .found, .seeOther, .temporaryRedirect, .permanentRedirect]
          if redirectStatuses.contains(response.status) {
 -            guard let location = response.headers.first(name: "location"), let url = URL(string: location) else {
 -                return .failure(Strings.failedToRetrieveRedirect)

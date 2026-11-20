@@ -336,14 +336,15 @@ struct DownloadProtocolChecks {
         let initial = URL(string: "https://buy.itunes.apple.com\(legacy)/?guid=fixture")!
         let query = "routing=A%2FB%2B1&guid=fixture"
         let pod = AuthenticationRoute.normalized("https://p30-buy.itunes.apple.com\(legacy)?\(query)", relativeTo: initial)
-        precondition(pod?.absoluteString == "https://p30-buy.itunes.apple.com\(legacy)/?\(query)")
-        precondition(pod.map(AuthenticationRoute.logAddress) == "p30-buy.itunes.apple.com\(legacy)/")
+        precondition(pod?.absoluteString == "https://p30-buy.itunes.apple.com\(legacy)?\(query)")
+        precondition(pod.map(AuthenticationRoute.logAddress) == "p30-buy.itunes.apple.com\(legacy)")
         let unsafe = URL(string: "https://user:secret@buy.itunes.apple.com\(legacy)?token=fixture")!
         precondition(AuthenticationRoute.logAddress(unsafe) == "<redacted>")
         let relative = AuthenticationRoute.normalized("\(legacy)?\(query)", relativeTo: initial)
-        precondition(relative?.absoluteString == "https://buy.itunes.apple.com\(legacy)/?\(query)")
+        precondition(relative?.absoluteString == "https://buy.itunes.apple.com\(legacy)?\(query)")
+        precondition(AuthenticationRoute.normalized(initial.absoluteString) == initial)
         let native = AuthenticationRoute.normalized("https://auth.itunes.apple.com/auth/v1/native?\(query)")
-        precondition(native?.absoluteString == "https://auth.itunes.apple.com/auth/v1/native/fast/?\(query)")
+        precondition(native?.absoluteString == "https://auth.itunes.apple.com/auth/v1/native?\(query)")
         for bad in ["", " ", "https://buy.itunes.apple.com:8080\(legacy)",
                     "http://buy.itunes.apple.com\(legacy)", "https://buy.itunes.apple.com.attacker.invalid\(legacy)",
                     "https://p30-buy.itunes.apple.com/other", "https://auth.itunes.apple.com/other",
@@ -367,7 +368,7 @@ struct DownloadProtocolChecks {
         let token = try await StoreAuthenticationRetry.run(response: response, wait: { delays.append($0) }) {
             attempts += 1
             if attempts == 1 { throw Response(status: 503) }
-            if attempts == 2 { throw Response(status: 301) }
+            if attempts == 2 { throw Response(status: 302) }
             return "fixture-token"
         }
         precondition(token == "fixture-token" && attempts == 3 && delays == [2_000, 4_000])
@@ -384,7 +385,8 @@ struct DownloadProtocolChecks {
         precondition(attempts == 3 && delays == [3_000, 7_000])
 
         for (status, retryAfter, expectedAttempts) in [
-            (204, nil, 3), (301, nil, 3), (404, nil, 3), (503, nil, 3), (401, nil, 1), (429, nil, 1), (301, "11", 1), (503, "6", 2),
+            (204, nil, 3), (301, nil, 3), (302, nil, 3), (303, nil, 3), (307, nil, 3), (308, nil, 3),
+            (404, nil, 3), (503, nil, 3), (401, nil, 1), (403, nil, 1), (429, nil, 1), (301, "11", 1), (503, "6", 2),
         ] as [(Int, String?, Int)] {
             attempts = 0
             do {
