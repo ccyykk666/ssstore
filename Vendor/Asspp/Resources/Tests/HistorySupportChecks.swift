@@ -1,6 +1,12 @@
 import Foundation
 
 enum HistorySupportChecks {
+    private enum Failure: Error { case example }
+    private actor Counter {
+        private(set) var calls = 0
+        func increment() { calls += 1 }
+    }
+
     static func run() async throws {
         try checkLegacyCacheCleanup()
         let prepared = StorePreparedDownloadCache<String>(lifetime: 10)
@@ -19,6 +25,68 @@ enum HistorySupportChecks {
         await prepared.insert("expired reply", for: identity, now: preparedAt)
         let expired = await prepared.take(for: identity, now: preparedAt.addingTimeInterval(10))
         precondition(expired == nil, "Expired asset URLs must be fetched again")
+
+        let url = URL(string: "https://downloaddispatch.itunes.apple.com" + StoreDownloadProtocol.entPath)!
+        let count = Counter()
+        let cache = StoreBagCache(lifetime: 10)
+        let now = Date(timeIntervalSince1970: 1000)
+        let load: @Sendable () async throws -> URL? = {
+            await count.increment()
+            try await Task.sleep(nanoseconds: 20_000_000)
+            return url
+        }
+        async let first = cache.endpoint(for: "AABB", now: now, load: load)
+        async let second = cache.endpoint(for: "aabb", now: now, load: load)
+        let results = try await (first, second)
+        precondition(results.0 == url && results.1 == url)
+        var calls = await count.calls
+        precondition(calls == 1, "Concurrent bag requests must coalesce")
+        _ = try await cache.endpoint(for: "aabb", now: now.addingTimeInterval(9), load: load)
+        calls = await count.calls
+        precondition(calls == 1)
+        _ = try await cache.endpoint(for: "aabb", now: now.addingTimeInterval(10), load: load)
+        _ = try await cache.endpoint(for: "different", now: now, load: load)
+        calls = await count.calls
+        precondition(calls == 3, "Expiry and device keys must be respected")
+
+        let noEndpoint = StoreBagCache()
+        let legacyCalls = Counter()
+        for _ in 0..<2 {
+            let result = try await noEndpoint.endpoint(for: "legacy") {
+                await legacyCalls.increment()
+                return nil
+            }
+            precondition(result == nil)
+        }
+        calls = await legacyCalls.calls
+        precondition(calls == 1, "A valid legacy bag without ent/download is cacheable")
+
+        let failureCache = StoreBagCache()
+        do {
+            _ = try await failureCache.endpoint(for: "retry") { throw Failure.example }
+            fatalError("Expected bag failure")
+        } catch Failure.example {}
+        let recovered = try await failureCache.endpoint(for: "retry") { url }
+        precondition(recovered == url, "A failed bag must not poison its cache")
+
+        let cancellationCache = StoreBagCache()
+        let pendingCount = Counter()
+        let pendingLoad: @Sendable () async throws -> URL? = {
+            await pendingCount.increment()
+            try await Task.sleep(nanoseconds: 40_000_000)
+            return url
+        }
+        let cancelled = Task { try await cancellationCache.endpoint(for: "shared", load: pendingLoad) }
+        // Wait for the shared fetch to exist; cancellation of one waiter must
+        // not cancel another request using the same bag.
+        while await pendingCount.calls == 0 { await Task.yield() }
+        cancelled.cancel()
+        let surviving = try await cancellationCache.endpoint(for: "shared", load: pendingLoad)
+        do { _ = try await cancelled.value; fatalError("Cancelled waiter returned success") }
+        catch is CancellationError {}
+        precondition(surviving == url)
+        calls = await pendingCount.calls
+        precondition(calls == 1)
 
         let identifiers = StoreHistorySupport.uniqueIdentifiers(["9", "", "2", "9", "opaque", "10"])
         precondition(identifiers == ["9", "2", "opaque", "10"], "Do not sort opaque version IDs")
@@ -47,22 +115,20 @@ enum HistorySupportChecks {
         // Regression: a syntactically valid app-level release date must never
         // be labelled as the release date of a historical version.
         let downloadMetadata = try StoreHistorySupport.details([
-            "bundleShortVersionString": "9.04.66", "releaseDate": "2011-09-09T02:02:04Z",
-            "releaseNotes": "App-level notes"])
-        precondition(downloadMetadata.releaseDate == nil && downloadMetadata.releaseNotes == nil)
+            "bundleShortVersionString": "9.04.66", "releaseDate": "2011-09-09T02:02:04Z"])
+        precondition(downloadMetadata.releaseDate == nil)
         let legacy = Data(#"{"displayVersion":"9.04.66","releaseDate":337684924}"#.utf8)
         let migrated = try JSONDecoder().decode(StoreHistorySupport.Metadata.self, from: legacy)
-        precondition(migrated.displayVersion == "9.04.66" && migrated.releaseDate == nil && migrated.releaseNotes == nil)
+        precondition(migrated.displayVersion == "9.04.66" && migrated.releaseDate == nil)
 
         let versions: [[String: Any]] = [
             ["externalVersionId": 893919123, "versionDisplay": "9.04.70",
              "releaseDate": "2026-10-27", "releaseTimestamp": "2026-10-27T11:28:26Z"],
             ["externalVersionId": 893599338, "versionDisplay": "9.04.66",
-             "releaseDate": "2026-10-22", "releaseTimestamp": "2026-10-22T02:27:46Z",
-             "releaseNotes": "这一版本的更新说明\n第二行"],
+             "releaseDate": "2026-10-22", "releaseTimestamp": "2026-10-22T02:27:46Z"],
             ["externalVersionId": 893256306, "versionDisplay": "9.04.65",
              "releaseDate": "2026-10-21", "releaseTimestamp": "2026-10-21T09:15:51.123Z"],
-            ["externalVersionId": "892756980", "versionDisplay": "9.04.60", "releaseDate": "2026-10-12", "releaseNotes": "  "],
+            ["externalVersionId": "892756980", "versionDisplay": "9.04.60", "releaseDate": "2026-10-12"],
             ["externalVersionId": "0", "versionDisplay": "invalid"],
         ]
         func catalogData(id: String = "458318329", bundle: String = "com.tencent.live4iphone",
@@ -78,8 +144,6 @@ enum HistorySupportChecks {
         precondition(catalog.identifiers == ["893919123", "893599338", "893256306", "892756980"])
         precondition(catalog.metadata["893599338"]?.displayVersion == "9.04.66")
         precondition(catalog.metadata["893599338"]?.releaseDate == StoreHistorySupport.date("2026-10-22T02:27:46Z"))
-        precondition(catalog.metadata["893599338"]?.releaseNotes == "这一版本的更新说明\n第二行")
-        precondition(catalog.metadata["893919123"]?.releaseNotes == nil && catalog.metadata["892756980"]?.releaseNotes == nil)
         precondition(catalog.metadata["893256306"]?.releaseDate != nil)
         precondition(catalog.metadata["892756980"]?.releaseDate == StoreHistorySupport.date("2026-10-12"))
         let iPad = try StoreHistorySupport.catalogIndex(catalogData(families: ["iphone", "ipod"]), appID: 458318329,
@@ -87,7 +151,7 @@ enum HistorySupportChecks {
         precondition(iPad.identifiers == catalog.identifiers && iPad.metadata == catalog.metadata)
         let trusted = catalog.metadata["893599338"]!
         let roundTrip = try JSONDecoder().decode(StoreHistorySupport.Metadata.self, from: JSONEncoder().encode(trusted))
-        precondition(roundTrip == trusted, "Version dates and notes survive cache reload")
+        precondition(roundTrip == trusted, "Trusted dates survive cache reload")
         for invalid in try [
             catalogData(id: "999"),
             catalogData(bundle: "other.app"),
@@ -111,25 +175,18 @@ enum HistorySupportChecks {
           "titleOfferDisplayProperties":{"adamId":"6781589798","bundleId":"com.qianwen.ime"},
           "appPlatforms":["phone"],
           "shelfMapping":{"mostRecentVersion":{"seeAllAction":{"pageData":{"shelves":[{"items":[
-            {"$kind":"TitledParagraph","primarySubtitle":"1.1.47","secondarySubtitle":"Tue Nov 17 2026 13:52:02 GMT+0000 (Coordinated Universal Time)","text":"该版本的网页更新说明"},
-            {"$kind":"TitledParagraph","primarySubtitle":"1.1.46","secondarySubtitle":"2026-11-17T01:45:43Z","text":"第一条"},
-            {"$kind":"TitledParagraph","primarySubtitle":"1.1.46","secondarySubtitle":"2026-11-16T01:45:43Z","text":"第二条"},
-            {"$kind":"TitledParagraph","primarySubtitle":"1.1.45","text":"无日期的更新说明"}
+            {"$kind":"TitledParagraph","primarySubtitle":"1.1.47","secondarySubtitle":"Tue Nov 17 2026 13:52:02 GMT+0000 (Coordinated Universal Time)"},
+            {"$kind":"TitledParagraph","primarySubtitle":"1.1.46","secondarySubtitle":"2026-11-17T01:45:43Z"},
+            {"$kind":"TitledParagraph","primarySubtitle":"1.1.46","secondarySubtitle":"2026-11-16T01:45:43Z"}
           ]}]}}}}
         }}]}
         </script>
         """.utf8)
-        let history = try StoreHistorySupport.pageHistory(page, appID: 6781589798, bundleID: "com.qianwen.ime", region: "CN")
-        precondition(history.count == 2 && history["1.1.46"] == nil)
-        precondition(history["1.1.47"]?.releaseDate == StoreHistorySupport.date("2026-11-17T13:52:02Z"))
-        precondition(history["1.1.47"]?.releaseNotes == "该版本的网页更新说明")
-        precondition(history["1.1.45"]?.releaseDate == nil && history["1.1.45"]?.releaseNotes == "无日期的更新说明")
-        let notesOnly = StoreHistorySupport.Metadata(version: "1.1.47", releaseNotes: "目录说明")
-        let mergedDetails = notesOnly.fillingMissingFields(from: history["1.1.47"])
-        precondition(mergedDetails.releaseDate != nil && mergedDetails.releaseNotes == "目录说明")
+        let dates = try StoreHistorySupport.pageReleaseDates(page, appID: 6781589798, bundleID: "com.qianwen.ime", region: "CN")
+        precondition(dates.count == 1 && dates["1.1.47"] == StoreHistorySupport.date("2026-11-17T13:52:02Z"))
         do {
-            _ = try StoreHistorySupport.pageHistory(page, appID: 6781589798, bundleID: "com.qianwen.ime", region: "US")
-            fatalError("Accepted version details from the wrong storefront")
+            _ = try StoreHistorySupport.pageReleaseDates(page, appID: 6781589798, bundleID: "com.qianwen.ime", region: "US")
+            fatalError("Accepted release dates from the wrong storefront")
         } catch StoreDownloadError.catalogUnavailable {}
         let request = try StoreCatalogHistoryService.request(appID: 458318329, region: "CN", platform: "iphone")
         precondition(request.url?.host == "apps.apple.com" && request.url?.scheme == "https")

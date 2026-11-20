@@ -41,6 +41,9 @@ class SelectionTests(unittest.TestCase):
             "ssstore/UIKit/FileContents.swift": {"core"},
             "scripts/prepare-performance-devicekit.py": {"performance"},
             "scripts/patches/rsd-discovery.patch": {"performance"},
+            "scripts/applepackage-authentication.patch": {"downloads"},
+            "scripts/applepackage-authentication-route.swift": {"downloads"},
+            selection.STORE + "Asspp/Backend/AppStore/StoreAuthenticationRetry.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreProtocol.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreHistorySupport.swift": {"downloads"},
             selection.STORE + "Asspp/Backend/AppStore/StoreCatalogHistoryService.swift": {"downloads"},
@@ -49,11 +52,13 @@ class SelectionTests(unittest.TestCase):
             selection.STORE + "Asspp/App/Localizable.xcstrings": {"localization"},
             selection.STORE + "Resources/Scripts/check.downloads.sh": {"downloads", "localization"},
             "scripts/select-ci-tests.py": {"selection"},
+            "ssstore/KBSyncGenerator.swift": {"kbsync"},
             "ssstore/ManifestAPICredentials.swift": {"manifest_credentials"},
             "ssstore/InstallerManifestService.swift": {"manifest_credentials"},
             "ssstore/UIKit/ManifestServiceScreen.swift": {"manifest_credentials"},
             "scripts/tests/ManifestCredentialChecks.swift": {"manifest_credentials", "selection"},
-            selection.STORE + "Asspp/Backend/AppStore/StoreDownloadService.swift": {"downloads"},
+            "scripts/kbsync-runtime.ts": {"kbsync"},
+            selection.STORE + "Asspp/Backend/AppStore/StoreDownloadService.swift": {"downloads", "kbsync"},
         }
         for path, expected in cases.items():
             with self.subTest(path=path):

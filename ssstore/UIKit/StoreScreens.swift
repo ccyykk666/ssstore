@@ -43,6 +43,7 @@ final class NativeProductHeaderCell: UITableViewCell {
 
 @MainActor
 final class NativeProduct: NativePage {
+    private var prewarm: Task<Void, Never>?
     let package: AppStore.AppPackage
     let region: String
     var accountID: String?
@@ -53,6 +54,21 @@ final class NativeProduct: NativePage {
         navigationItem.largeTitleDisplayMode = .never
     }
     required init?(coder: NSCoder) { fatalError() }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        prewarm = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }
+            guard let self, let id = self.accountID,
+                  let account = AppStore.this.accounts.first(where: { $0.id == id }) else { return }
+            let guid = ApplePackage.Configuration.deviceIdentifier
+            if await KBSyncStore.shared.cached(guid: guid, dsid: account.account.directoryServicesIdentifier) == nil {
+                _ = try? await KBSyncStore.shared.generate(guid: guid, dsid: account.account.directoryServicesIdentifier)
+            }
+        }
+    }
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated); prewarm?.cancel(); prewarm = nil
+    }
     override func rows() -> [NativeSection] {
         let accounts = AppStore.this.eligibleAccounts(for: region)
         if !accounts.contains(where: { $0.id == accountID }) { accountID = accounts.first?.id }
@@ -66,11 +82,7 @@ final class NativeProduct: NativePage {
         header.append(link(working ? "正在请求…" : "下载") { [weak self] in self?.download() })
         var details = [NativeRow(title: "Bundle ID", detail: app.bundleID), NativeRow(title: "开发者", detail: app.sellerName), NativeRow(title: "类别", detail: app.primaryGenreName), NativeRow(title: "兼容性", detail: app.minimumOsVersion + "+")]
         if let size = app.fileSizeBytes.flatMap(Int64.init) { details.append(NativeRow(title: "大小", detail: ByteCountFormatter.string(fromByteCount: size, countStyle: .file))) }
-        var sections = [NativeSection(rows: header)]
-        if let notes = app.releaseNotes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            sections.append(NativeSection(title: "新功能", rows: [NativeRow(title: notes)]))
-        }
-        sections.append(NativeSection(title: "详情", rows: details))
+        var sections = [NativeSection(rows: header), NativeSection(title: "详情", rows: details), NativeSection(title: "新功能", rows: [NativeRow(title: app.releaseNotes ?? "")])]
         if accountID == nil { sections.append(NativeSection(rows: [NativeRow(title: "请添加此地区的账户。", color: .systemOrange)])) }
         return sections
     }
@@ -103,27 +115,30 @@ final class NativeHistory: NativePage {
         reload()
         for index in tableView.indexPathsForVisibleRows ?? [] { loadVersion(at: index) }
     }
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        if !(navigationController?.topViewController is NativeHistoryVersion) { archive.cancelHistoryLoading() }
-    }
+    override func viewDidDisappear(_ animated: Bool) { super.viewDidDisappear(animated); archive.cancelHistoryLoading() }
     override func rows() -> [NativeSection] {
         navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: UIMenu(children: [UIAction(title: "加载更多", image: UIImage(systemName: "list.bullet.below.rectangle")) { [weak self] _ in self?.archive.populateNextVersionItems() }, UIAction(title: "刷新", image: UIImage(systemName: "arrow.clockwise")) { [weak self] _ in self?.archive.loadHistory(force: true) }]))
         var rows: [NativeRow] = []
+        if working { rows.append(NativeRow(title: "正在请求下载…")) }
         if archive.isLoadingIndex { rows.append(NativeRow(title: "正在加载历史版本...")) }
         if let error = archive.error { rows.append(NativeRow(title: error, color: .systemOrange)) }
         versionRowOffset = rows.count
         displayedVersionIDs = archive.versionIdentifiers
-        let metadata = archive.historyMetadata
+        let releaseDates = archive.releaseDates
         for key in displayedVersionIDs {
             if let package = archive.package(for: key) {
-                let date = metadata[key]?.releaseDate.map { date in
+                let date = releaseDates[key].map { date in
                     let thisYear = Calendar(identifier: .gregorian).isDate(date, equalTo: Date(), toGranularity: .year)
                     return Self.dateFormatters[thisYear ? 0 : 1].string(from: date)
                 }
                 rows.append(NativeRow(title: package.software.version, color: .systemBlue, action: { [weak self] in
-                    guard let self else { return }
-                    push(NativeHistoryVersion(model, archive: archive, package: package, versionID: key))
+                    guard let self, let account = archive.accountIdentifier else { self?.alert("请先选择账户。"); return }
+                    confirm("下载 \(package.software.version)？") { [weak self] in self?.run {
+                        guard let self else { return }
+                        self.archive.cancelHistoryLoading()
+                        let request = try await Downloads.this.startDownload(for: package, accountID: account)
+                        self.push(NativePackage(self.model, package: request))
+                    } }
                 }, badge: date))
             } else {
                 rows.append(NativeRow(title: key, detail: archive.metadataErrors[key] ?? (archive.loadingIDs.contains(key) ? "加载中…" : "点按加载"), action: { [weak self] in self?.archive.populateVersionItem(for: key, retry: true) }))
@@ -138,52 +153,6 @@ final class NativeHistory: NativePage {
     private func loadVersion(at indexPath: IndexPath) {
         let index = indexPath.row - versionRowOffset
         if displayedVersionIDs.indices.contains(index) { archive.populateVersionItem(for: displayedVersionIDs[index]) }
-    }
-}
-
-@MainActor
-private final class NativeHistoryVersion: NativePage {
-    private let archive: AppPackageArchive
-    private let package: AppStore.AppPackage
-    private let versionID: String
-
-    init(_ model: AppModel, archive: AppPackageArchive, package: AppStore.AppPackage, versionID: String) {
-        self.archive = archive
-        self.package = package
-        self.versionID = versionID
-        super.init(model, title: "版本 \(package.software.version)")
-        navigationItem.largeTitleDisplayMode = .never
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if archive.historyMetadata[versionID]?.releaseNotes == nil { archive.loadHistory() }
-    }
-
-    override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        if !(navigationController?.topViewController is NativeHistory) { archive.cancelHistoryLoading() }
-    }
-
-    override func rows() -> [NativeSection] {
-        let notes = archive.historyMetadata[versionID]?.releaseNotes
-        return [
-            NativeSection(title: "新功能", rows: [NativeRow(title: notes ?? (archive.isLoadingIndex ? "正在加载…" : "暂无更新日志"))]),
-            NativeSection(rows: [working ? NativeRow(title: "正在请求下载…") : link("下载") { [weak self] in self?.download() }]),
-        ]
-    }
-
-    private func download() {
-        guard let accountID = archive.accountIdentifier else { alert("请先选择账户。"); return }
-        confirm("下载 \(package.software.version)？") { [weak self] in
-            self?.run { [weak self] in
-                guard let self else { return }
-                archive.cancelHistoryLoading()
-                let request = try await Downloads.this.startDownload(for: package, accountID: accountID)
-                if navigationController?.topViewController === self { push(NativePackage(model, package: request)) }
-            }
-        }
     }
 }
 

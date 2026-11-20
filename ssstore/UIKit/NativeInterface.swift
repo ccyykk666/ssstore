@@ -14,12 +14,10 @@ enum NativeIconLoading {
     static func load(_ request: NativeIconRequest, completion: @escaping (UIImage?) -> Void) -> (() -> Void)? {
         let source: Kingfisher.Source = request.url.isFileURL
             ? .provider(LocalFileImageDataProvider(fileURL: request.url)) : .network(ImageResource(downloadURL: request.url))
-        var options: KingfisherOptionsInfo = [
+        let task = KingfisherManager.shared.retrieveImage(with: source, options: [
             .processor(DownsamplingImageProcessor(size: CGSize(width: request.size, height: request.size))),
             .scaleFactor(request.scale), .backgroundDecode,
-        ]
-        if request.url.isFileURL { options.append(.cacheMemoryOnly) }
-        let task = KingfisherManager.shared.retrieveImage(with: source, options: options) { result in
+        ]) { result in
             DispatchQueue.main.async {
                 if case let .success(value) = result { completion(value.image) } else { completion(nil) }
             }

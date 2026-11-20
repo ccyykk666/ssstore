@@ -1,0 +1,108 @@
+{
+  "repository": "ccyykk666/AssppWeb",
+  "revision": "dda77c915e9b61469ca7b4995c7515a6eb0e3115",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha": "c008d0dcb71789fd65fc03d4b517442d798f233c"
+    },
+    {
+      "path": "frontend/scripts/unicorn-wasm-patch/build.sh",
+      "sha": "e25ed0c8e5e3656b9fbbde2d9b428ca3d45c7c19"
+    },
+    {
+      "path": "frontend/scripts/unicorn-wasm-patch/glue.c",
+      "sha": "10f515e804d0e83de5a1ecfa71e705ba15a91be1"
+    },
+    {
+      "path": "frontend/scripts/unicorn-wasm-patch/patches/unicorn-2.1.4-tci-wasm.patch",
+      "sha": "da5ce489f51ff614f74391225ae7315f2bbab865"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/engine.ts",
+      "sha": "c1c5c2090fd09a321ad1884648f8c439a4544272"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/machImage.ts",
+      "sha": "d9743c4cca537875bc4ceb558ce8d806f22ef214"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/machine.ts",
+      "sha": "103af88aaac7d83f9204497d9d145f3445e7274e"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/shims.ts",
+      "sha": "b81c98aad150db103fb545ea4921006a5bbdccd6"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/storeAgent.ts",
+      "sha": "a26f17b8771820272dd11844073b876dbb075476"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/types.ts",
+      "sha": "3de137c069694c673a9b3735d561daf9ed512af0"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/vendor/COPYING",
+      "sha": "00ccfbb62888382f5a4ce201a9d5e4bf85bbc373"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/vendor/COPYING.LGPL2",
+      "sha": "5bc8fb2c8f757e34a0d8f4644f589d57609e213f"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/vendor/COPYING_GLIB",
+      "sha": "bf50f20de6ef55b52fe7832d3a4ed05f0c69d452"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/vendor/unicorn.mjs",
+      "sha": "2d28ccd8b44a26a2b596ad0e763682eaa18dd97f"
+    },
+    {
+      "path": "frontend/src/apple/kbsync/vendor/unicorn.wasm",
+      "sha": "19b6a910676313d88652b05d2ac2dde9e38cd4d5"
+    }
+  ],
+  "assets": [
+    {
+      "name": "CommerceKit",
+      "path": "./System/Library/PrivateFrameworks/CommerceKit.framework/Versions/A/CommerceKit",
+      "size": 3271840,
+      "sha256": "b84ff12c21987856c0a17b78f1ad82b73195a6dec5f3b208a17d245555a2c8a2",
+      "strippedSize": 3271840,
+      "strippedSha256": "b84ff12c21987856c0a17b78f1ad82b73195a6dec5f3b208a17d245555a2c8a2"
+    },
+    {
+      "name": "CommerceCore",
+      "path": "./System/Library/PrivateFrameworks/CommerceKit.framework/Versions/A/Frameworks/CommerceCore.framework/Versions/A/CommerceCore",
+      "size": 207744,
+      "sha256": "c5401e57402230f3c876409d295319ddf1e61287bc882683c5d61277be7bc1f2",
+      "strippedSize": 115712,
+      "strippedSha256": "05707cd937798f2b5189471f513672ac6242ffbffc38f06ed2e4fb4345156819"
+    },
+    {
+      "name": "CoreFP",
+      "path": "./System/Library/PrivateFrameworks/CoreFP.framework/Versions/A/CoreFP",
+      "size": 29014912,
+      "sha256": "f19141336be4198d0f8991bb00017c915efc7aeaece36c345f7faa1237ea6074",
+      "strippedSize": 14904192,
+      "strippedSha256": "97c899f2fb076bdf7f810fe00ceb335d4af85efab0f2de737ad0aedd991c8277"
+    },
+    {
+      "name": "CoreFP.icxs",
+      "path": "./System/Library/PrivateFrameworks/CoreFP.framework/Versions/A/CoreFP.icxs",
+      "size": 5288352,
+      "sha256": "473e78af86979f5bd4f6269561caf770b3d16c098d918846eeac8cdd2fe6566a",
+      "strippedSize": 5288352,
+      "strippedSha256": "473e78af86979f5bd4f6269561caf770b3d16c098d918846eeac8cdd2fe6566a"
+    },
+    {
+      "name": "storeagent",
+      "path": "./System/Library/PrivateFrameworks/CommerceKit.framework/Versions/A/Resources/storeagent",
+      "size": 2580176,
+      "sha256": "70ce036f9dbcbc04db9511ebd08de0dd3cbc35ccc9d44b089c90170cb5453c59",
+      "strippedSize": 2580176,
+      "strippedSha256": "70ce036f9dbcbc04db9511ebd08de0dd3cbc35ccc9d44b089c90170cb5453c59"
+    }
+  ]
+}

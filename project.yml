@@ -39,12 +39,10 @@ settings:
     SWIFT_VERSION: "5.9"
     CLANG_ENABLE_MODULES: YES
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    MARKETING_VERSION: "0.12.0"
-    CURRENT_PROJECT_VERSION: "108"
+    MARKETING_VERSION: "0.13.0"
+    CURRENT_PROJECT_VERSION: "109"
   configs:
     Release:
-      ASSETCATALOG_COMPILER_OPTIMIZATION: space
-      SWIFT_OPTIMIZATION_LEVEL: "-Osize"
       # Keep crash symbols in a separate dSYM instead of shipping the executable's
       # full symbol table in every IPA. Debug builds retain their usual symbols.
       DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
@@ -65,6 +63,9 @@ targets:
           - Interface
           - Backend/DeviceCTL
           - Interface/Download/DeviceCTLInstallSection.swift
+      - path: build/KBSyncRuntime
+        type: folder
+        buildPhase: resources
     info:
       path: ssstore/Info.plist
       properties:

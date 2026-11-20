@@ -87,7 +87,7 @@ ssstore 是面向 iPhone 和 iPad 的应用清单、版本查询、商店下载�
 - 账户凭据和会话令牌通过系统 Keychain/上游账户存储管理。用户主动下载免费应用时，若服务返回缺少许可，会使用当前会话获取免费许可并重试一次下载，不预先轮换有效令牌；付费应用仍须已有购买许可。读取清单与搜索不会请求购买许可。验证码/双重验证按 Apple 返回的认证流程完成。
 - 下载页展示本地软件包状态，可继续、暂停、重试、分享或左滑删除。下载完成后的软件包可以预览或通过系统分享/AirDrop 导出。
 - 下载采用原生 `URLSessionDownloadTask` 直接写盘，进度合并后每 0.25 秒最多通知界面一次。同一账户、应用、平台和版本的并发准备请求会合并，已有下载任务直接复用。暂停保存系统续传数据，恢复时交由 URLSession 请求剩余内容，不使用同步 HEAD 探测；文件校验和签名整理在后台执行。历史版本查询返回的可下载内容按账户会话、设备、地区、平台和版本在内存保留至多 60 秒，供一次下载复用，减少重复鉴权请求。
-- 从 93 版起，下载经 Apple 的兼容接口获取安装包。最新版先查询对应地区和设备类型的版本 ID，旧版沿用指定的版本 ID。版本 ID 在 volumeStore、redownload 及 update 请求中保持一致。
+- kbsync 验证数据按 DSID/GUID 保存在本机 Keychain，避免每次冷启动重新运行本地解释器；缓存被服务端拒绝时按现有规则失效并重新生成一次。首次生成与最新版本目录查询并行进行。首次验证、Apple 服务响应与 CDN/网络带宽仍会影响开始时间和实际速度，不承诺固定加速倍数。
 - 39 版切换下载引擎后，旧引擎尚未完成的任务需要重新传输一次；已经完成的 IPA 保留。后续暂停使用原生续传数据。
 - 可选 Remote Pairing 安装由用户明确启动：通过已配对的本机网络连接上传已下载 IPA 到设备暂存区，再请求设备 InstallationProxy 安装，完成后清理由本次操作创建的暂存目录。原 IPA 会保留。系统仍负责验证应用签名及许可；此流程不提供重签名、越狱或绕过 Apple 验证的能力。
 - 证书方式是另一条单独安装路径，继续遵守 TLS 信任要求。配对安装不需要安装本地 HTTPS 根证书。
@@ -112,13 +112,14 @@ ssstore 是面向 iPhone 和 iPad 的应用清单、版本查询、商店下载�
 | `ssstore/UIKit/DeviceScreens.swift` | 设置、配对、设备只读检查器、日志及文件浏览 |
 | `ssstore/AppModel.swift` | 应用清单生命周期、版本比较调度、偏好和本地状态 |
 | `ssstore/OnDevicePairingController.swift` | iOS Remote Pairing 原生配对桥接 |
+| `ssstore/KBSyncGenerator.swift` | 本机 WebKit 中运行的 kbsync 准备与调用 |
 | `ssstore/StoreRuntime.swift` | 商店运行时、日志、下载并发及本地目录初始化 |
 | `Vendor/Asspp/Asspp/Backend/Downloader/PackageTransfer.swift` | 原生文件下载、进度合并、暂停与续传 |
 | `Packages/UpdateCore/` | 清单模型与解析、版本匹配、忽略名单、配对记录和只读检查模型；含 Swift 测试 |
 | `Packages/DeviceKit/` | 已固定版本的 `IDevice.xcframework` 二进制桥接包 |
 | `Vendor/Asspp/` | Asspp 商店、账户、下载、IPA 管理和安装代码的集成副本 |
-| `Vendor/AssppWeb/` | 上游许可文件 |
-| `scripts/` | 设备桥接准备、CI 检查选择、接口索引生成和构建脚本 |
+| `Vendor/AssppWeb/` | kbsync WebKit/WASM 构建输入及上游许可文件 |
+| `scripts/` | 设备桥接准备、kbsync 资源准备、CI 检查选择、接口索引生成和构建脚本 |
 | `docs/API_REFERENCE.md` | 设备只读接口说明 |
 | `docs/UIKIT_MIGRATION.md` | UIKit 页面迁移范围与验证边界 |
 | `THIRD_PARTY_NOTICES.md` | 第三方来源、版本和当前许可/再分发说明 |
@@ -170,9 +171,9 @@ brew install xcodegen
 bash scripts/build-ipa.sh
 ```
 
-`build-ipa.sh` 会准备 IDevice 二进制、校验并准备固定版本的 ApplePackage 认证补丁、运行 XcodeGen、复制已锁定的 Swift Package 解析文件，并用 Release / generic iOS destination / `CODE_SIGNING_ALLOWED=NO` 编译。成功后输出 `dist/ssstore.ipa`（未签名）。脚本自身只负责编译打包；CI 在它之前独立选择并执行相关检查。
+`build-ipa.sh` 会准备 IDevice 二进制、生成 kbsync 运行资源、应用 ApplePackage 登录修复、运行 XcodeGen、复制已锁定的 Swift Package 解析文件，并用 Release / generic iOS destination / `CODE_SIGNING_ALLOWED=NO` 编译。成功后输出 `dist/ssstore.ipa`（未签名）。CI 单独运行受改动影响的检查。
 
-首次构建需要网络访问依赖。CI 使用缓存减少重复下载。请勿把签名证书、Apple 凭据、个人配对文件、账户 token 或本机私密日志加进资源目录。
+首次构建需要网络访问依赖及声明的 kbsync 资源。CI 使用缓存减少重复下载。请勿把签名证书、Apple 凭据、个人配对文件、账户 token 或本机私密日志加进资源目录。
 
 ### 检查选择规则
 
@@ -184,6 +185,7 @@ bash scripts/build-ipa.sh
 | UpdateCore | `Packages/UpdateCore/` |
 | 下载/历史协议 | Asspp 下载、历史服务及协议检查文件 |
 | 商店本地化 | Asspp strings、本地化检查和相关协议文件 |
+| kbsync | 生成器、runtime、worker、HTML、manifest 和 smoke 检查 |
 
 可用的成功基线无法确定时会运行全部相关检查，避免静默跳过。如果只改 `docs/`，当前 push path 规则不触发 iOS 构建，也不会消耗 Actions 分钟数。文档提交不等于重新构建 IPA。
 
@@ -191,10 +193,10 @@ bash scripts/build-ipa.sh
 
 - Swift Package 版本固定在 `project.yml`；生成项目的依赖解析文件来源于 `Vendor/Asspp/Asspp.xcworkspace/xcshareddata/swiftpm/Package.resolved`。
 - `UpdateCore`、`DeviceKit` 为仓库内包；`DeviceKit` 中的 IDevice 是固定版本 XCFramework，而非由 SwiftPM 从源代码编译。
-- 商店集成基于 `Vendor/Asspp` 的 Asspp 4.2.2 上游副本。具体 commit、许可文本和适用范围见 `THIRD_PARTY_NOTICES.md` 及随应用打包的许可资源。
+- 商店集成基于 `Vendor/Asspp` 的 Asspp 4.2.2 上游副本；本地 kbsync 资源基于 `Vendor/AssppWeb`。具体 commit、许可文本和适用范围见 `THIRD_PARTY_NOTICES.md` 及随应用打包的许可资源。
 - 下载流程优化参考 [majd/ipatool](https://github.com/majd/ipatool) 对版本绑定、历史下载回复与 HTTP 续传的处理；iOS 文件传输使用 Foundation 原生实现，移除了应用目标的 Digger 依赖。
 - 本仓库没有由 `THIRD_PARTY_NOTICES.md` 自动授予的统一项目级 MIT 许可。不要把单一依赖的许可误当作整个仓库的许可。
-- 第 92 版及更早的本地 kbsync 运行资源见对应版本的许可记录。
+- 当前许可记录指出：kbsync 构建含 Unicorn/WASM 及从 Apple OS X 10.9 更新提取的运行资源；对应源代码/许可与再分发边界详见通知文件。仓库公开或 CI 构建成功本身不代表这些组件获得额外再分发授权。
 
 ## 隐私与诊断边界
 
