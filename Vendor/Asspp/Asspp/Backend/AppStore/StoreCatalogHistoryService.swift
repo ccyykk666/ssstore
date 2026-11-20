@@ -62,7 +62,7 @@ enum StoreCatalogHistoryService {
         return index
     }
 
-    static func pageReleaseDates(appID: Int64, bundleID: String, region: String, platform: String) async throws -> [String: Date] {
+    static func pageHistory(appID: Int64, bundleID: String, region: String, platform: String) async throws -> [String: StoreHistorySupport.Metadata] {
         guard platform != "appletv" else { return [:] }
         let catalogRequest = try request(appID: appID, region: region, platform: platform)
         guard let catalogURL = catalogRequest.url,
@@ -77,7 +77,7 @@ enum StoreCatalogHistoryService {
             try Task.checkCancellation()
             guard let response = response as? HTTPURLResponse, response.url == url else { break }
             if response.statusCode == 200, data.count <= 2 * 1024 * 1024 {
-                return try StoreHistorySupport.pageReleaseDates(data, appID: appID, bundleID: bundleID, region: region)
+                return try StoreHistorySupport.pageHistory(data, appID: appID, bundleID: bundleID, region: region)
             }
             guard redirect == 0, [301, 302, 307, 308].contains(response.statusCode),
                   let location = response.value(forHTTPHeaderField: "Location"),
