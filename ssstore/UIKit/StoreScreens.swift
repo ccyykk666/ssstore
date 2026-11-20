@@ -302,14 +302,9 @@ final class NativeAddAccount: NativePage {
 
     func presentSheet(from presenter: UIViewController) {
         let navigation = UINavigationController(rootViewController: self)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            // The system detents keep the sheet and keyboard transitions synchronized.
-            sheet.detents = [.medium(), .large()]
-            sheet.prefersGrabberVisible = true
-            sheet.prefersEdgeAttachedInCompactHeight = true
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = false
-        }
+        // UIKit adapts the form's size and keyboard layout to the current window.
+        navigation.modalPresentationStyle = .formSheet
+        navigation.sheetPresentationController?.prefersGrabberVisible = true
         presenter.present(navigation, animated: true)
     }
 
