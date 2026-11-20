@@ -90,7 +90,7 @@ final class PackageTransfer {
                 }
                 let session = self.session
                 let chunkSize = self.chunkSize
-                try await withThrowingTaskGroup(of: Int?.self) { group in
+                try await withThrowingTaskGroup(of: Int.self) { group in
                     func enqueue(_ index: Int) {
                         group.addTask {
                             let start = Int64(index) * chunkSize
@@ -103,16 +103,15 @@ final class PackageTransfer {
                             let reply: URLResponse
                             do { (temporary, reply) = try await session.download(for: request, delegate: delegate) }
                             catch {
-                                if delegate.needsFallback { return nil }
+                                if delegate.needsFallback { throw TransferError.unsupportedRange }
                                 throw error
                             }
                             defer { try? FileManager.default.removeItem(at: temporary) }
+                            if (reply as? HTTPURLResponse)?.statusCode == 200 { throw TransferError.unsupportedRange }
                             guard let reply = reply as? HTTPURLResponse, reply.statusCode == 206,
                                   reply.value(forHTTPHeaderField: validatorHeader) == validator,
                                   reply.value(forHTTPHeaderField: "Content-Range") == "bytes \(start)-\(end)/\(total)",
-                                  (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == end - start + 1 else {
-                                return nil
-                            }
+                                  (try FileManager.default.attributesOfItem(atPath: temporary.path)[.size] as? NSNumber)?.int64Value == end - start + 1 else { throw URLError(.badServerResponse) }
                             try Task.checkCancellation()
                             try await Task.detached {
                                 let input = try FileHandle(forReadingFrom: temporary)
@@ -127,16 +126,12 @@ final class PackageTransfer {
                         }
                     }
                     for _ in 0..<min(4, pending.count) { enqueue(pending[next]); next += 1 }
-                    var rejectedRange = false
-                    while let result = try await group.next() {
-                        try Task.checkCancellation()
-                        guard let index = result else { rejectedRange = true; continue }
+                    while let index = try await group.next() {
                         checkpoint.completed.insert(index)
                         try JSONEncoder().encode(checkpoint).write(to: stateFile, options: .atomic)
-                        if !rejectedRange, next < pending.count { enqueue(pending[next]); next += 1 }
+                        try Task.checkCancellation()
+                        if next < pending.count { enqueue(pending[next]); next += 1 }
                     }
-                    // Let the in-flight ranges drain before clearing their file.
-                    if rejectedRange { throw TransferError.unsupportedRange }
                 }
                 try Task.checkCancellation()
                 try FileManager.default.moveItem(at: destination, to: file(id, ".download"))

@@ -100,7 +100,6 @@ class Downloads {
     }
 
     func suspend(request: PackageManifest) {
-        logger.info("Download [\(request.id)] paused")
         transfer.pause(id: request.id)
         if let processing = processingTasks[request.id] {
             processing.cancel()
@@ -133,7 +132,6 @@ class Downloads {
     }
 
     private func startTransfer(request: PackageManifest) {
-        logger.info("Download [\(request.id)] transfer started scheme=\(request.url.scheme ?? "unknown")")
         transfer.resume(id: request.id, url: request.url) { [weak self] fraction, speed in
             guard let self, [.pending, .downloading].contains(request.state.status) else { return }
             let wasDownloading = request.state.status == .downloading
@@ -152,7 +150,6 @@ class Downloads {
             }
             switch result {
             case let .success(file):
-                logger.info("Download [\(request.id)] transfer finished, validating package")
                 request.state.status = .processing; request.state.percent = 1; request.state.speed = ""
                 if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.update(request) }
                 self.refreshRunningTaskCount()
@@ -174,22 +171,17 @@ class Downloads {
                             request.delete(); self.processingTasks.removeValue(forKey: request.id); return
                         }
                         request.state.complete()
-                        logger.info("Download [\(request.id)] completed")
                     } catch {
                         if Task.isCancelled {
                             if request.state.status == .processing { request.state.resetIfNotCompleted() }
                             if !self.manifests.contains(where: { $0.id == request.id }) { request.delete() }
-                        } else {
-                            logger.error("Download [\(request.id)] failed stage=finalize \(StoreDiagnostics.errorSummary(error))")
-                            request.state.error = error.localizedDescription
-                        }
+                        } else { request.state.error = error.localizedDescription }
                     }
                     self.processingTasks.removeValue(forKey: request.id)
                     if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.finish(request) }
                     self.refreshRunningTaskCount(); self.saveManifests()
                 }
             case let .failure(error):
-                logger.error("Download [\(request.id)] failed stage=transfer \(StoreDiagnostics.errorSummary(error))")
                 request.state.error = error.localizedDescription
                 if #available(iOS 26.0, *) { DownloadBackgroundExecution.shared.finish(request) }
                 self.refreshRunningTaskCount(); self.saveManifests()

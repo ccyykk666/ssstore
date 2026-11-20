@@ -1,11 +1,5 @@
 import Foundation
 
-struct PackageTransferHTTPError: LocalizedError, CustomNSError {
-    let statusCode: Int
-    var errorCode: Int { statusCode }
-    var errorDescription: String? { "\(URLError(.badServerResponse).localizedDescription) (HTTP \(statusCode))" }
-}
-
 /// URLSession writes the IPA directly to disk. Only throttled progress reaches UI.
 final class NativePackageTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     typealias ProgressHandler = @MainActor @Sendable (Double, Int64) -> Void
@@ -144,11 +138,8 @@ final class NativePackageTransfer: NSObject, URLSessionDownloadDelegate, @unchec
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
         guard let transfer = transfer(for: downloadTask), !transfer.paused else { return }
         do {
-            guard let response = downloadTask.response as? HTTPURLResponse else {
+            guard let response = downloadTask.response as? HTTPURLResponse, (200..<300).contains(response.statusCode) else {
                 throw URLError(.badServerResponse)
-            }
-            guard (200..<300).contains(response.statusCode) else {
-                throw PackageTransferHTTPError(statusCode: response.statusCode)
             }
             let target = downloadedFile(transfer.id)
             try FileManager.default.moveItem(at: location, to: target)
