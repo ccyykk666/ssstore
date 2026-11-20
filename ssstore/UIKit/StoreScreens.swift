@@ -211,9 +211,7 @@ final class NativeAccounts: NativePage {
         super.viewDidLoad()
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .add, primaryAction: UIAction { [weak self] _ in
             guard let self else { return }
-            let add = NativeAddAccount(model)
-            let nav = NativeFittingNavigation(root: add)
-            present(nav, animated: true)
+            NativeAddAccount(model).presentSheet(from: self)
         })
     }
     override func rows() -> [NativeSection] {
@@ -276,7 +274,7 @@ final class NativeAccountDetail: NativePage {
             self?.rotationStatus = "已更新"
             self?.reload()
         }
-        present(NativeFittingNavigation(root: page), animated: true)
+        page.presentSheet(from: self)
     }
 }
 
@@ -301,6 +299,20 @@ final class NativeAddAccount: NativePage {
         super.init(model, title: original == nil ? "添加账户" : "轮换密码令牌")
     }
     required init?(coder: NSCoder) { fatalError() }
+
+    func presentSheet(from presenter: UIViewController) {
+        let navigation = UINavigationController(rootViewController: self)
+        navigation.modalPresentationStyle = .pageSheet
+        if let sheet = navigation.sheetPresentationController {
+            // The system detents keep the sheet and keyboard transitions synchronized.
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersEdgeAttachedInCompactHeight = true
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = false
+        }
+        presenter.present(navigation, animated: true)
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
